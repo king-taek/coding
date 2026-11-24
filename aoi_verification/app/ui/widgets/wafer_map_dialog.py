@@ -65,6 +65,7 @@ from ..drop_paths import guess_kinds, install_paste, local_paths, split_paths
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
+from .tool_open_save import EmptyOpen
 from .no_wheel_slider import NoWheelSlider
 from .wafer_map_view import DOT_R, DOT_R_MAX, DOT_R_MIN, WaferMapView, count_text
 from .window_controls import set_window_fullscreen
@@ -239,6 +240,10 @@ class WaferMapDialog(QDialog):
         self._token = 0
         self._build_thread: Optional[_MapBuild] = None
         self._build()
+        if result is None:      # 폴더를 고르기 전엔 가운데 큰 [폴더 선택] 하나(현택님 2026-11-24)
+            self._empty_open = EmptyOpen(self, i18n.KO.WAFER_MAP_PICK_FOLDER, self._on_pick,
+                                         i18n.KO.EMPTY_DROP_HINT)
+            self._empty_open.set_empty(not folder)
         self._loading = LoadingOverlay(self)
         if result is not None:
             self._on_slot_changed()
@@ -271,7 +276,7 @@ class WaferMapDialog(QDialog):
             self.slot_combo.currentIndexChanged.connect(self._on_slot_changed)
             top.addWidget(self.slot_combo)
         else:
-            self.pick_btn = NeonButton(i18n.KO.WAFER_MAP_PICK_FOLDER, role="primary")
+            self.pick_btn = NeonButton(i18n.KO.WAFER_MAP_PICK_FOLDER, role="ghost")
             self.pick_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
             self.pick_btn.clicked.connect(self._on_pick)
             self.pick_btn.setAutoDefault(False)
@@ -591,7 +596,7 @@ class WaferMapDialog(QDialog):
         self._folder = folder
         self._images = []
         self.folder_label.setText(str(folder))
-        self.pick_btn.setText(i18n.KO.WAFER_MAP_PICK_FOLDER_ANOTHER)
+        self._empty_open.set_empty(False)
         self._lot_slots = {}
         self._selected = None
         self.slots_btn.hide()
@@ -732,6 +737,7 @@ class WaferMapDialog(QDialog):
         paths = list(dict.fromkeys(paths))          # 같은 사진 두 번은 한 번으로
         self._images = paths
         self._folder = paths[0].parent
+        self._empty_open.set_empty(False)
         self._lot_slots = {}
         self._selected = None
         self.slots_btn.hide()

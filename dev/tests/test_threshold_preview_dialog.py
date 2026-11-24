@@ -944,7 +944,7 @@ def test_zone_rows_are_rows_not_boxes(styled_qapp, tmp_path):
 
 
 def test_left_column_stacks_folders_above_zones_without_chip_row(styled_qapp, tmp_path, monkeypatch):
-    """폴더 칩 줄은 없다 — 왼쪽 열 위가 폴더 목록, 아래가 Zone 이고, 윗줄에는 폴더 버튼이 없다.
+    """폴더 칩 줄은 없다 — 왼쪽 열 위가 폴더 목록, 아래가 Zone 이다.  [폴더 선택] 은 위 왼쪽 회색(현택님 2026-11-24).
     [컬러 | 스캔] 은 고른 폴더 줄에만 보이고, ✕ 는 줄마다 하나다."""
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     a, lot = _lot_setup(tmp_path)
@@ -959,8 +959,9 @@ def test_left_column_stacks_folders_above_zones_without_chip_row(styled_qapp, tm
         assert not hasattr(dlg, "_chips_host")
         rows = _chips(dlg, T)
         assert [r.info.root for r in rows] == [a, lot] and all(r.x_btn is not None for r in rows)
-        assert dlg.pick_btn.property("role") == "textAccent"              # 조용한 [+ 폴더]
-        assert dlg.pick_btn.mapTo(dlg, dlg.pick_btn.rect().topLeft()).x() < T.SIDE_W
+        assert dlg.pick_btn.property("role") == "ghost"                   # 위 왼쪽 회색 [폴더 선택]
+        tl = dlg.pick_btn.mapTo(dlg, dlg.pick_btn.rect().topLeft())
+        assert tl.x() < T.SIDE_W and tl.y() < rows[0].mapTo(dlg, rows[0].rect().topLeft()).y()
         assert rows[0].mapTo(dlg, rows[0].rect().topLeft()).y() < dlg.zone_btns[("Zones", 1)].mapTo(dlg, dlg.zone_btns[("Zones", 1)].rect().topLeft()).y()
         assert not any(r.seg_host.isVisibleTo(dlg) for r in rows)
         dlg.select_folder(lot)
@@ -1200,8 +1201,9 @@ def test_rules_panel_is_boxless_with_distribution_aligned_to_slider(styled_qapp,
 
 
 # ------------------------------------------------------------------ 2026-11-17 디자인 검토 반영
-def test_empty_overkill_shows_one_line_and_add_button_and_disables_modes(styled_qapp):
-    """폴더가 없으면 본문 가운데 안내 + [+ 폴더](32px), 모드 버튼은 꺼지고 'Zone' 소제목은 숨는다."""
+def test_empty_overkill_shows_one_big_pick_button_and_disables_modes(styled_qapp):
+    """폴더가 없으면 화면 가운데 큰 파랑 [폴더 선택] 하나(현택님 2026-11-24 B1 안 B), 모드 버튼은 꺼지고
+    'Zone' 소제목은 숨는다."""
     from aoi_verification.app import i18n
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     dlg = T.ThresholdPreviewDialog()
@@ -1209,13 +1211,13 @@ def test_empty_overkill_shows_one_line_and_add_button_and_disables_modes(styled_
         dlg.resize(1280, 800)
         dlg.show()
         styled_qapp.processEvents()
-        assert dlg.empty_state.isVisibleTo(dlg)
-        assert dlg.empty_hint.text() == i18n.KO.OVERKILL_EMPTY
-        assert dlg.empty_pick_btn.text() == i18n.KO.OVERKILL_ADD_FOLDER
-        assert dlg.empty_pick_btn.property("role") == "ghost" and dlg.empty_pick_btn.height() == 32
+        eo = dlg._empty_open
+        assert eo.isVisibleTo(dlg) and eo.geometry() == dlg.rect()
+        assert eo.btn.text() == i18n.KO.OVERKILL_ADD_FOLDER and eo.btn.property("role") == "primary"
+        c = eo.btn.mapTo(dlg, eo.btn.rect().center())
+        assert abs(c.x() - dlg.width() // 2) <= 2 and abs(c.y() - dlg.height() // 2) <= 40
         assert not any(b.isEnabled() for b in dlg.mode_btns.values())
         assert not dlg._zone_head.isVisibleTo(dlg) and not dlg.summary.isVisibleTo(dlg)
-        assert dlg.empty_hint.geometry().center().x() > dlg.width() // 3        # 본문 가운데쪽
     finally:
         dlg.deleteLater()
 
@@ -1224,7 +1226,7 @@ def test_empty_state_goes_away_with_a_wafer(styled_qapp, tmp_path):
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     dlg = _shown_dlg(T, styled_qapp, tmp_path)
     try:
-        assert not dlg.empty_state.isVisibleTo(dlg)
+        assert not dlg.empty_state.isVisibleTo(dlg) and not dlg._empty_open.isVisibleTo(dlg)
         assert all(b.isEnabled() for b in dlg.mode_btns.values())
         assert dlg._zone_head.isVisibleTo(dlg) and dlg.summary.isVisibleTo(dlg)
     finally:

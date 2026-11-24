@@ -65,6 +65,7 @@ from . import photo_menu
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
+from .tool_open_save import EmptyOpen
 
 # 미리보기 — 고정 정사각형이 아니라 폭 하한만 두고 세로는 표와 함께 늘어난다.
 _PREVIEW_MIN_W = 300
@@ -341,6 +342,15 @@ class ImageInfoDialog(QDialog):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(theme.PROFILE.section_gap // 2)
 
+        # [사진 선택] — 사진을 연 뒤에는 위 왼쪽 회색, 비어 있는 동안은 가운데 큰 파랑(``EmptyOpen``).
+        top = QHBoxLayout()
+        self.pick_btn = NeonButton(i18n.KO.IMAGE_INFO_PICK, role="ghost")
+        self.pick_btn.setMinimumWidth(120)
+        self.pick_btn.clicked.connect(self._on_pick)
+        top.addWidget(self.pick_btn)
+        top.addStretch(1)
+        root.addLayout(top)
+
         body = QHBoxLayout()
         body.setSpacing(theme.PROFILE.card_pad)
         body.addWidget(self._build_preview())
@@ -356,10 +366,15 @@ class ImageInfoDialog(QDialog):
         # 값 라벨이 선택 복사를 지원하므로, 창 단축키로 가로채면 사용자가 고른 수치
         # 대신 시트 전체가 복사돼 버린다.  전체 복사는 버튼이 맡는다.
         QShortcut(QKeySequence.StandardKey.Open, self, self._on_pick)
+        self._empty_open = EmptyOpen(self, i18n.KO.IMAGE_INFO_PICK, self._on_pick,
+                                     i18n.KO.EMPTY_DROP_HINT)
         self._render()
         # 열자마자 주요 동작에 포커스 — 시트 호스트는 다이얼로그 자신에 포커스를
         # 주므로, 그대로 두면 첫 Tab 이 허비된다.
-        QTimer.singleShot(0, self.pick_btn.setFocus)
+        QTimer.singleShot(0, self._focus_pick)
+
+    def _focus_pick(self) -> None:
+        (self._empty_open.btn if self._path is None else self.pick_btn).setFocus()
 
     def _build_preview(self) -> QWidget:
         host = QWidget(self)
@@ -424,11 +439,6 @@ class ImageInfoDialog(QDialog):
 
     def _build_actions(self) -> QHBoxLayout:
         bar = QHBoxLayout()
-        self.pick_btn = NeonButton(i18n.KO.IMAGE_INFO_PICK, role="primary")
-        self.pick_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
-        self.pick_btn.setMinimumWidth(160)
-        self.pick_btn.clicked.connect(self._on_pick)
-        bar.addWidget(self.pick_btn)
         # 복사 확인 — 모달 대신 버튼 옆에서 잠깐 뜨는 줄(자리는 늘 예약).
         self._toast = QLabel("", self)
         self._toast.setProperty("role", "muted")
@@ -550,6 +560,7 @@ class ImageInfoDialog(QDialog):
         돌린다.  덮개는 **정보가 오면 바로** 걷힌다 — Scan 원본(수 MB)을 기다리지 않는다.
         Scan 은 자기 칸에서 '불러오는 중' 점 애니메이션으로 따로 기다린다(사용자 요청)."""
         self._path = Path(path)
+        self._empty_open.set_empty(False)
         self.gl_btn.setEnabled(False)     # GL 로 볼 수 있는지는 `_ScanLoader` 가 알려 준다
         self._info_gen += 1
         self._scan_gen += 1               # 이전 사진의 Scan 결과가 늦게 와도 버린다
@@ -570,7 +581,6 @@ class ImageInfoDialog(QDialog):
     def _on_info_done(self, gen: int, groups) -> None:
         if gen != self._info_gen:
             return
-        self.pick_btn.setText(i18n.KO.IMAGE_INFO_PICK_ANOTHER)
         self._loading.hide_overlay()    # 정보는 다 왔다 — Scan 은 자기 칸에서 기다린다
         if isinstance(groups, _ScanSheet):
             self._sheet = groups
@@ -807,6 +817,7 @@ class ImageInfoDialog(QDialog):
         렌더의 행 간격을 벌린다.  ``QScrollArea.setWidget`` 이 이전 위젯을 지우므로
         새 호스트를 넘기는 편이 짧고 확실하다.
         """
+        self._empty_open.set_empty(self._path is None)
         host = QWidget(self)
         col = QVBoxLayout(host)
         col.setContentsMargins(0, 0, 0, 0)

@@ -84,6 +84,7 @@ from . import photo_menu
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
+from .tool_open_save import EmptyOpen, SavedLine
 from .overkill_pick_dialog import OverkillPickDialog
 from .no_wheel_slider import NoWheelSlider
 
@@ -1774,13 +1775,18 @@ class ThresholdPreviewDialog(QDialog):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # 윗줄 — 검산 · 모드만(폴더는 왼쪽 열, 되돌리기 · 내보내기는 요약 줄)
+        # 윗줄 — 위 왼쪽 회색 [폴더 선택] · 검산 · 모드 · 오른쪽 위 파랑 [HTML로 저장](현택님 2026-11-24)
         head = QFrame(self)
         head.setProperty("role", "ovHeader")
         head.setFixedHeight(56)
         top = QHBoxLayout(head)
-        top.setContentsMargins(24, 0, 16, 0)
+        top.setContentsMargins(16, 0, 16, 0)
         top.setSpacing(16)
+        self.pick_btn = NeonButton(_KO.OVERKILL_ADD_FOLDER, role="ghost")
+        self.pick_btn.setProperty("grade", "panel")
+        self.pick_btn.setToolTip(_KO.OVERKILL_ADD_FOLDER_TIP)
+        self.pick_btn.clicked.connect(self._on_pick)
+        top.addWidget(self.pick_btn)
         self.check_label = QLabel("", self)          # 제목은 창 맨 위 단계 줄이 이미 보인다 — 여기엔 두지 않는다
         self.check_label.setProperty("role", "muted")
         top.addWidget(self.check_label)
@@ -1802,6 +1808,12 @@ class ThresholdPreviewDialog(QDialog):
             seg.addWidget(b)
             self.mode_btns[key] = b
         top.addLayout(seg)
+        self.saved_line = SavedLine(head)
+        top.addWidget(self.saved_line)
+        self.export_btn = NeonButton(_KO.THRESH_PREVIEW_EXPORT, role="primary")
+        self.export_btn.setProperty("grade", "panel")
+        self.export_btn.clicked.connect(self._on_export)
+        top.addWidget(self.export_btn)
         root.addWidget(head)
 
         body = QHBoxLayout()
@@ -1827,13 +1839,9 @@ class ThresholdPreviewDialog(QDialog):
         fhead.setProperty("role", "ovGroupHead")
         fhead.setContentsMargins(12, 0, 0, 4)
         il.addWidget(fhead)
-        self._folder_lay = QVBoxLayout()               # 폴더 줄 — 비어 있으면 아래 [+ 폴더] 만 남는다
+        self._folder_lay = QVBoxLayout()               # 폴더 줄 — 더하기는 위 왼쪽 [폴더 선택]
         self._folder_lay.setSpacing(2)
         il.addLayout(self._folder_lay)
-        self.pick_btn = NeonButton(_KO.OVERKILL_ADD_FOLDER, role="textAccent")
-        self.pick_btn.setToolTip(_KO.OVERKILL_ADD_FOLDER_TIP)
-        self.pick_btn.clicked.connect(self._on_pick)
-        il.addWidget(self.pick_btn, 0, Qt.AlignmentFlag.AlignLeft)
         il.addSpacing(12)
         rule = self._side_rule = QFrame(inner)
         rule.setFixedHeight(1)
@@ -1883,21 +1891,8 @@ class ThresholdPreviewDialog(QDialog):
         al.addWidget(self.alert_label, 1)
         self.alert.setVisible(False)
         main.addWidget(self.alert)
-        # 폴더가 없을 때의 본문 — 한 줄 안내 + [+ 폴더].  폴더를 더하면 사라진다.
+        # 폴더가 없을 때 본문 자리를 채우는 빈 칸 — 화면은 가운데 큰 [폴더 선택](``EmptyOpen``)이 덮는다.
         self.empty_state = QWidget(self)
-        el = QVBoxLayout(self.empty_state)
-        el.setSpacing(12)
-        el.addStretch(1)
-        self.empty_hint = QLabel(_KO.OVERKILL_EMPTY, self.empty_state)
-        self.empty_hint.setProperty("role", "muted")
-        self.empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        el.addWidget(self.empty_hint)
-        self.empty_pick_btn = NeonButton(_KO.OVERKILL_ADD_FOLDER, role="ghost")
-        self.empty_pick_btn.setProperty("grade", "panel")
-        self.empty_pick_btn.setToolTip(_KO.OVERKILL_ADD_FOLDER_TIP)
-        self.empty_pick_btn.clicked.connect(self._on_pick)
-        el.addWidget(self.empty_pick_btn, 0, Qt.AlignmentFlag.AlignHCenter)
-        el.addStretch(2)
         main.addWidget(self.empty_state, 1)
         self._notice_timer = QTimer(self)
         self._notice_timer.setSingleShot(True)
@@ -1956,9 +1951,6 @@ class ThresholdPreviewDialog(QDialog):
         self.reset_btn.setToolTip(_KO.THRESH_PREVIEW_RESET_TIP)
         self.reset_btn.clicked.connect(self.reset)
         srow.addWidget(self.reset_btn)
-        self.export_btn = NeonButton(_KO.THRESH_PREVIEW_EXPORT, role="textAction")
-        self.export_btn.clicked.connect(self._on_export)
-        srow.addWidget(self.export_btn)
         sm.addLayout(srow)
         self.ratio = _RatioBar(self.summary)
         sm.addWidget(self.ratio)
@@ -2030,6 +2022,7 @@ class ThresholdPreviewDialog(QDialog):
         self.empty_label.setProperty("role", "muted")
         main.addWidget(self.empty_label)
         main.addStretch(1)
+        self._empty_open = EmptyOpen(self, _KO.OVERKILL_ADD_FOLDER, self._on_pick, _KO.EMPTY_DROP_HINT)
         self._sync_empty()
         body.addLayout(main, 1)
         root.addLayout(body, 1)
@@ -2763,8 +2756,9 @@ class ThresholdPreviewDialog(QDialog):
 
     # ------------------------------------------------------------------ 그리기
     def _sync_empty(self) -> None:
-        """폴더가 하나도 없으면 본문 가운데 안내 + [+ 폴더], 폴더 없이는 못 하는 것은 끈다."""
+        """폴더가 하나도 없으면 가운데 큰 [폴더 선택] 하나만(``EmptyOpen``), 폴더 없이는 못 하는 것은 끈다."""
         empty = not self._roots and self._w is None
+        self._empty_open.set_empty(empty)
         for wid in (self.summary, self._tabs_host, self.grid_host, self.empty_label, self.rules,
                     self._side_folder_head, self.pick_btn, self._side_rule):
             wid.setVisible(not empty)
@@ -4104,6 +4098,7 @@ class ThresholdPreviewDialog(QDialog):
             _LOG.warning("Threshold HTML 저장 실패: %s", exc)
             self.check_label.setText(_KO.THRESH_EXPORT_FAILED.format(e=exc))
             return
+        self.saved_line.show_saved(path)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def export_html(self, path: Path) -> None:

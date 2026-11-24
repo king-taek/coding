@@ -593,11 +593,14 @@ def test_drop_and_paste_open_first_file_only(styled_qapp, tmp_path, monkeypatch)
 
 
 # ------------------------------------------------------------------ 화면 구성(2026-11 개편)
-def test_head_has_one_primary_and_all_buttons_are_32px(dlg):
+def test_head_save_buttons_are_primary_top_right_and_all_buttons_are_32px(dlg):
+    """현택님 2026-11-24 B2 안 A — 저장은 모두 파랑 · 오른쪽 위, [사진 선택] 은 위 왼쪽 회색."""
     from PyQt6.QtWidgets import QPushButton
     heads = [dlg.open_btn, dlg.compare_btn, dlg.png_btn, dlg.xlsx_btn]
-    assert [b.property("role") for b in heads] == ["textAccent", "textAction", "ghost", "primary"]
-    assert [b for b in dlg.findChildren(QPushButton) if b.property("role") == "primary"] == [dlg.xlsx_btn]
+    assert [b.property("role") for b in heads] == ["ghost", "textAction", "primary", "primary"]
+    assert [b for b in dlg.findChildren(QPushButton)
+            if b.property("role") == "primary" and b.isVisibleTo(dlg)] == [dlg.png_btn, dlg.xlsx_btn]
+    assert (dlg.png_btn.text(), dlg.xlsx_btn.text()) == ("그림으로 저장", "엑셀로 저장")
     _pump()
     assert {b.height() for b in heads} == {32}, [(b.text(), b.height()) for b in heads]
     assert dlg.png_rois.isCheckable() and dlg.png_rois.isChecked()     # PNG 메뉴 안의 선택
@@ -885,8 +888,11 @@ def test_empty_viewer_has_open_as_only_primary_and_disables_the_rest(styled_qapp
         d.resize(1280, 820)
         d.show()
         _pump()
-        assert d.open_btn.property("role") == "primary" and d.xlsx_btn.property("role") != "primary"
-        assert [b for b in d.findChildren(QPushButton) if b.property("role") == "primary"] == [d.open_btn]
+        # 빈 화면 = 가운데 큰 [사진 선택] 하나(현택님 2026-11-24 B1 안 B) — 위 왼쪽 버튼은 덮여 안 보인다.
+        assert d._empty_open.isVisibleTo(d) and d._empty_open.btn.text() == d.open_btn.text()
+        assert [b for b in d.findChildren(QPushButton)
+                if b.property("role") == "primary" and b.isVisibleTo(d)
+                and not d._empty_open.isAncestorOf(b)] == [d.png_btn, d.xlsx_btn]
         assert not any(b.isEnabled() for b in (d.xlsx_btn, d.png_btn, d.compare_btn, d.clear_btn,
                                                d.undo_btn, *d._tool_btns.values()))
         assert not d.scope.isEnabled()
@@ -895,7 +901,8 @@ def test_empty_viewer_has_open_as_only_primary_and_disables_the_rest(styled_qapp
         d.show_view(loader.ViewLoad(loader.GlImage(rng.integers(0, 255, (H, W)).astype(np.uint8),
                                                    8, False, "y.png", [])))
         _pump()
-        assert d.xlsx_btn.property("role") == "primary" and d.open_btn.property("role") == "textAccent"
+        assert not d._empty_open.isVisibleTo(d)
+        assert d.xlsx_btn.property("role") == "primary" and d.open_btn.property("role") == "ghost"
         assert all(b.isEnabled() for b in (d.xlsx_btn, d.png_btn, d.compare_btn, *d._tool_btns.values()))
         assert d.scope.isEnabled() and d._zoom_bar.isVisibleTo(d)
         assert {b.height() for b in (d.open_btn, d.compare_btn, d.png_btn, d.xlsx_btn)} == {32}

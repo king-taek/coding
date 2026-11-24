@@ -41,6 +41,7 @@ from .gl_charts import ALL_ROW, HistogramChart
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
 from . import popup_layout
+from .tool_open_save import EmptyOpen, SavedLine
 from .option_group import OptionGroup
 
 _LOG = logging.getLogger("aoi.gl")
@@ -239,19 +240,20 @@ class GlViewerDialog(QDialog):
         body.addWidget(self._build_right())
         root.addLayout(body, 1)
         root.addWidget(self._build_status())
+        self._empty_open = EmptyOpen(self, _KO.GL_OPEN, self._on_pick, _KO.EMPTY_DROP_HINT)
         self._sync_empty_state()
 
     def _build_head(self) -> QHBoxLayout:
-        """머리줄 — 남색 채움은 '엑셀 저장' 하나, PNG 는 외곽선, 나머지는 글자 버튼."""
+        """머리줄 — 위 왼쪽 회색 [사진 선택] · 오른쪽 위 파랑 [그림으로 저장] [엑셀로 저장](현택님 2026-11-24)."""
         bar = QHBoxLayout()
         bar.setContentsMargins(16, 12, 16, 12)
         bar.setSpacing(8)
         self.file_label = QLabel("", self)
-        self.open_btn = NeonButton(_KO.GL_OPEN, role="textAccent")
+        self.open_btn = NeonButton(_KO.GL_OPEN, role="ghost")
         self.open_btn.clicked.connect(self._on_pick)
         self.xlsx_btn = NeonButton(_KO.GL_SAVE_XLSX, role="primary")
         self.xlsx_btn.clicked.connect(self._on_save_xlsx)
-        self.png_btn = NeonButton(_KO.GL_SAVE_PNG_SHORT, role="ghost")
+        self.png_btn = NeonButton(_KO.GL_SAVE_PNG_SHORT, role="primary")
         menu = QMenu(self.png_btn)
         menu.addAction(_KO.GL_SAVE_PNG, self._on_save_png)
         menu.addSeparator()
@@ -265,8 +267,8 @@ class GlViewerDialog(QDialog):
         self.toast.setProperty("role", "muted")
         for b in (self.open_btn, self.compare_btn, self.png_btn, self.xlsx_btn):
             b.setProperty("grade", "panel")             # 머리줄 버튼은 모두 32 px
-        bar.addWidget(self.file_label)
         bar.addWidget(self.open_btn)
+        bar.addWidget(self.file_label)
         bar.addStretch(1)
         # ★ 긴 안내가 한 줄로 서면 그 폭이 창 최소 폭이 돼 1100px 창에 가로 스크롤이 생겼다
         #   (최소 1332px, 실측 2026-11-24) — 줄을 바꿔 남는 폭 안에 담는다.
@@ -274,6 +276,8 @@ class GlViewerDialog(QDialog):
         self.toast.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         bar.addWidget(self.toast, 1)
         bar.addWidget(self.compare_btn)
+        self.saved_line = SavedLine(self)
+        bar.addWidget(self.saved_line)
         bar.addWidget(self.png_btn)
         bar.addWidget(self.xlsx_btn)
         return bar
@@ -301,10 +305,9 @@ class GlViewerDialog(QDialog):
         btn.style().polish(btn)
 
     def _sync_empty_state(self) -> None:
-        """사진이 없으면 '사진 열기' 만 남색 채움이고 사진이 필요한 것은 모두 꺼 둔다."""
+        """사진이 없으면 가운데 큰 [사진 선택] 만 보이고(``EmptyOpen``) 사진이 필요한 것은 모두 꺼 둔다."""
         has = self._gl is not None
-        self._set_role(self.open_btn, "textAccent" if has else "primary")
-        self._set_role(self.xlsx_btn, "primary" if has else "ghost")
+        self._empty_open.set_empty(not has)
         for b in (self.xlsx_btn, self.png_btn, self.compare_btn, self.clear_btn):
             b.setEnabled(has)
         for b in self._tool_btns.values():
@@ -1020,7 +1023,7 @@ class GlViewerDialog(QDialog):
             _LOG.exception("GL 엑셀 저장 실패")
             self._toast(_KO.GL_SAVE_FAILED_FMT.format(why=exc), error=True)
             return
-        self._toast(_KO.GL_SAVED_FMT.format(name=Path(path).name))
+        self.saved_line.show_saved(path)
 
     def save_xlsx(self, path: Path) -> None:
         """통계·히스토그램을 엑셀 한 장으로 저장한다(헤드리스 호출 가능)."""
@@ -1070,7 +1073,7 @@ class GlViewerDialog(QDialog):
             _LOG.exception("GL PNG 저장 실패")
             self._toast(_KO.GL_SAVE_FAILED_FMT.format(why=exc), error=True)
             return
-        self._toast(_KO.GL_SAVED_FMT.format(name=Path(path).name))
+        self.saved_line.show_saved(path)
 
     def render_overlay(self, with_rois: bool, gl: Optional[loader.GlImage] = None) -> QImage:
         """색 칠한 사진을 **원본 해상도**로 그린다(선·이름은 선택)."""

@@ -43,6 +43,7 @@ from . import photo_menu
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
+from .tool_open_save import EmptyOpen, SavedLine
 from ..deferred import call_later
 from ..teardown import tolerate_teardown
 from ..undo_keys import bind_undo
@@ -312,6 +313,7 @@ class ZoneOriginDialog(QDialog):
         self._build()
         for b in self.findChildren(QPushButton):
             b.setAutoDefault(False)
+        self._empty_open = EmptyOpen(self, _KO.ZO_ADD_FOLDER, self._on_pick, _KO.EMPTY_DROP_HINT)
         self._loading = LoadingOverlay(self)
         self._loading.cancel_requested.connect(self._cancel_load)
         self._render()
@@ -327,21 +329,24 @@ class ZoneOriginDialog(QDialog):
         hl = QHBoxLayout(head)
         hl.setContentsMargins(16, 10, 16, 10)
         hl.setSpacing(8)
-        self._chip_lay = QHBoxLayout()
-        self._chip_lay.setSpacing(6)
-        hl.addLayout(self._chip_lay)
+        # 위 왼쪽 회색 [폴더 선택] · 오른쪽 위 파랑 [엑셀로 저장](현택님 2026-11-24)
         self.pick_btn = _nf(NeonButton(_KO.ZO_ADD_FOLDER, role="ghost"))
         self.pick_btn.setToolTip(_KO.ZO_ADD_FOLDER_TIP)
         self.pick_btn.clicked.connect(self._on_pick)
         hl.addWidget(self.pick_btn)
-        self.excel_btn = _nf(NeonButton(_KO.ZO_BTN_EXCEL, role="ghost"))
-        self.excel_btn.setToolTip(_KO.ZO_BTN_EXCEL_TIP)
-        self.excel_btn.clicked.connect(self.save_excel)
-        hl.addWidget(self.excel_btn)
+        self._chip_lay = QHBoxLayout()
+        self._chip_lay.setSpacing(6)
+        hl.addLayout(self._chip_lay)
         hl.addStretch(1)
         self.big_count = QLabel("", head)
         self.big_count.setTextFormat(Qt.TextFormat.RichText)
         hl.addWidget(self.big_count)
+        self.saved_line = SavedLine(head)
+        hl.addWidget(self.saved_line)
+        self.excel_btn = _nf(NeonButton(_KO.ZO_BTN_EXCEL, role="primary"))
+        self.excel_btn.setToolTip(_KO.ZO_BTN_EXCEL_TIP)
+        self.excel_btn.clicked.connect(self.save_excel)
+        hl.addWidget(self.excel_btn)
         root.addWidget(head)
 
         self.notice = QFrame(self)
@@ -746,6 +751,7 @@ class ZoneOriginDialog(QDialog):
             top.setUpdatesEnabled(frozen)
 
     def _render_head(self) -> None:
+        self._empty_open.set_empty(not self._roots)
         _clear(self._chip_lay)
         for r in self._roots:
             chip = QFrame(self)
@@ -1542,6 +1548,7 @@ class ZoneOriginDialog(QDialog):
         if not self._overlay_on:        # 저장 중에 폴더를 더 넣어 읽기 막이 떠 있으면 그 막은 읽기가 끝날 때 걷는다
             self._loading.hide_overlay()
         self._saved = Path(path)
+        self.saved_line.show_saved(path)
         QTimer.singleShot(0, self._offer_open)
 
     def _offer_open(self) -> None:

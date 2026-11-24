@@ -525,6 +525,14 @@ QPushButton[grade="panel"] {
     padding-top: 0px;
     padding-bottom: 0px;
 }
+/* 도구 화면의 빈 화면 가운데 큰 [사진 선택]/[폴더 선택](`tool_open_save.EmptyOpen`, 현택님 2026-11-24) —
+   화면에 하나뿐인 할 일이라 크게: 내용 42 + 패딩 12 + 보더 2 = 56. */
+QPushButton[grade="hero"] {
+    min-height: 42px;
+    font-size: 16px;
+    padding-left: 32px;
+    padding-right: 32px;
+}
 /* 허용 오차 ± — 입력란과 **같은 높이**여야 중심이 맞는다.  ghost 의 min-height 30
    (+패딩 = 44)이 `setFixedSize(38,38)` 을 이겨 38×44 로 렌더돼 3px 어긋났다(실측).
    38px 은 WCAG 2.5.8(AA 24)을 넘으므로 액션 등급 44 를 강제하지 않는다. */
