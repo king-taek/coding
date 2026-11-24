@@ -87,3 +87,25 @@ def test_no_bare_english_skip_on_screen() -> None:
 def test_tooltip_bridges_screen_and_excel_wording() -> None:
     """화면('매치 없음')과 엑셀('미매칭')이 다른 유일한 자리에 다리를 놓아 둔다."""
     assert i18n.KO.NOTE_UNMATCHED in i18n.KO.TALLY_TOOLTIP
+
+
+def _all_texts(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _all_texts(v)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            yield from _all_texts(v)
+
+
+def test_screen_says_defect_and_zone_in_english() -> None:
+    """화면은 '결함' 대신 'Defect', Zone 개념은 '구역' 대신 'Zone' (현택님 2026-11-24).
+
+    ※ '구역' 은 뷰어의 '드래그한 구역'(잘라 복사할 범위)처럼 Zone 이 아닌 뜻으로도 쓰여
+    Zone 을 가리키는 키만 본다."""
+    offenders = [name for name in dir(i18n.KO) if name.isupper()
+                 for text in _all_texts(getattr(i18n.KO, name)) if "결함" in text]
+    assert offenders == [], f"'결함' 이 남아 있다: {sorted(set(offenders))}"
+    assert i18n.KO.OVERKILL_PICK_ZONE_TIP == "Zone"

@@ -1035,7 +1035,7 @@ DEFECT_ABS_XY_FMT = "wafer x {x:.0f} / y {y:.0f} ㎛"
 # 화면 전용 라벨 — 파일 하나에서만 의미 있는 항목(엑셀에는 나가지 않는다).
 IMAGE_INFO_LOADING = "사진 정보를 불러오는 중"
 IMAGE_INFO_GROUP_FILE = "파일"
-IMAGE_INFO_GROUP_DEFECT = "결함 계측"
+IMAGE_INFO_GROUP_DEFECT = "Defect 계측"
 IMAGE_INFO_COL_VALUE = "값"
 IMAGE_INFO_ROW_FILE = "파일명"
 IMAGE_INFO_ROW_FOLDER = "폴더"
@@ -1069,7 +1069,7 @@ IMAGE_INFO_NO_FILE = (
     "사진만 따로 복사한 폴더에서는 일부 항목이 나오지 않습니다."
 )
 IMAGE_INFO_EMPTY = (
-    "이 사진에서 읽을 수 있는 결함 정보가 없습니다.\n"
+    "이 사진에서 읽을 수 있는 Defect 정보가 없습니다.\n"
     "폴더에 정보파일(ColorImageGrabingInfo.ini / KLA 정보파일 / Surface.flt)이 "
     "있는지 확인하세요."
 )
@@ -1314,13 +1314,13 @@ THRESH_EXPORT_SHAPE = "분포"
 # ── Wafer map ────────────────────────────────────────────────────────────────
 WAFER_MAP_BUTTON = "Wafer Map 보기"
 WAFER_MAP_TITLE = "Wafer Map"
-WAFER_MAP_SUBTITLE = "결함 사진을 웨이퍼 위 실제 위치에 찍습니다 — 휠: 확대 · 드래그: 이동 · 점에 마우스: 사진 · 점 더블클릭: 상세 정보"
+WAFER_MAP_SUBTITLE = "Defect 사진을 웨이퍼 위 실제 위치에 찍습니다 — 휠: 확대 · 드래그: 이동 · 점에 마우스: 사진 · 점 더블클릭: 상세 정보"
 WAFER_MAP_PICK_FOLDER = "폴더 선택"
 WAFER_MAP_PICK_FOLDER_ANOTHER = "다른 폴더"
 WAFER_MAP_PICK_FOLDER_TITLE = "웨이퍼(슬롯) 폴더 또는 LOT 폴더 선택"
 WAFER_MAP_NO_FOLDER = (
     "‘폴더 선택’ 으로 사진이 든 웨이퍼(슬롯) 폴더를 고르세요.\n"
-    "사진(여러 장 가능)을 끌어다 놓으면 그 결함만 봅니다.\n\n"
+    "사진(여러 장 가능)을 끌어다 놓으면 그 Defect 만 봅니다.\n\n"
     "좌표는 그 폴더의 정보파일에서 읽습니다 — "
     "ColorImageGrabingInfo.ini(Camtek) · LIVE 파일명 · KLA 정보파일."
 )
@@ -1333,7 +1333,7 @@ WAFER_MAP_SIDE_REF_FMT = "기준 · {machine}"
 WAFER_MAP_SIDE_VAL_FMT = "검증 · {machine}"
 WAFER_MAP_LEGEND_MATCHED = "매치됨"
 WAFER_MAP_LEGEND_UNMATCHED = "미매치"
-WAFER_MAP_LEGEND_DEFECT = "결함"
+WAFER_MAP_LEGEND_DEFECT = "Defect"
 WAFER_MAP_COUNT_FMT = "{n}장"
 WAFER_MAP_DEFECT_TOTAL_FMT = "Defect {n:,}개"
 WAFER_MAP_UNPLACED_FMT = "좌표 없음 {n}장"
@@ -1383,14 +1383,14 @@ WAFER_MAP_LOADING_THUMBS = "사진 미리보기 준비 중"
 # 보기 옵션 — die 색칠 · 노치 방향(90° 단위 회전) · 사진 1장만 보기.
 WAFER_MAP_FILL_DIES = "die 색칠"
 WAFER_MAP_FILL_DIES_TIP = (
-    "결함 위치(점) 대신 결함이 든 die 칸을 통째로 칠합니다(점과 같은 색). "
+    "Defect 위치(점) 대신 Defect 가 든 die 칸을 통째로 칠합니다(점과 같은 색). "
     "die 격자를 모르는 폴더(절대좌표)에서는 점 그대로입니다.")
 WAFER_MAP_UNMATCHED_FIRST = "미매치 우선"
 WAFER_MAP_UNMATCHED_FIRST_TIP = (
-    "한 die 칸에 매치됨·미매치 결함이 섞여 있을 때 칸 색을 정합니다. "
+    "한 die 칸에 매치됨·미매치 Defect 가 섞여 있을 때 칸 색을 정합니다. "
     "켜면 미매치 색(미매치가 가려지지 않음), 끄면 매치됨 색입니다.")
 WAFER_MAP_DOT_SIZE = "점 크기"
-WAFER_MAP_DOT_SIZE_TIP = "결함 점을 키우거나 줄입니다(화면 보기 전용 — die 색칠 중에는 꺼집니다)."
+WAFER_MAP_DOT_SIZE_TIP = "Defect 점을 키우거나 줄입니다(화면 보기 전용 — die 색칠 중에는 꺼집니다)."
 WAFER_MAP_NOTCH_FMT = "노치: {dir}"
 WAFER_MAP_NOTCH_DIRS = ("아래", "왼쪽", "위", "오른쪽")
 WAFER_MAP_NOTCH_TIP = "누를 때마다 90°씩 돌려 노치 방향을 맞춥니다(화면 보기 전용)."
@@ -1490,24 +1490,24 @@ EXTRACT_FILE_TITLE_FMT = "{machine} {tag} Defect 추출.xlsx"
 EXTRACT_FILE_TITLE_FALLBACK_FMT = "AOI {machine} Defect 추출.xlsx"
 # 엑셀 — 요약 시트 D열 머리(C열 사진의 파일명·계측·좌표 칸)와 Wafer Map 시트 머리.
 EXTRACT_INFO_HEADER = "정보"
-EXTRACT_MAP_SHEET_COL = "결함 위치"
+EXTRACT_MAP_SHEET_COL = "Defect 위치"
 
 # 선별 화면 — 사진 가운데만 잘라 크게 보기(결함은 사진 정중앙).
 CENTER_CROP_LABEL = "가운데 확대"
 CENTER_CROP_FULL = "전체"
-CENTER_CROP_TOOLTIP = "사진 가운데(결함 위치)만 잘라 크게 봅니다 — 50% 는 가운데 절반, 30% 는 더 좁게."
+CENTER_CROP_TOOLTIP = "사진 가운데(Defect 위치)만 잘라 크게 봅니다 — 50% 는 가운데 절반, 30% 는 더 좁게."
 
 # 좌표 보정(KLA ↔ Camtek) — 매칭 직전, 사용자가 '같은 결함' 사진 쌍을 골라 어긋남을 뺀다.
 # 보정은 매칭 계산에만 쓰이고 엑셀·화면 좌표는 바뀌지 않는다(사용자 지시).
 COORD_CAL_TITLE = "좌표 보정 (KLA ↔ Camtek)"
 COORD_CAL_HINT_FMT = (
-    "① 왼쪽에서 {src} 사진을 고르고  ② 오른쪽에서 같은 결함인 {dst} 사진을 누르세요 — 3쌍쯤이면 충분해요. "
+    "① 왼쪽에서 {src} 사진을 고르고  ② 오른쪽에서 같은 Defect 인 {dst} 사진을 누르세요 — 3쌍쯤이면 충분해요. "
     "두 장비 좌표의 어긋남을 매칭 전에 보정합니다(엑셀·화면 좌표는 그대로).")
 COORD_CAL_SRC_HEAD_FMT = "{side} 사진 {n}장"
 COORD_CAL_SRC_MORE_FMT = "가까운 짝 후보가 있는 사진만 보여요 · 후보가 많은 {n}장은 생략"
 COORD_CAL_SIDE_REF_FMT = "기준({dev})"
 COORD_CAL_PICK_FIRST = "왼쪽에서 사진을 고르세요."
-COORD_CAL_CANDS_HEAD_FMT = "같은 결함인 {dst} 사진을 누르세요 — 그럴듯한 순서 · 숫자는 보정 전 거리"
+COORD_CAL_CANDS_HEAD_FMT = "같은 Defect 인 {dst} 사진을 누르세요 — 그럴듯한 순서 · 숫자는 보정 전 거리"
 COORD_CAL_ANCHOR_FMT = "기준 ({dev})"
 COORD_CAL_DIST_FMT = "{d:.0f} µm"
 COORD_CAL_PAIRED_FMT = "✓ {i}번 쌍"
@@ -1519,16 +1519,16 @@ COORD_CAL_RESIDUAL_WARN_FMT = (
 KLA_INFO_BROKEN_FMT = (
     "KLA 정보파일(.001)이 비어 있는 슬롯이 {n}개 있어요:\n{names}\n\n"
     "파일 이름의 WaferID 와 슬롯 번호가 상대 장비와 맞는 {k}개는 짝을 지었어요.\n"
-    "이 슬롯들은 KLA 결함 좌표가 없어 좌표 매칭이 되지 않아요. KLA 결과 파일을 확인해 주세요.")
+    "이 슬롯들은 KLA Defect 좌표가 없어 좌표 매칭이 되지 않아요. KLA 결과 파일을 확인해 주세요.")
 COORD_CAL_AUTO_FMT = (
     "자동 계산값  가로 {dx:+.0f} µm · 세로 {dy:+.0f} µm   (근거 {n}쌍) — "
     "그대로 '보정 적용' 을 누르거나, 쌍을 골라 직접 정할 수 있어요.")
 COORD_CAL_AUTO_WEAK_FMT = (
     "자동 계산은 근거가 부족해요(맞는 짝 {n}쌍 · 다른 후보 무리 {m}쌍). "
-    "같은 결함 쌍을 직접 골라 주세요.")
+    "같은 Defect 쌍을 직접 골라 주세요.")
 COORD_CAL_AUTO_DIFF_FMT = (
     "고른 쌍의 보정값이 자동 계산값(가로 {ax:+.0f} · 세로 {ay:+.0f} µm)과 {d:.0f} µm 달라요. "
-    "같은 결함이 맞는지 확인해 주세요.")
+    "같은 Defect 가 맞는지 확인해 주세요.")
 COORD_CAL_REMOVE = "지우기"
 COORD_CAL_SKIP = "보정 건너뛰기"
 COORD_CAL_APPLY = "보정 적용"
@@ -1584,7 +1584,7 @@ GL_UNDO = "되돌리기"
 GL_CLEAR = "모두 지우기"
 GL_ROI_DEFECT = "Defect"
 GL_DEFECT_GO = "Defect 위치"
-GL_DEFECT_GO_OFF_TIP = "컬러 결함 사진을 열면 쓸 수 있습니다"
+GL_DEFECT_GO_OFF_TIP = "컬러 Defect 사진을 열면 쓸 수 있습니다"
 
 GL_THR_LOW = "하한 이하 = 파랑"
 GL_THR_HIGH = "상한 이상 = 빨강"
@@ -1620,15 +1620,15 @@ GL_STATUS_ZOOM_FMT = "배율 {zoom}%"
 GL_WARN_COLOR = "컬러 사진 · 밝기(0.299R+0.587G+0.114B)로 분석"
 GL_WARN_JPEG = "JPEG 는 원본 GL 과 조금 다를 수 있음"
 GL_WARN_HUGE = "1억 화소 초과 · 느릴 수 있음"
-GL_SCAN_FOUND_FMT = "Scan 사진 {name} 의 결함 위치(300 µm) · 맞춤(F)으로 전체"
+GL_SCAN_FOUND_FMT = "Scan 사진 {name} 의 Defect 위치(300 µm) · 맞춤(F)으로 전체"
 GL_SCAN_MISSING_FMT = "Scan 사진을 못 찾았습니다 — {why} · 컬러 사진 밝기로 분석"
 GL_SCAN_WHY_UNKNOWN = "원인을 알 수 없음"
 GL_SCAN_WHY = {
     "no_manifest": "폴더에 ScanResultImageList.txt 가 없음",
     "unsupported_version": "Scan 목록 형식(Version)이 다름",
-    "no_coordinates": "이 사진의 결함 좌표를 못 읽음",
+    "no_coordinates": "이 사진의 Defect 좌표를 못 읽음",
     "no_pixel_size": "Scan 픽셀 크기를 못 읽음",
-    "no_candidate": "결함 위치를 담은 Scan 사진이 목록에 없음",
+    "no_candidate": "Defect 위치를 담은 Scan 사진이 목록에 없음",
     "unreadable_scan": "Scan 사진을 읽다가 실패",
 }
 
@@ -1691,7 +1691,7 @@ DROP_PILL_ONLY_FOLDER_PHOTO = "폴더·사진만 받아요"
 
 # ── Overkill 튜닝 · Defect 고르기 팝업 — 왼쪽 Overkill · 오른쪽 Defect(후보 선별과 같은 짜임) ──
 OVERKILL_PICK_TITLE = "Defect 고르기"
-OVERKILL_PICK_ZONE_TIP = "구역"
+OVERKILL_PICK_ZONE_TIP = "Zone"
 OVERKILL_PICK_COUNTS_FMT = "전체 {total} · 남음 {left}"
 OVERKILL_PICK_PANE_OVERKILL = "Overkill"
 OVERKILL_PICK_PANE_DEFECT = "Defect"

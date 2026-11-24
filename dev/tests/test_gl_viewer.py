@@ -968,7 +968,7 @@ def test_scan_missing_shows_reason_and_toast(styled_qapp):
     v = loader.ViewLoad(loader.GlImage(np.full((H, W), 9, np.uint8), 8, True, "c.jpg", []),
                         scan_missing=True, source_path="c.jpg", scan_status="no_candidate")
     d = _make(styled_qapp, view=v)
-    assert "결함 위치를 담은 Scan 사진이 목록에 없음" in d.note.text()
+    assert "Defect 위치를 담은 Scan 사진이 목록에 없음" in d.note.text()
     assert "Scan 사진을 못 찾았습니다" in d.toast.text()
     d.close()
 
