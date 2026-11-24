@@ -445,7 +445,7 @@ def test_chip_select_filters_tiles_but_not_counts(styled_qapp, tmp_path, monkeyp
 
 
 def test_remove_is_synchronous_and_undo_restores(styled_qapp, tmp_path, monkeypatch):
-    """✕ 는 읽지 않는다(스레드 · 덮개 없음) — 메모리에서 다시 합치고 '뺐습니다 · 꼭 잡기 n개도 빠짐' + [되돌리기].
+    """✕ 는 읽지 않는다(스레드 · 덮개 없음) — 메모리에서 다시 합치고 '뺌 · 꼭 잡기 n개도 빠짐' + [되돌리기].
     되돌리면 그 칩과 꼭 잡기가 돌아온다."""
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     a, lot = _lot_setup(tmp_path)
@@ -464,7 +464,7 @@ def test_remove_is_synchronous_and_undo_restores(styled_qapp, tmp_path, monkeypa
         assert dlg._thread is None and not dlg._overlay_on and not dlg.is_loading()
         assert dlg._roots == [a] and dlg._w.folders == (a,) and len(dlg._picked) == 1
         assert dlg.notice.isVisibleTo(dlg) and dlg.undo_btn.isVisibleTo(dlg)
-        assert dlg.notice_label.text() == "lot 를 뺐습니다 · 꼭 잡기 1개도 빠짐"
+        assert dlg.notice_label.text() == "lot 뺌 · 꼭 잡기 1개도 빠짐"
         assert dlg._view.get(lot)                                                # 칩 설정은 남는다
         dlg._undo()
         assert dlg._roots == [a, lot] and len(dlg._w.folders) == 3 and len(dlg._picked) == 2

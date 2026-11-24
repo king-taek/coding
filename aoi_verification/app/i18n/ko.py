@@ -10,9 +10,9 @@ APP_TITLE = "AOI 레시피 검증"
 CREDIT = "Developed by 임현택"
 
 # ── 시작 스플래시(로고 + 로딩) ────────────────────────────────────────────
-SPLASH_MODULES = "구성 요소를 불러오는 중…"
-SPLASH_PAGES = "화면을 준비하는 중…"
-SPLASH_UPDATE_CHECK = "업데이트를 확인하는 중…"
+SPLASH_MODULES = "구성 요소를 불러오는 중"
+SPLASH_PAGES = "화면을 준비하는 중"
+SPLASH_UPDATE_CHECK = "업데이트를 확인하는 중"
 SPLASH_READY = "준비 완료"
 
 # ── OpenVINO 자동 설치 안내 ───────────────────────────────────────────────
@@ -25,7 +25,7 @@ OPENVINO_OFFER_BODY = (
 OPENVINO_OFFER_BTN_INSTALL = "지금 설치"
 OPENVINO_OFFER_BTN_LATER = "다음에"
 OPENVINO_OFFER_BTN_NEVER = "다시 보지 않기"
-OPENVINO_INSTALL_PROGRESS = "OpenVINO 설치 중…"
+OPENVINO_INSTALL_PROGRESS = "OpenVINO 설치 중"
 OPENVINO_INSTALL_DONE = (
     "OpenVINO 설치 완료!\n프로그램을 다시 시작하면 고효율 모드에서 Intel GPU 가속을 쓸 수 있습니다."
 )
@@ -57,7 +57,7 @@ DURATION_HOUR_FMT = "{h}시간 {m}분"
 BTN_START = "검증 시작"
 # 시작 직후 — 무거운 구성 요소(영상 처리·가속)를 백그라운드에서 불러오는 동안의 표기.
 # 창은 먼저 뜨고, 준비가 끝나면 원래 이름(BTN_START)으로 돌아오며 활성화된다.
-BTN_START_PREPARING = "준비 중…"
+BTN_START_PREPARING = "준비 중"
 BTN_BROWSE = "폴더 선택…"
 BTN_VERIFY = "검증"
 BTN_EXCLUDE = "제외"
@@ -332,7 +332,7 @@ DIE_SIZE_SRC_KLA = "KLA .001 DiePitch"
 # 1초를 넘고(슬롯 25 × 결함 3,000 실측 1.4초), 아무 표시도 없으면 '안내가 원래
 # 없는 폴더' 와 구분되지 않는다.  진행을 모를 때도 멈춰 보이게 두지 않는다는
 # 로딩바 규칙(CLAUDE.md)과 같은 취지다.
-DIE_SIZE_CHECKING = "die 크기 확인 중…"
+DIE_SIZE_CHECKING = "die 크기 확인 중"
 # ⚠ **Camtek INI 좌표가 있는데 die pitch 를 못 정한 경우에만** 띄운다.
 # KLA 슬롯·LIVE 파일명 슬롯은 die 크기 없이도 좌표가 나오므로 경고 대상이 아니다.
 # 매칭 자체는 절대 wafer 좌표로 정상 동작한다 — 못 하는 건 die 단위 표기뿐이다.
@@ -392,10 +392,10 @@ RESULT_SAVED_AT_FMT = "저장 완료 {time}"
 # ★ 로딩 문구에 진행 수치({done}/{total})를 넣지 마라.  진행 수치는 웨이퍼 맵 **옆의
 #   모노 라벨**(LoadingOverlay._count_label)이 전담한다 — 문구에도 넣으면 같은 숫자가
 #   한 화면에 두 번 보인다("썸네일 생성 중 147 / 480" + "147 / 480").  단일 출처 규칙.
-LOAD_THUMBNAIL = "썸네일 생성 중…"
+LOAD_THUMBNAIL = "썸네일 생성 중"
 # 교차검증 2차 선별에 들어가기 전 — 1차 동안 천천히 만들던 검증 사진 썸네일을 마저 만든다.
-LOAD_THUMBNAIL_CROSS_B = "2차 선별용 썸네일 마무리 중…"
-LOAD_STAGE_PREP = "다음 단계 준비 중…"
+LOAD_THUMBNAIL_CROSS_B = "2차 선별용 썸네일 마무리 중"
+LOAD_STAGE_PREP = "다음 단계 준비 중"
 # ★ [검증 시작] 뒤의 세 단계.  단계가 바뀌면 진행바는 0 에서 다시 차는데(그 스냅은
 #   올바른 동작이다), 여정 표시가 없으면 "다 됐다가 다시 0 이 됐다" 로 읽힌다.
 #   바를 잇는 것이 답이 아니라, 화면이 '전체의 어디쯤' 을 말해야 한다 —
@@ -413,21 +413,19 @@ LOAD_JOURNEY_STEPS = ("폴더 스캔", "썸네일", "매칭 준비")
 #   사진을 각각 다시 임베드한다).  고정 문구 하나로는 그 사실이 전달되지 않아
 #   '3분째 같은 문장' 이 됐다.  행 수치는 여기 넣지 않는다 — 진행 라벨의 몫이다.
 EXPORT_PHASE_FMT = "엑셀로 저장 중 — {sheet} 시트 · {slot}"
-LOAD_REVIEW_ROWS = "검토 목록 준비 중…"
-LOAD_FEATURE = "검증 장비 특징 추출 중…"
-LOAD_SCORING = "유사도 계산 중…"
-LOAD_COORD = "좌표 매칭 중…"             # 좌표 모드는 유사도를 계산하지 않는다
+LOAD_REVIEW_ROWS = "검토 목록 준비 중"
+LOAD_FEATURE = "검증 장비 특징 추출 중"
+LOAD_SCORING = "유사도 계산 중"
+LOAD_COORD = "좌표 매칭 중"             # 좌표 모드는 유사도를 계산하지 않는다
 PHASE_FEATURE = "이미지 특징 분석"
 PHASE_SCORING = "유사도 계산"
 PHASE_EMBED = "후보 생성 (GPU 임베딩)"      # 고효율 모드 1단계 — 유사도 계산 직전
 PHASE_COORD = "좌표 매칭 중"                # 좌표 기반 매칭 v2
-PHASE_COORD_PARSE = "좌표 파싱 중…"         # 좌표 매칭 1단계
+PHASE_COORD_PARSE = "좌표 파싱 중"         # 좌표 매칭 1단계
 # 수동 모드: 첫 슬롯만 기다리고 나머지는 백그라운드 (#streaming).
 # 선행 단계(특징 분석/임베딩) 동안에도 '유사도 계산' 으로 오인되지 않도록 중립 문구.
-LOAD_PRECOMPUTE_FIRST_SLOT = (
-    "첫 슬롯 준비 중… 잠시만 기다려 주세요."
-)
-LOAD_PRECOMPUTE_WAIT_FMT = "{slot} 슬롯 계산 중…"
+LOAD_PRECOMPUTE_FIRST_SLOT = "첫 슬롯 준비 중"
+LOAD_PRECOMPUTE_WAIT_FMT = "{slot} 슬롯 계산 중"
 PRECOMPUTE_BG_STATUS_FMT = "백그라운드 유사도 계산: {idx} / {total} 슬롯 완료"
 PRECOMPUTE_BG_DONE = "유사도 계산 완료"
 
@@ -443,7 +441,7 @@ UPDATE_AVAILABLE_BODY = "새 버전이 있습니다. 지금 업데이트할까�
 UPDATE_BTN_NOW = "지금 업데이트"
 UPDATE_BTN_LATER = "나중에"
 UPDATE_UNKNOWN_CURRENT = "최신 버전을 받아 적용할까요?"
-UPDATE_DOWNLOADING = "업데이트 다운로드 중…"
+UPDATE_DOWNLOADING = "업데이트 다운로드 중"
 UPDATE_DONE_RESTART = "업데이트가 적용되었습니다.\n프로그램을 종료합니다. 다시 실행해 주세요."
 # exe 배포본은 실행 중인 app 폴더를 바꿀 수 없어 새 버전을 받아두기만 하고, 다음 실행 때
 # 런처가 교체한다.  '적용되었다' 고 하면 사실과 다르므로 문구를 나눈다.
@@ -465,11 +463,11 @@ UPDATE_NEEDS_NEW_BUNDLE = (
     "이번 업데이트에 필요한 패키지를 설치하지 못해 적용하지 않았습니다.\n"
     "지금 버전은 그대로 사용하실 수 있습니다.\n\n"
     "인터넷 연결을 확인한 뒤 다시 시도해 주세요.\n"
-    "계속 실패하면 관리자에게 새 배포본 'AOI_Verify' 폴더 전체(zip)를 요청하세요.\n"
+    "계속 실패하면 관리자에게 새 배포본 ‘AOI_Verify’ 폴더 전체(zip)를 요청하세요.\n"
     "app 폴더만 바꾸면 앱이 실행되지 않습니다."
 )
 UPDATE_FAILED = "업데이트에 실패했습니다. 잠시 후 다시 시도해 주세요."
-UPDATE_CHECKING = "업데이트 확인 중…"
+UPDATE_CHECKING = "업데이트 확인 중"
 UPDATE_LATEST = "최신 버전입니다."
 UPDATE_UNKNOWN = "업데이트를 확인할 수 없습니다. 인터넷 연결을 확인해 주세요."
 UPDATE_GIT_HINT = "개발(git) 환경입니다. 'git pull' 로 업데이트하세요."
@@ -491,7 +489,7 @@ DEV_MODE_REPO = "저장소 (소유자/이름)"
 DEV_MODE_BRANCH = "브랜치"
 DEV_MODE_BRANCH_DEFAULT_HINT = "비우면 기본 브랜치"
 DEV_MODE_LOAD_BRANCHES = "브랜치 목록 불러오기"
-DEV_MODE_LOADING_BRANCHES = "브랜치 목록을 불러오는 중…"
+DEV_MODE_LOADING_BRANCHES = "브랜치 목록을 불러오는 중"
 DEV_MODE_BRANCHES_LOADED_FMT = "브랜치 {n}개를 불러왔습니다."
 DEV_MODE_BRANCHES_FAILED = "브랜치 목록을 불러오지 못했습니다. 이름을 직접 적어 주세요."
 DEV_MODE_CHECK = "업데이트 확인"
@@ -500,12 +498,12 @@ DEV_MODE_RESET = "기본으로 되돌리기"
 DEV_MODE_CLOSE = "닫기"
 DEV_MODE_OPEN_LOG = "로그 폴더 열기"
 DEV_MODE_LOG_PATH_FMT = "app.log 위치: {path}"
-DEV_MODE_CHECKING = "확인 중…"
+DEV_MODE_CHECKING = "확인 중"
 DEV_MODE_RESULT_UPDATE_FMT = "새 버전이 있습니다: {sha}  {message}"
 DEV_MODE_RESULT_LATEST_FMT = "이미 이 버전입니다: {sha}"
 DEV_MODE_RESULT_UNKNOWN_FMT = "확인할 수 없습니다 — {error}"
 DEV_MODE_INSTALL_ASK_FMT = "{repo} 의 {branch} 브랜치({sha})를 설치할까요?"
-LOAD_AUTO_MATCH = "자동 매치 진행 중…"
+LOAD_AUTO_MATCH = "자동 매치 진행 중"
 
 # ── 자동 업데이트 진행 단계 (utils/updater.py → LoadingOverlay) ──────────────
 # ★ 이 문구들은 `updater.download_and_apply(progress=…)` 이 단계마다 보고하는 phase 다.
@@ -515,11 +513,11 @@ LOAD_AUTO_MATCH = "자동 매치 진행 중…"
 #   (UPDATE_DOWNLOADING='업데이트 다운로드 중…')와 어긋난 채 '다운로드 중…' 으로
 #   바뀌었다.  한 화면의 문구는 한 곳에서 정한다.
 UPDATE_PHASE_DOWNLOAD = UPDATE_DOWNLOADING
-UPDATE_PHASE_EXTRACT = "업데이트 압축 해제 중…"
-UPDATE_PHASE_PREPARE = "업데이트 준비 중…"
-UPDATE_PHASE_DEPS = "필요한 패키지 설치 중…"
-UPDATE_PHASE_APPLY = "업데이트 적용 중…"
-UPDATE_PHASE_WAIT_LOCK = "보안 검사가 새 파일 확인을 마치길 기다리는 중…"
+UPDATE_PHASE_EXTRACT = "업데이트 압축 해제 중"
+UPDATE_PHASE_PREPARE = "업데이트 준비 중"
+UPDATE_PHASE_DEPS = "필요한 패키지 설치 중"
+UPDATE_PHASE_APPLY = "업데이트 적용 중"
+UPDATE_PHASE_WAIT_LOCK = "보안 검사가 새 파일 확인을 마치길 기다리는 중"
 UPDATE_PHASE_DONE = "업데이트 완료"
 # 사용자에게는 크게 두 단계로만 보인다 — 받는 일(다운로드) / 그 뒤 전부(설치: 압축 해제·
 # 준비·패키지·적용).  `UPDATE_PHASE_DOWNLOAD` 만 1단계, 나머지 phase 는 2단계다.
@@ -560,18 +558,18 @@ OPENVINO_INSTALL_OK = "설치 완료"
 BOOT_DEPS_INSTALLING = "필요한 패키지를 설치합니다 — 처음 1회, 인터넷이 필요하고 몇 분 걸립니다."
 BOOT_DEPS_FAILED = "패키지 설치에 실패했습니다. 인터넷·프록시 설정을 확인한 뒤 다시 실행하세요."
 BOOT_DEPS_DONE = "설치가 끝났습니다."
-BOOT_PY_DOWNLOADING = "파이썬 런타임을 내려받는 중… (처음 1회, 수십 MB)"
+BOOT_PY_DOWNLOADING = "파이썬 런타임을 내려받는 중 (처음 1회, 수십 MB)"
 BOOT_PY_DOWNLOAD_FAILED_FMT = "파이썬 런타임 다운로드 실패: {error}"
 BOOT_PY_TOO_SMALL_FMT = (
     "받은 파일이 너무 작습니다({n} bytes) — 회사 프록시가 차단 페이지를 돌려줬을 수 있습니다."
 )
-BOOT_PY_EXTRACTING = "파이썬 런타임을 푸는 중…"
+BOOT_PY_EXTRACTING = "파이썬 런타임을 푸는 중"
 BOOT_PY_EXTRACT_FAILED_FMT = "파이썬 런타임 압축 해제 실패: {error}"
 BOOT_PY_NOT_FOUND = "파이썬 런타임을 풀었지만 실행 파일을 찾지 못했습니다."
 BOOT_PY_UNAVAILABLE = "파이썬 런타임을 준비하지 못해 시작할 수 없습니다."
-BOOT_APP_DOWNLOADING = "앱을 내려받는 중…"
+BOOT_APP_DOWNLOADING = "앱을 내려받는 중"
 BOOT_APP_DOWNLOAD_FAILED = "앱 다운로드 실패 — 인터넷 연결을 확인하세요."
-BOOT_DEPS_INSTALLING_FIRST = "필요한 패키지를 설치하는 중… (처음 1회, 인터넷 필요)"
+BOOT_DEPS_INSTALLING_FIRST = "필요한 패키지를 설치하는 중 (처음 1회, 인터넷 필요)"
 BOOT_DEPS_FAILED_SHORT = "패키지 설치 실패 — 인터넷/프록시 설정을 확인하세요."
 BOOT_APP_STARTING = "앱을 시작합니다…"
 
@@ -646,7 +644,7 @@ VIEWER_BOX_OFF = "박스 끄기"
 VIEWER_BOX_ON = "박스 켜기"
 VIEWER_BOX_TIP = "Scan 범위 박스를 숨기거나 다시 보여줍니다 (B)"
 # Defect 의 Scan 사진 — Overkill 튜닝의 크게보기에서만
-VIEWER_SCAN_CHECKING = "Scan 확인 중…"
+VIEWER_SCAN_CHECKING = "Scan 확인 중"
 VIEWER_SCAN_YES = "Scan 있음"
 VIEWER_SCAN_NONE = "Scan 없음"
 VIEWER_SCAN_VIEW = "Scan image 보기"
@@ -679,8 +677,8 @@ JOURNEY_BACK_TO_SETUP_BODY = (
     "저장하지 않은 결과는 복구할 수 없습니다.")
 
 # ※ '모션 줄이기' 토글은 제거했다 — 모션은 항상 켜진다(사용자 결정).
-LOAD_SCAN = "폴더 스캔 중…"          # 여정 규칙은 LOAD_JOURNEY_STEPS 주석 참조
-LOAD_EXPORT = "엑셀로 저장 중…"
+LOAD_SCAN = "폴더 스캔 중"          # 여정 규칙은 LOAD_JOURNEY_STEPS 주석 참조
+LOAD_EXPORT = "엑셀로 저장 중"
 
 # ── 경고/안내 모달 ─────────────────────────────────────────────────────────
 WARN_SAME_PATH_TITLE = "경로 확인"
@@ -739,9 +737,9 @@ SLOT_SELECT_NONE = "전체 해제"
 # ★ 세는 것은 **결함 사진 장수**다(`models.slot.count_images`) — 웨이퍼 전경 사진은
 #   빠지므로 검증이 실제로 도는 장수와 같다.  좌표 항목 수가 아니다.
 # ★ 폴더를 열거해야 알 수 있어 워커가 채운다.  채워지기 전에는 빈칸이 아니라
-#   '확인 중…' 을 보여 준다(로딩바 계약과 같은 취지 — 모를 때도 멈춰 보이지 않게).
+#   '확인 중' 을 보여 준다(로딩바 계약과 같은 취지 — 모를 때도 멈춰 보이지 않게).
 SLOT_SELECT_TILE_COUNT_FMT = "기준 {ref} · 검증 {val}"
-SLOT_SELECT_TILE_COUNT_PENDING = "확인 중…"
+SLOT_SELECT_TILE_COUNT_PENDING = "확인 중"
 SLOT_SELECT_TILE_COUNT_NONE = "—"      # 검증 폴더에 그 슬롯이 없다
 # KLA 폴더 타일 이름 — 폴더명(검사 시각) 대신 정보파일의 WaferID·Slot 번호(사용자 요청).
 SLOT_SELECT_KLA_FMT = "{wafer_id} · 슬롯 #{slot}"
@@ -755,7 +753,7 @@ SCOPE_SUBSET_COUNT_FMT = "일부 슬롯 ({n}/{total})"
 SETUP_INVALID_FOLDER = "폴더를 찾을 수 없습니다."
 START_BLOCKED_HINT = "기준·검증 폴더를 먼저 지정하세요."
 # 폴더 존재 확인이 아직 안 끝났을 때 — 네트워크 폴더는 응답이 느릴 수 있다 (P-15).
-START_CHECKING_HINT = "폴더를 확인하는 중입니다…"
+START_CHECKING_HINT = "폴더를 확인하는 중"
 # 폴더는 다 골랐는데 아직 구성 요소를 불러오는 중일 때 — 곧 저절로 풀린다.
 START_PREPARING_HINT = "구성 요소를 불러오는 중입니다. 잠시만 기다려 주세요."
 # 그 불러오기가 실패한 경우(설치 손상 등) — 시작 버튼은 잠긴 채로 둔다.
@@ -775,7 +773,7 @@ SELECT_NONE_CHOSEN_BODY = (
 SLOT_SELECT_NEED_REF = "먼저 기준 폴더를 선택하세요."
 
 # 이전 결과 엑셀을 기준으로 쓰기 (기준 폴더 줄의 [엑셀로])
-EXCEL_REF_LOADING = "엑셀에서 기준 사진 꺼내는 중…"
+EXCEL_REF_LOADING = "엑셀에서 기준 사진 꺼내는 중"
 EXCEL_REF_DONE_TIP_FMT = "{name}\n사진 {photos}장 · 슬롯 {groups}개 · 좌표 {coords}장"
 EXCEL_REF_ERR_NOFILE = "엑셀 파일을 찾을 수 없습니다."
 EXCEL_REF_ERR_OPEN = "엑셀을 열 수 없습니다. 다른 프로그램에서 열려 있거나 손상된 파일일 수 있습니다."
@@ -791,8 +789,8 @@ SLOT_SELECT_EMPTY = "기준 폴더에서 슬롯(하위 폴더)을 찾지 못했�
 REF_REUSE_TITLE = "이전 기준 사진 재사용"
 REF_REUSE_BODY_FMT = "이 기준 폴더에서 전에 고른 기준 사진 {n}장을 그대로 쓸까요?"
 # KLA slot 해석 단계 — 로딩창에 현재 진행 단계(정보파일/OCR)를 실시간 표시.
-LOAD_KLA_INFO = "KLA 슬롯 매칭 중 — 정보파일 분석…"
-LOAD_KLA_OCR = "KLA WaferID 판독 (OCR) 중…"
+LOAD_KLA_INFO = "KLA 슬롯 매칭 중 — 정보파일 분석"
+LOAD_KLA_OCR = "KLA WaferID 판독 (OCR) 중"
 
 # slot 매칭 실패 시 'KLA 가 어느 쪽?' 확인 — 호기가 K-n 이면 자동, 아니면 묻는다.
 # 그림 카드 넷 + [취소](BTN_CANCEL) — 설명문 없음(현택님 2026-11-24, K1 A안).
@@ -939,7 +937,7 @@ DEFECT_NUMBER_WARN_FMT = "⚠ {text}"
 # 매칭·검토 화면 위 큰 경고 — col / row 를 장비 번호표 없이 계산한 웨이퍼(`coords.number_risk`).
 # 좌표 매칭 중 좌표를 못 읽어 사진 모양(유사도)으로 짝을 찾은 기준 사진 — 검토 화면.
 REVIEW_NO_COORD_BANNER_FMT = ("⚠ 좌표를 못 읽은 기준 사진 {n}장은 좌표 대신 사진 모양(유사도)으로 짝을 찾았습니다. "
-                              "'좌표 없음' 표시가 붙은 줄을 직접 확인해 주세요.")
+                              "‘좌표 없음’ 표시가 붙은 줄을 직접 확인해 주세요.")
 REVIEW_NO_COORD_TAG = "좌표 없음"
 REVIEW_NO_COORD_TIP = "이 기준 사진은 좌표를 못 읽어 사진 모양(유사도)으로 후보를 찾았습니다. 점수는 거리(µm)가 아니라 유사도입니다."
 NUMBER_RISK_HEAD = "⚠ 틀릴 확률이 매우 높습니다!!  col / row 번호를 확실히 정하지 못한 웨이퍼가 있습니다"
@@ -1050,7 +1048,7 @@ BTN_MATCH_THIS = "이 후보로 매치"
 # ★ 몇 개가 더 숨어 있는지 라벨에 싣는다 — 최대 50개까지 보관하므로 개수를 모르면
 #   '몇 번 더 눌러야 하는가' 를 알 수 없다.  +N 타일·'매치 없음 사진 보기 (n)' 과
 #   같은 개수 표기 관습이다.
-RUNNERUP_MORE_ROW_FMT = "후보 한 줄 더 보기 (+{n}) ▾"
+RUNNERUP_MORE_ROW_FMT = "후보 한 줄 더 보기 +{n} ▾"
 RUNNERUP_LESS_ROW = "접기 ▴"
 
 # ── 앱 내 메시지 시트 버튼 (widgets/sheet_host.py) ─────────────────────────
@@ -1123,7 +1121,7 @@ OVERKILL_MODE_MANUAL = "직접 조정"
 OVERKILL_MODE_AUTO = "자동 추천"
 OVERKILL_WAFERS = "웨이퍼 {n}"
 OVERKILL_CHIP_READING = "읽는 중 {i}/{n}"
-OVERKILL_CHIP_READING_NOCOUNT = "읽는 중…"
+OVERKILL_CHIP_READING_NOCOUNT = "읽는 중"
 OVERKILL_CHIP_PARTIAL = "제외 {n}"
 OVERKILL_CHIP_EX_RECIPE = "제외: 레시피 다름"
 OVERKILL_CHIP_EX_UNREAD = "제외: 못 읽음"
@@ -1144,7 +1142,7 @@ OVERKILL_VIEW_NO_COLOR = "이 폴더에는 컬러 사진이 없습니다"
 OVERKILL_VIEW_NO_SCAN = "이 폴더에는 스캔 사진 목록이 없습니다"
 OVERKILL_FILTER_ONLY = "{name} 만 보는 중 · {n:,}"
 OVERKILL_UNDO = BTN_UNDO
-OVERKILL_NOTICE_REMOVED = "{name} 를 뺐습니다"
+OVERKILL_NOTICE_REMOVED = "{name} 뺌"
 OVERKILL_NOTICE_PICKS_LOST = " · 꼭 잡기 {n}개도 빠짐"
 OVERKILL_NOTICE_ADDED = "{name} 를 더했습니다 · 웨이퍼 {w}장 · Defect {n:,}"
 OVERKILL_NOTICE_ADDED_MANY = "폴더 {k}개를 더했습니다 · 웨이퍼 {w}장 · Defect {n:,}"
@@ -1167,7 +1165,7 @@ OVERKILL_PICK_OPEN = "Defect 고르기"
 OVERKILL_DETAIL_CLOSE = "닫기"
 OVERKILL_SCAN_TAG = "Scan"
 OVERKILL_SCAN_PROGRESS = "스캔 사진 불러오는 중 {done}/{total}"
-OVERKILL_SCAN_WAIT = "불러오는 중…"
+OVERKILL_SCAN_WAIT = "불러오는 중"
 OVERKILL_LOADING_WAFERS = "Defect 읽는 중 · 웨이퍼 {i}/{n}"
 OVERKILL_RICH_PROGRESS = "내리기 준비 {p}%"
 THRESH_PREVIEW_LOADING = "Defect 읽는 중"
@@ -1366,7 +1364,7 @@ EXTRACT_SAVE_COLUMNS = "Recipe별 열로 저장"
 EXTRACT_RECIPE_NONE = "Recipe 없음"
 EXTRACT_RECIPE_CODE_FMT = "Recipe {code}"
 # 저장 첫 단계 — 엑셀에 넣을 사진을 미리 준비한다(로딩 때 만든 것이 있으면 즉시 끝난다).
-EXPORT_PREPARE_IMAGES = "엑셀에 넣을 사진 준비 중…"
+EXPORT_PREPARE_IMAGES = "엑셀에 넣을 사진 준비 중"
 # 저장 방식 창 왼쪽 아래 — 선별에서 왔으면 선별로, 아니면 설정으로(K2 B안: 한 낱말).
 EXTRACT_SUMMARY_BACK = "돌아가기"
 # 저장 파일 이름 — 결과 엑셀 제목 규칙에 '추출' 을 붙인 것(사용자 결정).
@@ -1419,15 +1417,15 @@ NOTCH_DIRS = {"up": "위", "left": "왼쪽", "right": "오른쪽", "down": "아�
 NOTCH_OK = "확인"
 NOTCH_CANCEL = BTN_CANCEL
 NOTCH_AUTO = "자동 감지"
-NOTCH_CHECKING = "Notch 방향 확인 중…"
-NOTCH_AUTO_BUSY = "검증 폴더를 네 방향으로 돌려 맞춰 보는 중…"
+NOTCH_CHECKING = "Notch 방향 확인 중"
+NOTCH_AUTO_BUSY = "검증 폴더를 네 방향으로 돌려 맞춰 보는 중"
 NOTCH_AUTO_FOUND_FMT = "검증 Notch: {dir} (기준 사진 {hit}장이 짝을 찾았습니다)"
 NOTCH_AUTO_UNSURE = "뚜렷한 방향을 찾지 못했습니다 — 직접 골라 주세요."
 NOTCH_FAIL_FMT = ("Notch 방향을 맞추지 못했습니다 — 웨이퍼 중심·die 크기를 읽을 수 없는 폴더가 있습니다.\n"
                   "{detail}")
 NOTCH_LOG_FMT = "Notch 방향 보정(매칭 전용): {dirs}"
 
-COORD_CAL_LOADING = "좌표 보정 준비 중 — 두 장비의 좌표를 읽고 있습니다…"
+COORD_CAL_LOADING = "좌표 보정 준비 중 — 두 장비의 좌표를 읽는 중"
 
 # ── GL 히스토그램 뷰어 ────────────────────────────────────────────────────
 GL_BUTTON = "GL 히스토그램"
@@ -1582,11 +1580,11 @@ OVERKILL_PICK_BTN_CANCEL = "취소"
 OVERKILL_PICK_BTN_APPLY_FMT = "적용 · Defect {n}"
 OVERKILL_PICK_ALL_PHOTOS = "전체 사진"
 OVERKILL_PICK_DONE = "다 골랐습니다"
-OVERKILL_PICK_LOADING = "불러오는 중…"
+OVERKILL_PICK_LOADING = "불러오는 중"
 OVERKILL_PICK_EMPTY = "사진 없음"
 OVERKILL_PICK_RESULT_FMT = "적용하면 새로 빠짐 {drop} · Overkill로 고른 {n}개 중 {gone}개 빠짐"
 OVERKILL_PICK_MISSED_FMT = "놓침 {k}"
-OVERKILL_NOT_BY_FILTER = "검출 단계({name})가 잡은 Defect 예요 — '검출 단계 (Dark/Bright)' 하한으로만 빠져요"
+OVERKILL_NOT_BY_FILTER = "검출 단계({name})가 잡은 Defect 예요 — ‘검출 단계 (Dark/Bright)’ 하한으로만 빠져요"
 OVERKILL_NOT_BY_FILTER_FIXED = "검출 단계({name})가 잡은 Defect 예요 — 이 종류의 하한은 앱에서 바꿀 수 없어서 기준을 바꿔도 빠지지 않아요"
 
 # ── 어느 Zone에서 왔니?(Defect 분류별 조회, 현택님 이름 2026-11-23) ──────────────────
@@ -1637,13 +1635,13 @@ ZO_SORT_WAFER = "웨이퍼 순"
 ZO_SORT_TIP = "정렬"
 ZO_VIEW_TILES = "사진"
 ZO_VIEW_TABLE = "표"
-ZO_MORE_FMT = "더 보기 (+{n})"
+ZO_MORE_FMT = "더 보기 +{n}"
 ZO_NONE = "고른 조건에 맞는 Defect 가 없습니다"
 ZO_NO_PHOTO = "사진 없음"
 ZO_DETAIL_EMPTY = "사진이나 줄을 누르세요"
 ZO_DETAIL_COLOR = "컬러 사진"
 ZO_DETAIL_SCAN = "Scan 300 µm"
-ZO_DETAIL_SCAN_WAIT = "Scan 찾는 중…"
+ZO_DETAIL_SCAN_WAIT = "Scan 찾는 중"
 ZO_DETAIL_SCAN_NONE = "Scan 없음"
 ZO_ROW_LOT = "LOT"
 ZO_ROW_WAFER = "Wafer"
@@ -1677,7 +1675,7 @@ ZO_COL_HEIGHT = "Height µm"
 ZO_COL_PHOTO = "사진"
 ZO_CHIP_COUNT_FMT = "웨이퍼 {w} · {n}"
 ZO_SHOWN_FMT = "{shown}개 표시"
-ZO_NOTICE_REMOVED = "{name} 을(를) 뺐습니다"
+ZO_NOTICE_REMOVED = "{name} 뺌"
 ZO_FACET_CAP = "잘림"
 ZO_TABLE_CAP_FMT = "표는 앞 {n}줄까지 보입니다 — 더 좁혀 고르거나 엑셀로 저장하세요"
 ZO_EXCEL_NONE = "저장할 사진이 없습니다 — 사진 있는 Defect 를 고르세요"
