@@ -1526,6 +1526,22 @@ class ExcelExporter(QThread):
             ws.cell(row=r, column=1, value="검증 전용")
             ws.cell(row=r, column=2, value=s)
             r += 1
+        # 다른 시트와 같은 모양(현택님 2026-11-25 Q4): 남색 머리 · 흰 굵은 글자 · 가는 격자 ·
+        # 가운데 정렬 · 열 너비 15 · 머리 줄 고정.  값은 그대로다.
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+        center = Alignment(horizontal="center", vertical="center")
+        side = Side(style="thin", color=BODY_GRID_COLOR)
+        box = Border(left=side, right=side, top=side, bottom=side)
+        for row in ws.iter_rows(min_row=1, max_row=r - 1, max_col=2):
+            for cell in row:
+                cell.alignment = center
+                cell.border = box
+                if cell.row == 1:
+                    cell.font = Font(name=TEMPLATE_FONT, bold=True, color="FFFFFFFF")
+                    cell.fill = PatternFill("solid", fgColor=HEADER_NAVY)
+        for col in "AB":
+            ws.column_dimensions[col].width = COL_WIDTHS["B"]
+        ws.freeze_panes = "A2"
 
 
 # ---------------------------------------------------------------------------

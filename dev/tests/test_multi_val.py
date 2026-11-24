@@ -420,3 +420,24 @@ def test_result_page_equipment_buttons(styled_qapp):
     assert picked == [1]
     page.set_equipments([], 0, None)
     assert page._equip_host.isHidden() and page._results_provider is None
+
+
+def test_slot_mismatch_sheet_has_header_style(isolated_cache, tmp_path):
+    """'Slot 불일치 목록' 시트도 다른 시트처럼 남색 머리 · 격자 · 머리 줄 고정(현택님 2026-11-25 Q4)."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    pytest.importorskip("PyQt6.QtWidgets")
+    openpyxl = pytest.importorskip("openpyxl")
+    from aoi_verification.app.i18n import ko
+    from aoi_verification.app.workers.exporter import HEADER_NAVY, ExcelExporter
+    res = FinalResult(mode="single", ref_machine="KLA", val_machine="AOI-4",
+                      matches=[], slot_only_ref=["S9"], slot_only_val=["S7"])
+    ExcelExporter(res, dst_path=tmp_path / "out.xlsx",
+                  template_path=tmp_path / "none.xlsx").run()
+    wb = openpyxl.load_workbook(tmp_path / "out.xlsx")
+    ws = wb[[n for n in wb.sheetnames if n.startswith(ko.SLOT_MISMATCH_SHEET)][0]]
+    assert [ws.cell(r, 2).value for r in (2, 3)] == ["S9", "S7"]
+    head = ws["A1"]
+    assert head.fill.fgColor.rgb == HEADER_NAVY and head.font.bold
+    assert ws["B3"].border.bottom.style == "thin"
+    assert ws.freeze_panes == "A2"
+    assert ws.column_dimensions["A"].width == ws.column_dimensions["B"].width == 15
