@@ -119,8 +119,8 @@ def display_shift(folder: Path) -> tuple[int, int]:
     예전처럼 더하고 경고한다.
 
     매칭·Wafer map 위치에는 쓰지 않는다 — KLA·LOT 맵 txt·시프트 없는 레시피는 실제 die
-    번호를 쓰므로, 시프트를 섞으면 같은 die 가 1 어긋난다.  값은 줄 끝 ``; 주석`` 을 버리고
-    정수로 읽으며, 정수가 아니면 경고하고 0 으로 둔다(화면 표기만 바뀌므로 매칭은 안전)."""
+    번호를 쓰므로, 시프트를 섞으면 같은 die 가 1 어긋난다.  값은 줄 끝 ``; 주석`` 을
+    버리고 정수로 읽으며, 정수가 아니면 경고하고 0 으로 둔다(화면 표기만 바뀌므로 매칭은 안전)."""
     p = Path(folder) / _RECIPE_INI
     text = read_ini_text(p)
     if text is None:
@@ -319,6 +319,29 @@ def _parse_sections(ini: Path, _mtime_ns: int, _size: int) -> tuple:
                     _xy_from_kv(kv), int(m.group(1)) if m else 0,
                     int(t) if t.lstrip("-").isdigit() else None))
     return tuple(out)
+
+
+def load_name_folder(folder: Path) -> dict[str, str]:
+    """폴더의 INI → ``{stem(소문자) → 섹션 이름(원래 대소문자·확장자 그대로)}``.
+
+    다른 맵은 키를 ``stem`` 으로만 들고 있어 원래 파일 이름을 되살릴 수 없다 — Scan 사진에서
+    Defect 를 찾을 때(:func:`~.scan_image.defects_in`) 그 Defect 의 사진 경로를 만드는 데 쓴다."""
+    ini = _find_ini(Path(folder))
+    if ini is None:
+        return {}
+    try:
+        st = ini.stat()
+        return dict(_section_names(ini, st.st_mtime_ns, st.st_size))
+    except Exception:
+        _LOG.warning("Camtek INI 섹션 이름 읽기 실패: %s", folder, exc_info=True)
+        return {}
+
+
+@lru_cache(maxsize=32)
+def _section_names(ini: Path, _mtime_ns: int, _size: int) -> tuple:
+    text = read_ini_text(ini) or ""
+    return tuple((Path(n.strip()).stem.lower(), n.strip())
+                 for n in _SECTION_PAT.findall(text))
 
 
 @lru_cache(maxsize=256)
