@@ -1064,6 +1064,14 @@ QSpinBox::up-button, QDoubleSpinBox::up-button,
 QSpinBox::down-button, QDoubleSpinBox::down-button {
     width: 18px;
 }
+/* 허용 오차(NoButtons + 바깥 ±) — 위 18px 규칙이 NoButtons 와 만나면 입력란이 1px 로
+   눌려 값이 안 보였다(실측).  버튼 자리를 테두리 기준 0 폭으로 둔다. */
+QDoubleSpinBox[stepper="outside"]::up-button,
+QDoubleSpinBox[stepper="outside"]::down-button {
+    subcontrol-origin: border;
+    width: 0px;
+    border: none;
+}
 /* ★ 순서 주의 — Qt 는 `위젯::서브컨트롤:상태` 만 인식한다.
    `QSlider:disabled::sub-page` 처럼 상태를 앞에 쓰면 규칙이 **무시**돼, 무효해진
    임계치 슬라이더가 풀 accent 로 칠해진 채 화면에서 가장 강한 요소로 남았다(실측). */

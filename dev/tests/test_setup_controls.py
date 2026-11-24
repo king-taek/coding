@@ -468,3 +468,23 @@ def test_threshold_btn_visible_without_dev_mode(styled_qapp):
         assert not page.threshold_btn.isHidden()
     finally:
         page.deleteLater()
+
+
+def test_tolerance_spin_value_is_visible(styled_qapp):
+    """허용 오차 입력란에 '200 µm' 이 보여야 한다.
+
+    전역 QSS 의 스핀 버튼 폭(18px)이 NoButtons 와 만나면 안쪽 입력란이 1px 로 눌려
+    칸이 비어 보였다(실측, 2026-11-24)."""
+    page = sp.SetupPage()
+    page.resize(1440, 900)
+    page.show()
+    styled_qapp.processEvents()
+    spin = page.coord_tol_spin
+    edit = spin.lineEdit()
+    need = edit.fontMetrics().horizontalAdvance(spin.text())
+    assert spin.text().endswith("µm")
+    assert edit.width() >= need, \
+        f"입력란 폭 {edit.width()}px < 글자 {need}px — 값이 잘린다"
+    assert edit.width() >= spin.width() * 0.6, \
+        f"입력란이 칸에 비해 너무 좁다 ({edit.width()}/{spin.width()})"
+    page.deleteLater()

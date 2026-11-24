@@ -1218,6 +1218,7 @@ class SetupPage(QWidget):
         #   공유하고 새 리소스가 필요 없다.
         self.coord_tol_spin.setButtonSymbols(
             QDoubleSpinBox.ButtonSymbols.NoButtons)
+        self.coord_tol_spin.setProperty("stepper", "outside")   # style.qss — 입력란 폭 지킴
         self.coord_tol_spin.setMinimumWidth(120)
         self.tol_minus_btn = self._stepper_button("−", -1)
         self.tol_plus_btn = self._stepper_button("+", +1)
