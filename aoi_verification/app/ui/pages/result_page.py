@@ -554,7 +554,10 @@ class ResultPage(QWidget):
             )
             # 비동기 OS 창 — `exec()` 는 Windows 에서 UI 스레드를 세운다.  고르면
             # `_on_save_picked` 가 저장을 시작하고, 취소하면 아무 일도 없다.
-            self._save_picker.open(i18n.KO.SAVE_DIALOG_TITLE, filename,
+            # 기본 폴더는 다른 저장과 같은 결과 폴더(현택님 2026-11-25 Q3 A안).
+            from ...utils import paths
+            self._save_picker.open(i18n.KO.SAVE_DIALOG_TITLE,
+                                   str(paths.results_dir() / filename),
                                    "Excel (*.xlsx)", "xlsx")
             return
         self._start_export()

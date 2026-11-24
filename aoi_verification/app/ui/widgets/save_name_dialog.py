@@ -113,6 +113,7 @@ class SaveNameDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(i18n.KO.SAVE_NAME_TITLE)
         self._chosen: str | None = None
+        self._confirm_overwrite: str | None = None
         self._folder = Path(folder)
         self._fields: dict[str, QLineEdit] = {}
         # 칸이 아닌 제목 종류 표시(``cross``) — 칸 입력과 함께 이름 재생성에 넘긴다.
@@ -206,11 +207,23 @@ class SaveNameDialog(QDialog):
         _name, err = sanitize_name(self.edit.text())
         self._err.setText(err)
         self.btn_ok.setEnabled(not err)
+        self._confirm_overwrite = None      # 이름을 고치면 덮어쓰기 확인을 다시 받는다
+        self.btn_ok.setText(i18n.KO.SAVE_NAME_OK)
 
     def _on_ok(self) -> None:
         name, err = sanitize_name(self.edit.text())
         if err:
             self._err.setText(err)
+            return
+        # 같은 이름이 있으면 한 번 더 누를 때만 덮어쓴다(현택님 2026-11-25 Q3 A안).
+        try:
+            exists = (self._folder / name).exists()
+        except (OSError, ValueError):
+            exists = False
+        if exists and self._confirm_overwrite != name:
+            self._confirm_overwrite = name
+            self._err.setText(i18n.KO.SAVE_NAME_EXISTS)
+            self.btn_ok.setText(i18n.KO.SAVE_NAME_OVERWRITE)
             return
         self._chosen = name
         self.accept()

@@ -78,7 +78,7 @@ from .. import motion
 from ..deferred import call_later
 from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import guess_kinds, install_paste, local_paths, split_paths
-from ..folder_picker import FolderPicker, SavePicker, last_dir
+from ..folder_picker import FolderPicker, SavePicker
 from ..undo_keys import bind_undo
 from . import photo_menu
 from . import sheet_host as sheets
@@ -4081,9 +4081,9 @@ class ThresholdPreviewDialog(QDialog):
         """저장 창은 ``open()`` 으로 — ``exec()`` 는 Windows 에서 UI 스레드를 세운다(:mod:`..folder_picker`)."""
         if not self._ov or self._w is None:
             return
-        home = Path.home()
-        last = last_dir("threshold_export")          # 마지막으로 저장한 폴더가 먼저
-        start = Path(last) if last else home / "Desktop" if (home / "Desktop").is_dir() else home
+        # 기본 폴더는 다른 저장과 같은 결과 폴더(현택님 2026-11-25 Q3 A안 — 전엔 바탕화면).
+        from ...utils import paths
+        start = paths.results_dir()
         base = self._roots[0].name if len(self._roots) == 1 else self._w.folder.name
         name = f"Overkill_{base}_{datetime.now():%Y%m%d_%H%M}.html"
         self._save_picker.open(_KO.THRESH_EXPORT_SAVE_TITLE, str(start / name),

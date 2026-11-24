@@ -34,7 +34,7 @@ from .. import theme
 from ..deferred import call_later
 from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import guess_kinds, install_paste, local_paths
-from ..folder_picker import FilePicker, SavePicker, last_dir
+from ..folder_picker import FilePicker, SavePicker
 from . import sheet_host as sheets
 from .gl_canvas import TOOLS, GlCanvas
 from .gl_charts import ALL_ROW, HistogramChart
@@ -995,17 +995,15 @@ class GlViewerDialog(QDialog):
     # ------------------------------------------------------------------
     def _default_name(self, suffix: str) -> str:
         """기본 저장 이름 — 다른 도구와 같은 규칙 ``<도구>_<대상>_<YYYYMMDD_HHMM>``, 폴더도 같은
-        결과 폴더(``paths.results_dir``, 마지막 저장 폴더가 있으면 그곳).  예전엔 사진이 있는 NAS 폴더에 ``<사진>_GL`` 로 썼다."""
+        결과 폴더(``paths.results_dir``).  예전엔 사진이 있는 NAS 폴더에 ``<사진>_GL`` 로 썼다."""
         from datetime import datetime
 
         from ...utils import paths
 
         base = Path(self._view.source_path if self._view and self._view.source_path
                     else (self._gl.path if self._gl else "gl")).stem
-        # 마지막으로 저장한 폴더가 먼저, 없으면 결과 폴더.
-        last = last_dir("gl_save")
-        folder = Path(last) if last else paths.results_dir()
-        return str(folder / f"GL_{base}_{datetime.now():%Y%m%d_%H%M}{suffix}")
+        # 기본 폴더는 다른 저장과 같은 결과 폴더(현택님 2026-11-25 Q3 A안).
+        return str(paths.results_dir() / f"GL_{base}_{datetime.now():%Y%m%d_%H%M}{suffix}")
 
     def _on_save_xlsx(self) -> None:
         if self._gl is None:

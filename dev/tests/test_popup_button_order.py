@@ -280,3 +280,37 @@ def test_ui_strings_write_esc_not_ESC():
                 bad.append(name)
     assert not bad, f"'ESC' 대신 'Esc': {bad}"
     assert "(Esc)" in i18n.KO.WAFER_MAP_FULLSCREEN_EXIT
+
+
+# ── 저장: 같은 이름이면 한 번 더 눌러야 덮어쓴다 (현택님 2026-11-25 Q3 A안) ─────────
+def test_save_name_asks_before_overwriting(styled_qapp, tmp_path):
+    from aoi_verification.app.ui.widgets.save_name_dialog import SaveNameDialog
+    (tmp_path / "a.xlsx").write_bytes(b"x")
+    d = SaveNameDialog("a.xlsx", tmp_path)
+    try:
+        d._on_ok()
+        assert d.chosen is None, "같은 이름인데 묻지 않고 저장했다"
+        assert d.btn_ok.text() == i18n.KO.SAVE_NAME_OVERWRITE
+        d._on_ok()
+        assert d.chosen == "a.xlsx"
+        d2 = SaveNameDialog("a.xlsx", tmp_path)
+        d2._on_ok()
+        d2.edit.setText("b.xlsx")         # 이름을 고치면 확인을 다시 받는다
+        assert d2.btn_ok.text() == i18n.KO.SAVE_NAME_OK
+        d2._on_ok()
+        assert d2.chosen == "b.xlsx"
+        d2.deleteLater()
+    finally:
+        d.deleteLater()
+
+
+def test_default_save_folders_are_the_results_folder():
+    """GL · Overkill · 결과(경로 없음) 저장의 기본 폴더는 결과 폴더 — 마지막 폴더·바탕화면 아님."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2] / "aoi_verification" / "app" / "ui"
+    gl = (root / "widgets" / "gl_viewer_dialog.py").read_text(encoding="utf-8")
+    thr = (root / "widgets" / "threshold_preview_dialog.py").read_text(encoding="utf-8")
+    res = (root / "pages" / "result_page.py").read_text(encoding="utf-8")
+    assert 'last_dir("gl_save")' not in gl
+    assert '"Desktop"' not in thr and 'last_dir("threshold_export")' not in thr
+    assert "paths.results_dir() / filename" in res
