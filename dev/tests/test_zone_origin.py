@@ -610,3 +610,18 @@ def test_notice_and_alert_bars_are_rounded_inner_bars(dlg):
     for bar in (dlg.notice, dlg.alert):
         sheet = bar.styleSheet()
         assert "border-radius: 6px" in sheet and "margin: 4px 12px 0 12px" in sheet, sheet
+
+
+def test_unknown_slot_reads_dash_not_question_mark(styled_qapp, tmp_path):
+    """슬롯 번호를 모르면 '#?' 가 아니라 엑셀과 같은 '—'(SM-E2f)."""
+    from aoi_verification.app.ui.widgets.zone_origin_dialog import ZoneOriginDialog
+    d = ZoneOriginDialog()
+    try:
+        w = B.WaferItems(tmp_path / "W1", (_item(),), slot="")
+        d.set_wafers([tmp_path / "LOT"], {tmp_path / "LOT": [w]})
+        assert d.wafer_label(0) == "— · W1"
+        assert d.wafer_label(99) == "—"
+        assert "?" not in d.wafer_label(0)
+    finally:
+        d.close()
+        d.deleteLater()

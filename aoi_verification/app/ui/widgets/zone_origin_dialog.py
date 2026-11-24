@@ -649,9 +649,13 @@ class ZoneOriginDialog(QDialog):
     def wafer_label(self, n: int) -> str:
         folder = self._folder_of.get(n)
         if folder is None:
-            return "?"
+            return _KO.ZO_NO_SLOT
         w = self._data.get(folder)
-        return _KO.ZO_WAFER_FMT.format(slot=w.slot or "?", name=w.wafer_id or folder.name) if w else folder.name
+        if w is None:
+            return folder.name
+        name = w.wafer_id or folder.name
+        return (_KO.ZO_WAFER_FMT.format(slot=w.slot, name=name) if w.slot
+                else _KO.ZO_WAFER_NO_SLOT_FMT.format(name=name))
 
     def wafer_of(self, n: int) -> Optional[B.WaferItems]:
         return self._data.get(self._folder_of.get(n))
