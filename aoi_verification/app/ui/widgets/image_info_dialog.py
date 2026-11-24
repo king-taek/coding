@@ -59,11 +59,16 @@ from ...gl import loader as gl_loader
 from ...utils import image_io as _io
 from .. import motion, theme
 from ..drop_overlay import drop_clear, drop_feedback
-from ..drop_paths import install_paste
+from ..drop_paths import guess_kinds, install_paste, local_paths
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
 
+_BOX_PAD_H = 10          # 정보 상자 안 좌우 여백
+# 여러 장 넘겨 보기(현택님 2026-11-24 안 A) — 아래 사진 띠.  사진이 수천 장이어도 위젯은 지금 사진
+# 앞뒤 _STRIP_HALF 장씩만 만든다.
+_STRIP_PX = 56
+_STRIP_HALF = 6
 # 미리보기 — 고정 정사각형이 아니라 폭 하한만 두고 세로는 표와 함께 늘어난다.
 _PREVIEW_MIN_W = 300
 _PREVIEW_MAX_W = 460
@@ -171,6 +176,73 @@ class _InfoLoader(QThread):
         except Exception:                   # 빈 표로라도 이어가야 덮개가 걷힌다
             groups = _ScanSheet(self._path) if self._fn is _describe_scan else []
         self.signals.done.emit(self._gen, groups)
+
+
+def list_photos(paths) -> list[Path]:
+    """끌어다 놓은 것 · 고른 것 → 사진 목록.
+
+    폴더는 **바로 안** 사진만(하위 폴더는 보지 않는다) 이름순으로, 사진 파일은 그대로.  같은 파일은
+    한 번만.  NAS 를 읽으므로 워커에서 부른다(테스트는 동기)."""
+    out: list[Path] = []
+    seen: set[str] = set()
+    for raw in paths:
+        p = Path(raw)
+        try:
+            if p.is_dir():
+                names = sorted((e.path for e in os.scandir(p)
+                                if e.is_file() and CONFIG.is_image(e.name)),
+                               key=lambda x: os.path.basename(x).lower())
+            else:
+                names = [str(p)] if CONFIG.is_image(p.name) and p.is_file() else []
+        except OSError:
+            names = []
+        for name in names:
+            key = os.path.normcase(os.path.normpath(name))
+            if key not in seen:
+                seen.add(key)
+                out.append(Path(name))
+    return out
+
+
+class _ListLoader(QThread):
+    """:func:`list_photos` 를 워커에서 — 폴더 목록은 NAS 왕복이라 UI 를 세우지 않는다."""
+
+    class _Signals(QObject):
+        done = pyqtSignal(int, object)                   # (세대, 사진 목록)
+
+    def __init__(self, paths: list, gen: int) -> None:
+        super().__init__()                  # 부모 없음(_LIVE_SCAN_LOADS 주석)
+        self._paths, self._gen = list(paths), gen
+        self.signals = self._Signals()
+
+    def run(self) -> None:      # type: ignore[override]
+        try:
+            got = list_photos(self._paths)
+        except Exception:
+            got = []
+        self.signals.done.emit(self._gen, got)
+
+
+class _ThumbLoader(QThread):
+    """띠 썸네일 캐시 파일을 만든다(원본 읽기는 NAS).  QPixmap 은 메인 스레드가 캐시에서 읽는다."""
+
+    class _Signals(QObject):
+        ready = pyqtSignal(str)
+
+    def __init__(self, paths: list) -> None:
+        super().__init__()
+        self._paths = list(paths)
+        self.signals = self._Signals()
+
+    def run(self) -> None:      # type: ignore[override]
+        for p in self._paths:
+            if self.isInterruptionRequested():
+                return
+            try:
+                _io.get_thumb_path(p)
+            except Exception:
+                continue                    # 못 읽는 사진은 회색 칸으로 남는다
+            self.signals.ready.emit(str(p))
 
 
 def _describe(path: Path) -> list:
@@ -291,6 +363,12 @@ class ImageInfoDialog(QDialog):
         self.setAcceptDrops(True)
         install_paste(self, self._on_paste_paths, self._on_paste_no_path)
         self._path: Path | None = None
+        self._paths: list[Path] = []        # 넘겨 볼 사진들(한 장이면 띠를 숨긴다)
+        self._pos = 0
+        self._list_gen = 0
+        self._thumb_ok: set[str] = set()    # 띠 썸네일 캐시가 준비된 사진
+        self._thumb_job: _ThumbLoader | None = None
+        self._strip_map: dict = {}          # 띠에 보이는 사진 → 칸
         self._groups: list = []
         self._scan_gen = 0
         self._info_gen = 0
@@ -333,12 +411,16 @@ class ImageInfoDialog(QDialog):
         body.addWidget(self._build_sheet(), stretch=1)
         root.addLayout(body, stretch=1)
 
+        root.addWidget(self._build_strip())
         root.addLayout(self._build_actions())
 
         # 파워 유저 경로 — 사진 열기를 손에서 떼지 않고.  ★ Ctrl+C 는 묶지 않는다:
         # 값 라벨이 선택 복사를 지원하므로, 창 단축키로 가로채면 사용자가 고른 수치
         # 대신 시트 전체가 복사돼 버린다.  전체 복사는 버튼이 맡는다.
         QShortcut(QKeySequence.StandardKey.Open, self, self._on_pick)
+        # 여러 장일 때 ← → 로 넘긴다(띠가 숨어 있으면 아무 일도 없다).
+        QShortcut(QKeySequence(Qt.Key.Key_Left), self, lambda: self.step_photo(-1))
+        QShortcut(QKeySequence(Qt.Key.Key_Right), self, lambda: self.step_photo(1))
         self._render()
         # 열자마자 주요 동작에 포커스 — 시트 호스트는 다이얼로그 자신에 포커스를
         # 주므로, 그대로 두면 첫 Tab 이 허비된다.
@@ -419,6 +501,35 @@ class ImageInfoDialog(QDialog):
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         return self._scroll
 
+    def _build_strip(self) -> QWidget:
+        """여러 장 넘겨 보기 띠 — ◀ · 지금 사진 앞뒤 썸네일 · ▶ · i / n.  한 장이면 숨긴다."""
+        bar = QWidget(self)
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        self.photo_prev = NeonButton(i18n.KO.SCAN_DEFECT_PREV, role="ghost")
+        self.photo_next = NeonButton(i18n.KO.SCAN_DEFECT_NEXT, role="ghost")
+        for b, d in ((self.photo_prev, -1), (self.photo_next, 1)):
+            b.setMinimumHeight(_STRIP_PX)
+            b.setMinimumWidth(44)
+            b.setAutoDefault(False)
+            b.clicked.connect(lambda _=False, d=d: self.step_photo(d))
+        lay.addWidget(self.photo_prev)
+        self._strip_tiles = QHBoxLayout()
+        self._strip_tiles.setSpacing(4)
+        lay.addStretch(1)
+        lay.addLayout(self._strip_tiles)
+        lay.addStretch(1)
+        lay.addWidget(self.photo_next)
+        self.photo_pos = QLabel("", bar)
+        self.photo_pos.setProperty("role", "mutedStrong")
+        self.photo_pos.setMinimumWidth(84)
+        self.photo_pos.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        lay.addWidget(self.photo_pos)
+        self.strip_bar = bar
+        bar.setVisible(False)
+        return bar
+
     def _build_actions(self) -> QHBoxLayout:
         bar = QHBoxLayout()
         self.pick_btn = NeonButton(i18n.KO.IMAGE_INFO_PICK, role="primary")
@@ -465,22 +576,28 @@ class ImageInfoDialog(QDialog):
     def _on_pick(self) -> None:
         # QFileDialog 는 시트로 감싸지 않는다 — OS 파일 브라우저를 그대로 쓴다
         # (sheet_host 모듈 docstring 의 명시적 결정).
+        # 여러 장 고를 수 있다(넘겨 보기).  ``open()`` 으로 띄운다 — 정적 ``getOpenFileName`` 의
+        # exec() 는 Windows 에서 UI 스레드를 세운 적이 있다(:mod:`..folder_picker`).
         patterns = " ".join(f"*{e}" for e in CONFIG.image_extensions)
         start = str(self._path.parent) if self._path else ""
-        path, _ = QFileDialog.getOpenFileName(
-            self, i18n.KO.IMAGE_INFO_PICK, start,
-            i18n.KO.IMAGE_INFO_FILE_FILTER_FMT.format(patterns=patterns))
-        if path:
-            self.show_image(Path(path))
+        dlg = QFileDialog(self, i18n.KO.IMAGE_INFO_PICK, start,
+                          i18n.KO.IMAGE_INFO_FILE_FILTER_FMT.format(patterns=patterns))
+        dlg.setFileMode(QFileDialog.FileMode.ExistingFiles)
+        dlg.filesSelected.connect(self.open_many)
+        dlg.finished.connect(dlg.deleteLater)
+        self._file_dlg = dlg
+        dlg.open()
 
     def hideEvent(self, event):         # noqa: N802
         drop_clear(self)                # 끌던 중에 숨겨져도 표시가 남지 않게
         super().hideEvent(event)
 
     def dragEnterEvent(self, event):        # noqa: N802
-        ok = self._dropped_image(event) is not None
+        # 이름만 본다(끄는 동안 디스크를 읽지 않는다) — 사진 파일이나 폴더면 받는다.
+        kinds = guess_kinds(self._dropped_paths(event))
+        ok = bool(kinds & {"image", "folder"})
         drop_feedback(self, event, None, i18n.KO.DROP_PILL_OPEN_IMAGE if ok
-                      else i18n.KO.DROP_PILL_ONLY_IMAGE, ok)
+                      else i18n.KO.DROP_PILL_ONLY_FOLDER_PHOTO, ok)
 
     def dragMoveEvent(self, event):         # noqa: N802
         self.dragEnterEvent(event)
@@ -491,23 +608,19 @@ class ImageInfoDialog(QDialog):
 
     def dropEvent(self, event):             # noqa: N802
         drop_clear(self)
-        path = self._dropped_image(event)
-        if path is None:
+        paths = self._dropped_paths(event)
+        if not guess_kinds(paths) & {"image", "folder"}:
             event.ignore()
             return
         event.acceptProposedAction()
-        self.show_image(path)
-        self._style_preview()               # 사진이 들어왔으니 점선 → 실선
+        self.open_many(paths)
 
     def _on_paste_paths(self, paths: list[str]) -> None:
-        """Ctrl+V — 처음 만나는 사진 경로를 연다.  디스크 확인은 여기(붙여넣기)에서만."""
-        first = next((p for p in paths if CONFIG.is_image(p)), None)
-        if first is None:
+        """Ctrl+V — 붙여 넣은 사진 · 폴더를 모두 연다(여러 장이면 넘겨 보기)."""
+        if not guess_kinds(paths) & {"image", "folder"}:
             self._flash(i18n.KO.DROP_WRONG_KIND_IMAGE)
-        elif not os.path.isfile(first):
-            self._flash(i18n.KO.DROP_NOT_FOUND)
         else:
-            self.show_image(Path(first))
+            self.open_many(paths)
 
     def _on_paste_no_path(self, has_image: bool) -> None:
         self._flash(i18n.KO.DROP_NO_PATH_IMAGE if has_image
@@ -526,16 +639,10 @@ class ImageInfoDialog(QDialog):
             f" border-radius: {theme.PROFILE.radius_sm}px; color: {theme.MUTE};")
 
     @staticmethod
-    def _dropped_image(event) -> Path | None:
-        """드롭된 것 중 **첫 번째 사진 파일** 경로.  사진이 없으면 None."""
+    def _dropped_paths(event) -> list[str]:
+        """드롭된 로컬 경로들(디스크를 보지 않는다)."""
         data = event.mimeData()
-        if not data.hasUrls():
-            return None
-        for url in data.urls():
-            local = url.toLocalFile()
-            if local and CONFIG.is_image(local):
-                return Path(local)
-        return None
+        return local_paths(data) if data is not None and data.hasUrls() else []
 
     # ------------------------------------------------------------------
     def _on_open_gl(self) -> None:
@@ -544,7 +651,119 @@ class ImageInfoDialog(QDialog):
         from .gl_viewer_dialog import GlViewerDialog
         sheets.run(GlViewerDialog(self, image_path=str(self._path)), full_bleed=True)
 
+    def open_many(self, paths) -> None:
+        """사진 · 폴더 여러 개 → 넘겨 볼 목록을 만들고 첫 사진을 연다(현택님 2026-11-24 안 A).
+
+        폴더 목록은 NAS 를 읽으므로 워커에서 만들고 그동안 로딩 표시를 띄운다."""
+        paths = [str(p) for p in paths]
+        if not paths:
+            return
+        self._list_gen += 1
+        if not _async_info():
+            self._on_listed(self._list_gen, list_photos(paths))
+            return
+        self._loading.show_overlay(i18n.KO.IMAGE_INFO_LISTING)
+        self._loading.set_progress(0, 0, i18n.KO.IMAGE_INFO_LISTING)   # 양을 모른다 — busy
+        ld = _ListLoader(paths, self._list_gen)
+        ld.signals.done.connect(self._on_listed)
+        _LIVE_SCAN_LOADS.add(ld)
+        ld.finished.connect(lambda: _LIVE_SCAN_LOADS.discard(ld))
+        ld.start()
+
+    def _on_listed(self, gen: int, photos) -> None:
+        if gen != self._list_gen:
+            return
+        if not photos:
+            self._loading.hide_overlay()
+            self._flash(i18n.KO.IMAGE_INFO_NO_PHOTOS)
+            return
+        self._paths, self._pos = list(photos), 0
+        self._load_photo(self._paths[0])
+        self._style_preview()               # 사진이 들어왔으니 점선 → 실선
+        self._render_strip()
+
+    def step_photo(self, d: int) -> None:
+        """여러 장일 때 앞 · 뒤 사진으로(끝에서 멈춘다)."""
+        self.go_photo(self._pos + d)
+
+    def go_photo(self, i: int) -> None:
+        if len(self._paths) < 2 or not 0 <= i < len(self._paths) or i == self._pos:
+            return
+        self._pos = i
+        self._load_photo(self._paths[i])
+        self._render_strip()
+
+    def _render_strip(self) -> None:
+        """띠를 지금 사진 앞뒤 :data:`_STRIP_HALF` 장으로 다시 만든다(위젯 수가 사진 수와 무관)."""
+        n = len(self._paths)
+        self.strip_bar.setVisible(n > 1)
+        while self._strip_tiles.count():
+            w = self._strip_tiles.takeAt(0).widget()
+            if w is not None:
+                w.hide()                    # 지워질 때까지 띠 왼쪽 위에 겹쳐 보이지 않게
+                w.deleteLater()
+        self._strip_map = {}
+        if n < 2:
+            return
+        self.photo_pos.setText(i18n.KO.IMAGE_INFO_PHOTO_POS_FMT.format(i=self._pos + 1, n=n))
+        self.photo_prev.setEnabled(self._pos > 0)
+        self.photo_next.setEnabled(self._pos < n - 1)
+        lo = max(0, self._pos - _STRIP_HALF)
+        hi = min(n, self._pos + _STRIP_HALF + 1)
+        need = []
+        for i in range(lo, hi):
+            p = self._paths[i]
+            tile = _ClickLabel(self.strip_bar)
+            tile.setFixedSize(_STRIP_PX, _STRIP_PX)
+            tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            tile.setCursor(Qt.CursorShape.PointingHandCursor)
+            tile.setToolTip(p.name)
+            tile.setProperty("role", "stripTile")
+            tile.setProperty("current", "true" if i == self._pos else "false")
+            tile.clicked.connect(lambda i=i: self.go_photo(i))
+            self._strip_tiles.addWidget(tile)
+            self._strip_map[str(p)] = tile
+            if str(p) in self._thumb_ok:
+                self._set_strip_pix(str(p))
+            else:
+                need.append(p)
+        if need:
+            self._want_thumbs(need)
+
+    def _want_thumbs(self, paths: list) -> None:
+        """띠 썸네일 캐시를 워커에서 만든다 — 이전 요청이 돌고 있으면 멈추고 지금 띠 것만."""
+        if not _async_info():
+            return                          # 헤드리스 테스트는 회색 칸 그대로
+        if self._thumb_job is not None:
+            self._thumb_job.requestInterruption()
+        job = _ThumbLoader(paths)
+        job.signals.ready.connect(self._on_thumb_ready)
+        _LIVE_SCAN_LOADS.add(job)
+        job.finished.connect(lambda: _LIVE_SCAN_LOADS.discard(job))
+        self._thumb_job = job
+        job.start()
+
+    def _on_thumb_ready(self, path: str) -> None:
+        self._thumb_ok.add(path)
+        self._set_strip_pix(path)
+
+    def _set_strip_pix(self, path: str) -> None:
+        tile = self._strip_map.get(path)
+        if tile is None:
+            return
+        try:
+            tile.setPixmap(_io.load_thumb_qpixmap(Path(path), _STRIP_PX - 4))
+        except RuntimeError:
+            pass                            # 띠를 다시 만들며 지운 칸
+
     def show_image(self, path: Path) -> None:
+        """사진 한 장을 연다 — 넘겨 보기 목록은 이 한 장으로 바뀐다."""
+        self._list_gen += 1                 # 읽던 폴더 목록이 늦게 와도 버린다
+        self._paths, self._pos = [Path(path)], 0
+        self._load_photo(Path(path))
+        self._render_strip()
+
+    def _load_photo(self, path: Path) -> None:
         """사진을 조회해 미리보기와 계측 표를 갱신한다.
 
         정보 읽기·미리보기·Scan 은 전부 NAS 를 읽어 느리므로 로딩 표시를 띄우고 워커에서
@@ -873,40 +1092,38 @@ class ImageInfoDialog(QDialog):
         return notice
 
     def _group_block(self, parent: QWidget, group, label_w: int) -> QWidget:
-        """타이틀블록(그룹명 + 컬럼 머리) + 하이라인 눈금 행들."""
+        """묶음 제목 + 밝은 상자 안 행들(현택님 2026-11-24 안 B '묶음마다 상자').
+
+        상자 안 구분선은 예전처럼 **묶음(cluster)이 바뀌는 곳에만** 긋고, 마지막 행은 상자 테두리와
+        겹치지 않게 긋지 않는다."""
         block = QWidget(parent)
         lay = QVBoxLayout(block)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
+        lay.setSpacing(4)
 
         lay.addWidget(self._group_header(block, group.title, label_w))
+        box = QFrame(block)
+        box.setProperty("role", "infoBox")
+        inner = QVBoxLayout(box)
+        inner.setContentsMargins(_BOX_PAD_H, 2, _BOX_PAD_H, 2)
+        inner.setSpacing(0)
         rows = group.rows
         for i, row in enumerate(rows):
-            frame = self._row_widget(block, row, label_w)
+            frame = self._row_widget(box, row, label_w)
+            last = i + 1 == len(rows)
             # 다음 행이 같은 묶음이면 아래 눈금을 감춘다 — 묶음 사이에만 선.
-            if i + 1 < len(rows) and row.cluster \
-                    and rows[i + 1].cluster == row.cluster:
+            if last or (row.cluster and rows[i + 1].cluster == row.cluster):
                 frame.setProperty("rule", "none")
-            lay.addWidget(frame)
+            inner.addWidget(frame)
+        lay.addWidget(box)
         return block
 
     @staticmethod
     def _group_header(parent: QWidget, title: str, label_w: int) -> QWidget:
-        """타이틀블록 — 컬럼 머리 "값"이 (오른쪽 끝이 아니라) 값 열 위에 선다."""
-        header = QFrame(parent)
-        header.setProperty("role", "listHeader")
-        grid = QGridLayout(header)
-        grid.setContentsMargins(0, 0, 0, 6)
-        grid.setHorizontalSpacing(theme.PROFILE.card_pad)
-        _shape_columns(grid, label_w)
-
-        name = QLabel(title, header)
-        name.setProperty("role", "colHead")
-        grid.addWidget(name, 0, 0)
-        unit = QLabel(i18n.KO.IMAGE_INFO_COL_VALUE, header)
-        unit.setProperty("role", "colHead")
-        grid.addWidget(unit, 0, 1)
-        return header
+        """묶음 제목 — 상자 바로 위.  '값' 열 머리는 두지 않는다(묶음마다 같은 글자가 되풀이됐다)."""
+        name = QLabel(title, parent)
+        name.setProperty("role", "infoGroupTitle")
+        return name
 
     def _row_widget(self, parent: QWidget, row, label_w: int) -> QWidget:
         """한 행 — 아래 눈금이 항목을 가른다(면 없음, 제도 시트)."""

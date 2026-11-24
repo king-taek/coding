@@ -423,6 +423,28 @@ QFrame[role="row"][rule="none"] {
     border-bottom: 1px solid $row_border;
 }
 
+/* Defect 정보 조회 — 묶음마다 밝은 상자(현택님 2026-11-24 안 B).  제목은 상자 위 굵은 글씨. */
+QFrame[role="infoBox"] {
+    background-color: $elev;
+    border: 1px solid $line2;
+    border-radius: $radius_sm;
+}
+QLabel[role="infoGroupTitle"] {
+    color: $ink;
+    font-weight: 700;
+    padding-left: 2px;
+}
+
+/* Defect 정보 조회 — 여러 장 넘겨 보기 띠의 썸네일.  지금 사진은 강조색 테두리. */
+QLabel[role="stripTile"] {
+    background-color: $panel;
+    border: 1px solid $line2;
+    border-radius: $radius_sm;
+}
+QLabel[role="stripTile"][current="true"] {
+    border: 2px solid $accent;
+}
+
 /* 점수 컬럼 눈금 — 이미지 영역과 우측 거리 컬럼을 가르는 1px 눈금.
    score_rule = ink 반투명이라 시트 위에서 또렷. */
 QFrame[role="vrule"] {
