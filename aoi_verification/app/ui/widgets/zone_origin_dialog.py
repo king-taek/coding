@@ -757,7 +757,6 @@ class ZoneOriginDialog(QDialog):
             hint.setContentsMargins(8, 0, 8, 0)
             il.addWidget(hint)
         else:
-            self._render_coord(inner, il)
             for k, title in B.FACETS:
                 if k == "wafer":
                     continue                        # LOT 아래에 펼쳐 그린다
@@ -783,9 +782,8 @@ class ZoneOriginDialog(QDialog):
                         wrap.setContentsMargins(30, 0, 8, 2)
                         wrap.addWidget(cb)
                         il.addLayout(wrap)
-            applied = sum(1 for key, _t in PARAMS if getattr(self._flags, key))
-            text = _KO.ZO_PARAM_CLOSE if self._params_open else _KO.ZO_PARAM_OPEN
-            self.param_btn = NeonButton(text + (f"  ·  {applied}" if applied and not self._params_open else ""),
+            self._render_coord(inner, il)
+            self.param_btn = NeonButton(_KO.ZO_PARAM_CLOSE if self._params_open else _KO.ZO_PARAM_OPEN,
                                         role="textAction", parent=inner)
             self.param_btn.clicked.connect(self.toggle_params)
             il.addSpacing(8)
@@ -814,32 +812,30 @@ class ZoneOriginDialog(QDialog):
         bar.setValue(pos)
 
     def _render_coord(self, inner: QWidget, il: QVBoxLayout) -> None:
-        """맨 위 '좌표 (col, row)' — 장비 화면 번호를 넣으면 그 die 의 Defect 만.  빈칸 = 안 거름(음수도 된다)."""
+        """LOT 목록 아래 '좌표' — 장비 화면 번호를 넣으면 그 die 의 Defect 만.  빈칸 = 안 거름(음수도 된다).
+        아래 파라미터 칸과 같은 모양(이름 왼쪽 · 입력칸 오른쪽)으로 한 줄씩."""
         head = QLabel(_KO.ZO_COORD_HEAD, inner)
         head.setProperty("role", "ovGroupHead")
-        head.setContentsMargins(8, 0, 0, 4)
+        head.setContentsMargins(8, 10, 0, 4)
         il.addWidget(head)
-        line = QHBoxLayout()
-        line.setContentsMargins(8, 1, 8, 4)
-        line.setSpacing(6)
         self.coord_edits: dict = {}
-        for i, (key, text) in enumerate((("col", _KO.ZO_COORD_COL), ("row", _KO.ZO_COORD_ROW))):
-            if i:
-                line.addSpacing(8)
+        for key, text in (("col", _KO.ZO_COORD_COL), ("row", _KO.ZO_COORD_ROW)):
+            line = QHBoxLayout()
+            line.setContentsMargins(8, 1, 8, 1)
             lab = QLabel(text, inner)
             lab.setProperty("role", "ovRowName")
-            line.addWidget(lab)
+            line.addWidget(lab, 1)
             ed = QLineEdit(inner)
             ed.setProperty("role", "zoParam")
-            ed.setMinimumWidth(40)
+            ed.setFixedWidth(76)
             ed.setAlignment(Qt.AlignmentFlag.AlignRight)
             ed.setValidator(QIntValidator(-9999, 99999, ed))
             v = getattr(self._flags, key)
             ed.setText("" if v is None else str(v))
             ed.editingFinished.connect(lambda key=key, ed=ed: self.set_flag(key, _int_or_none(ed.text())))
-            line.addWidget(ed, 1)
+            line.addWidget(ed)
+            il.addLayout(line)
             self.coord_edits[key] = ed
-        il.addLayout(line)
         self.coord_warn = None
         if self._flags.col is not None or self._flags.row is not None:
             n = sum(1 for d in self._wafer_folders() if (w := self._data.get(d)) is not None and w.number_warn)
@@ -852,11 +848,11 @@ class ZoneOriginDialog(QDialog):
                 il.addWidget(self.coord_warn)
 
     def _render_lot(self, inner: QWidget, il: QVBoxLayout, lot: str, counts: dict) -> None:
-        """LOT 한 줄(이름 · 웨이퍼 수 · 끝의 ▾/▸) + 펼치면 그 LOT 웨이퍼 줄들(왼쪽 가는 선 안에 들여 씀)."""
+        """LOT 한 줄(이름 · 수 · 끝의 ▾/▸) + 펼치면 그 LOT 웨이퍼 줄들(왼쪽 가는 선 안에 들여 씀)."""
         wafers = [wn for wn in self._order.get("wafer", [])
                   if (w := self.wafer_of(wn)) is not None and w.lot == lot]
         opened = self.lot_open(lot)
-        row = _FacetRow(_KO.ZO_LOT_FMT.format(lot=lot, n=len(wafers)), counts["lot"].get(lot, 0),
+        row = _FacetRow(lot, counts["lot"].get(lot, 0),
                         lot in self._sel["lot"], "", inner, disc=opened)
         row.clicked.connect(lambda lot=lot: self.toggle("lot", lot))
         row.disc_clicked.connect(lambda lot=lot: self.toggle_lot(lot))
