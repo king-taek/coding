@@ -52,6 +52,7 @@ _KO = i18n.KO
 
 LOAD_WORKERS = 6            # 웨이퍼를 동시에 읽는 수(Overkill 튜닝과 같다 — NAS 왕복 지연을 겹친다)
 THUMB_WORKERS = 3
+SCAN_WAIT_MS = 150          # 고른 Defect 에 이만큼 머물면 Scan 을 찾는다(화살표로 지나가는 것은 건너뜀)
 PAGE_TILES = 60
 TILE_PX = 118
 TILE_GAP = 2
@@ -147,7 +148,6 @@ class _ScanFind(QThread):
 
     class _Signals(QObject):
         done = pyqtSignal(object, object)
-        crop = pyqtSignal(object)                   # 크게보기 뷰어용(그림만)
 
     def __init__(self, key: tuple, folder: Path, xy: tuple) -> None:
         super().__init__()
@@ -163,7 +163,6 @@ class _ScanFind(QThread):
         except Exception:       # noqa: BLE001 — 못 찾으면 '없음'
             _LOG.exception("어느 Zone에서 왔니? Scan 찾기 실패")
         self.signals.done.emit(self._item[0], got)
-        self.signals.crop.emit(got)
 
 
 class _FacetRow(QFrame):
@@ -200,7 +199,7 @@ class _FacetRow(QFrame):
         self.disc = None
         if disc is not None:                          # LOT 줄 — 맨 끝 ▾/▸ 로 웨이퍼 목록을 펴고 접는다
             lay.setContentsMargins(8, 4, 0, 4)
-            self.disc = QPushButton("▾" if disc else "▸", self)
+            self.disc = _nf(QPushButton("▾" if disc else "▸", self))
             self.disc.setProperty("role", "ovRowDisc")
             self.disc.setFixedSize(22, 24)
             self.disc.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -276,6 +275,12 @@ class ZoneOriginDialog(QDialog):
         self._thumb_pool = ThreadPoolExecutor(max_workers=THUMB_WORKERS, thread_name_prefix="zone-origin-thumb")
         self._wanted: set = set()
         self._scan_threads: dict = {}       # 찾는 중인 Scan — 같은 Defect 를 두 번 찾지 않는다
+        self._scan_viewer = None            # (키, 크게보기 뷰어) — 찾는 중에 연 뷰어에 결과를 넘긴다
+        # 화살표를 누르고 있으면 지나가는 Defect 마다 Scan 을 찾으러 갔다(NAS 읽기 수백 개) — 멈춘 Defect 만 찾는다.
+        self._scan_timer = QTimer(self)
+        self._scan_timer.setSingleShot(True)
+        self._scan_timer.setInterval(SCAN_WAIT_MS)
+        self._scan_timer.timeout.connect(self._scan_current)
         self._pending: set = set()
         self._picker = FolderPicker(self)
         self._picker.picked.connect(lambda p: p and self.add_folders([Path(p)]))
@@ -300,11 +305,11 @@ class ZoneOriginDialog(QDialog):
         self._chip_lay = QHBoxLayout()
         self._chip_lay.setSpacing(6)
         hl.addLayout(self._chip_lay)
-        self.pick_btn = NeonButton(_KO.ZO_ADD_FOLDER, role="ghost")
+        self.pick_btn = _nf(NeonButton(_KO.ZO_ADD_FOLDER, role="ghost"))
         self.pick_btn.setToolTip(_KO.ZO_ADD_FOLDER_TIP)
         self.pick_btn.clicked.connect(self._on_pick)
         hl.addWidget(self.pick_btn)
-        self.excel_btn = NeonButton(_KO.ZO_BTN_EXCEL, role="ghost")
+        self.excel_btn = _nf(NeonButton(_KO.ZO_BTN_EXCEL, role="ghost"))
         self.excel_btn.setToolTip(_KO.ZO_BTN_EXCEL_TIP)
         self.excel_btn.clicked.connect(self.save_excel)
         hl.addWidget(self.excel_btn)
@@ -322,7 +327,7 @@ class ZoneOriginDialog(QDialog):
         self.notice_label = QLabel("", self.notice)
         self.notice_label.setStyleSheet("font-weight: 600; background: transparent;")
         nl.addWidget(self.notice_label, 1)
-        self.undo_btn = NeonButton(_KO.OVERKILL_UNDO, role="ghost")
+        self.undo_btn = _nf(NeonButton(_KO.OVERKILL_UNDO, role="ghost"))
         self.undo_btn.clicked.connect(self._undo)
         nl.addWidget(self.undo_btn)
         self.notice.setVisible(False)
@@ -379,7 +384,7 @@ class ZoneOriginDialog(QDialog):
         bl.addWidget(sort_cap)
         self.sort_btns: dict = {}
         for key, name, _dec in SORTS:
-            b = NeonButton(name, role="ovView")
+            b = _nf(NeonButton(name, role="ovView"))
             b.setProperty("sort", "true")
             b.setCheckable(True)
             b.clicked.connect(lambda _c=False, k=key: self.set_sort(k))
@@ -388,7 +393,7 @@ class ZoneOriginDialog(QDialog):
         bl.addStretch(1)
         self.view_btns: dict = {}
         for key, name in (("tiles", _KO.ZO_VIEW_TILES), ("table", _KO.ZO_VIEW_TABLE)):
-            b = NeonButton(name, role="ovView")
+            b = _nf(NeonButton(name, role="ovView"))
             b.setCheckable(True)
             b.clicked.connect(lambda _c=False, k=key: self.set_view(k))
             bl.addWidget(b)
@@ -471,9 +476,9 @@ class ZoneOriginDialog(QDialog):
         dl.addWidget(self.file_label)
         acts = QHBoxLayout()
         acts.setSpacing(6)
-        self.enlarge_btn = NeonButton(_KO.ZO_BTN_ENLARGE, role="ghost")
+        self.enlarge_btn = _nf(NeonButton(_KO.ZO_BTN_ENLARGE, role="ghost"))
         self.enlarge_btn.clicked.connect(self.enlarge_open)
-        self.info_btn = NeonButton(_KO.ZO_BTN_INFO, role="ghost")
+        self.info_btn = _nf(NeonButton(_KO.ZO_BTN_INFO, role="ghost"))
         self.info_btn.clicked.connect(self.open_info)
         acts.addWidget(self.enlarge_btn)
         acts.addWidget(self.info_btn)
@@ -518,7 +523,11 @@ class ZoneOriginDialog(QDialog):
         self.notice.setVisible(False)
         if folder not in self._roots:
             self._roots.insert(min(i, len(self._roots)), folder)
-            self._after_roots()
+            # 읽는 중에 뺐다 되돌리면 반만 읽힌 채일 수 있다 — 빠진 웨이퍼가 있으면 마저 읽는다.
+            if folder not in self._expand or any(d not in self._data for d in self._expand[folder]):
+                self._start_load()
+            else:
+                self._after_roots()
 
     def _after_roots(self) -> None:
         """폴더 목록이 바뀌었다(읽을 것 없음) — 빠진 웨이퍼의 고름을 풀고 다시 그린다."""
@@ -638,7 +647,7 @@ class ZoneOriginDialog(QDialog):
         """LOT 안 웨이퍼 순서 — 슬롯 번호 순(모르면 뒤), 같으면 읽은 순."""
         w = self.wafer_of(n)
         slot = w.slot if w is not None else ""
-        return (int(slot) if slot.isdigit() else 1 << 30, n)
+        return (int(slot) if slot.isdecimal() else 1 << 30, n)
 
     def lot_open(self, lot: str) -> bool:
         return self._lot_open.get(lot, len(self._order.get("lot", [])) <= 1)
@@ -722,7 +731,7 @@ class ZoneOriginDialog(QDialog):
             cnt = QLabel(_KO.ZO_CHIP_COUNT_FMT.format(w=len(wafers), n=f"{n:,}"), chip)
             cnt.setProperty("role", "ovRowCount")
             lay.addWidget(cnt)
-            x = NeonButton("✕", role="ovRowX")
+            x = _nf(NeonButton("✕", role="ovRowX"))
             x.setFixedSize(24, 24)
             x.setToolTip(_KO.ZO_CHIP_REMOVE_TIP)
             x.clicked.connect(lambda _c=False, f=r: self.remove_folder(f))
@@ -808,8 +817,8 @@ class ZoneOriginDialog(QDialog):
                         wrap.addWidget(cb)
                         il.addLayout(wrap)
             self._render_coord(inner, il)
-            self.param_btn = NeonButton(_KO.ZO_PARAM_CLOSE if self._params_open else _KO.ZO_PARAM_OPEN,
-                                        role="textAction", parent=inner)
+            self.param_btn = _nf(NeonButton(_KO.ZO_PARAM_CLOSE if self._params_open else _KO.ZO_PARAM_OPEN,
+                                        role="textAction", parent=inner))
             self.param_btn.clicked.connect(self.toggle_params)
             il.addSpacing(8)
             il.addWidget(self.param_btn, 0, Qt.AlignmentFlag.AlignLeft)
@@ -827,7 +836,7 @@ class ZoneOriginDialog(QDialog):
                 ed.setPlaceholderText("0")
                 ed.setValidator(QDoubleValidator(0.0, 1e9, 2, ed))
                 v = getattr(self._flags, key)
-                ed.setText(f"{v:g}" if v else "")
+                ed.setText(_num_text(v) if v else "")
                 ed.editingFinished.connect(lambda key=key, ed=ed: self._edit_done(key, _float(ed.text())))
                 row.addWidget(ed)
                 il.addLayout(row)
@@ -929,15 +938,15 @@ class ZoneOriginDialog(QDialog):
         for key, name in (("min_area", "Area"), ("min_width", "Width"), ("min_length", "Length"),
                           ("min_contrast", "Contrast")):
             if getattr(f, key):
-                chips.append((f"{name} ≥ {getattr(f, key):g}", lambda key=key: self.set_flag(key, 0.0)))
+                chips.append((f"{name} ≥ {_num_text(getattr(f, key))}", lambda key=key: self.set_flag(key, 0.0)))
         for text, fn in chips:
-            b = NeonButton(f"{text}  ✕", role="ovView")
+            b = _nf(NeonButton(f"{text}  ✕", role="ovView"))
             b.setCheckable(True)
             b.setChecked(True)
             b.clicked.connect(lambda _c=False, fn=fn: fn())
             self._sel_lay.addWidget(b)
         if chips:
-            c = NeonButton(_KO.ZO_CLEAR, role="textAction")
+            c = _nf(NeonButton(_KO.ZO_CLEAR, role="textAction"))
             c.clicked.connect(self.clear_all)
             self._sel_lay.addWidget(c)
         self._sel_lay.addStretch(1)
@@ -1035,7 +1044,7 @@ class ZoneOriginDialog(QDialog):
                 tile.set_caption(fmt_num(getattr(it, self._sort[0]), dec.get(self._sort[0], 1)))
             tile.set_open(self._open == k)
             tile.clicked.connect(lambda k=k: self.open_item(k))
-            tile.enlarge.connect(lambda k=k: (self.open_item(k), self.enlarge_open()))
+            tile.enlarge.connect(lambda k=k: (self.open_item(k), call_later(self, 0, self.enlarge_open)))
             rl.insertWidget(rl.count() - 1, tile)
             self._tiles[k] = tile
             self._tile_rows[-1].append(k)
@@ -1045,8 +1054,8 @@ class ZoneOriginDialog(QDialog):
         """격자 끝 — 남은 게 있으면 [더 보기] 와 늘어나는 빈칸.  :meth:`more` 가 떼고 다시 붙인다."""
         n0 = self.grid.count()
         if len(self._passed) > self._shown:
-            more = NeonButton(_KO.ZO_MORE_FMT.format(n=f"{min(PAGE_TILES, len(self._passed) - self._shown):,}"),
-                              role="ghost")
+            more = _nf(NeonButton(_KO.ZO_MORE_FMT.format(n=f"{min(PAGE_TILES, len(self._passed) - self._shown):,}"),
+                              role="ghost"))
             more.clicked.connect(self.more)
             self.grid.addSpacing(10)
             self.grid.addWidget(more, 0, Qt.AlignmentFlag.AlignLeft)
@@ -1099,6 +1108,8 @@ class ZoneOriginDialog(QDialog):
         hh.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         if sel_row >= 0:
             t.selectRow(sel_row)
+        else:
+            t.clearSelection()          # 고른 Defect 가 표 밖(2천 줄 뒤)이면 옛 줄을 골라 둔 채 두지 않는다
         t.blockSignals(False)
         over = len(self._passed) - len(rows)
         self.table_note.setText(_KO.ZO_TABLE_CAP_FMT.format(n=f"{TABLE_MAX:,}") if over > 0 else "")
@@ -1179,7 +1190,14 @@ class ZoneOriginDialog(QDialog):
                     DETAIL_PIC, DETAIL_PIC, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
             return
         self.scan_pic.setText(_KO.ZO_DETAIL_SCAN_WAIT)
-        self._scan_thread(k, w.folder, (it.x, it.y))
+        if k not in self._scan_threads:
+            self._scan_timer.start()
+
+    def _scan_current(self) -> None:
+        it = self.current()
+        w = self._data.get(self._folder_of.get(it.wafer)) if it is not None else None
+        if w is not None and w.has_scan and it.kind != B.KIND_HEIGHT and item_key(it) not in self._scans:
+            self._scan_thread(item_key(it), w.folder, (it.x, it.y))
 
     def _scan_thread(self, k: tuple, folder: Path, xy: tuple) -> "_ScanFind":
         """이 Defect 의 Scan 찾기 — 이미 찾는 중이면 그 스레드를 돌려준다(목록을 오가거나 크게보기를 눌러도 한 번만)."""
@@ -1194,6 +1212,8 @@ class ZoneOriginDialog(QDialog):
     def _on_scan(self, k: tuple, crop) -> None:
         self._scan_threads.pop(k, None)
         self._scans[k] = crop
+        if self._scan_viewer is not None and self._scan_viewer[0] == k:
+            self._scan_viewer[1].set_scan_crop(crop)
         if k == self._open:
             it = self.current()
             if it is not None:
@@ -1211,9 +1231,10 @@ class ZoneOriginDialog(QDialog):
     def _thumb_job(self, path: Path, size: int, kind: str) -> None:
         """워커 스레드 — QImage 까지만(QPixmap 은 GUI 스레드에서)."""
         key = (str(path), size, kind)
-        sent = False
+        sent = skipped = False
         try:
             if key not in self._wanted:
+                skipped = True
                 return
             # 목록 썸네일은 칸(118px)만 채우면 된다 — Wafer map 툴팁용 저화질(120px · Q60) 캐시를 쓴다(현택님 2026-11-24).
             tp = image_io.get_mid_path(path) if kind == "mid" else image_io.get_map_thumb_path(path)
@@ -1228,6 +1249,9 @@ class ZoneOriginDialog(QDialog):
         finally:
             if not sent:
                 self._pending.discard(key)
+                # 건너뛴 사이 새 그리기가 다시 원했으면(그때는 '이미 하는 중' 이라 안 맡겼다) 여기서 다시 맡긴다.
+                if skipped and key in self._wanted:
+                    self._want(path, size, kind)
 
     def _on_thumb(self, path, size: int, kind: str, img) -> None:
         self._pending.discard((str(path), size, kind))
@@ -1395,8 +1419,12 @@ class ZoneOriginDialog(QDialog):
             if k in self._scans:
                 viewer.set_scan_crop(self._scans[k])
             else:
-                self._scan_thread(k, w.folder, (it.x, it.y)).signals.crop.connect(viewer.set_scan_crop)
-        sheets.run(viewer, full_bleed=True)
+                self._scan_viewer = (k, viewer)     # 결과는 _on_scan 이 넘긴다(이미 끝난 스레드의 신호를 놓치지 않게)
+                self._scan_thread(k, w.folder, (it.x, it.y))
+        try:
+            sheets.run(viewer, full_bleed=True)
+        finally:
+            self._scan_viewer = None
         viewer.deleteLater()            # 닫힌 뷰어가 이 창 아래 쌓이지 않게(sheets.run 은 닫힐 때까지 기다린다)
 
     def _enlarge_scan(self) -> None:
@@ -1418,21 +1446,24 @@ class ZoneOriginDialog(QDialog):
 
     def excel_picks(self) -> tuple:
         """지금 고른 Defect 중 사진 있는 것 → ``({slot명: [사진]}, {slot명: 카세트 슬롯})`` — Defect 추출과 같은 입력."""
+        by_folder: dict = {}
+        for it in self._passed:
+            if it.photo is not None:
+                by_folder.setdefault(self._folder_of[it.wafer], []).append(it.photo)
+        # 이름은 폴더 순서로 붙인다 — 화면 정렬을 바꿔도 같은 웨이퍼가 같은 이름이 되게.
+        live = self._wafer_folders()
+        order = [f for f in live if f in by_folder] + [f for f in by_folder if f not in live]
         picked: dict = {}
         numbers: dict = {}
-        names: dict = {}
-        for it in self._passed:
-            if it.photo is None:
-                continue
-            folder = self._folder_of[it.wafer]
-            name = names.get(folder)
-            if name is None:
-                name = folder.name if folder.name not in names.values() else f"{folder.parent.name}/{folder.name}"
-                names[folder] = name
-                w = self._data.get(folder)
-                if w is not None and w.slot:
-                    numbers[name] = w.slot
-            picked.setdefault(name, []).append(it.photo)
+        for folder in order:
+            name = folder.name if folder.name not in picked else f"{folder.parent.name}/{folder.name}"
+            base, k = name, 2
+            while name in picked:        # 부모 이름까지 같으면 번호를 붙인다 — 한 slot 에 섞이지 않게
+                name, k = f"{base} ({k})", k + 1
+            picked[name] = by_folder[folder]
+            w = self._data.get(folder)
+            if w is not None and w.slot:
+                numbers[name] = w.slot
         return picked, numbers
 
     def save_excel(self) -> None:
@@ -1464,10 +1495,13 @@ class ZoneOriginDialog(QDialog):
                                     map_renderer=render_map_png, recipe_layout=choice)
         self._exporter = exporter
         self._loading.show_overlay(_KO.LOAD_EXPORT)
-        exporter.signals.progress.connect(lambda d, t, msg: self._loading.set_progress(d, t, msg or _KO.LOAD_EXPORT))
+        exporter.signals.progress.connect(self._on_excel_progress)
         exporter.signals.done.connect(self._on_excel_done)
         exporter.signals.failed.connect(self._on_excel_failed)
         exporter.start()
+
+    def _on_excel_progress(self, done: int, total: int, msg: str) -> None:
+        self._loading.set_progress(done, total, msg or _KO.LOAD_EXPORT)
 
     def _on_excel_done(self, path: str) -> None:
         if not self._overlay_on:        # 저장 중에 폴더를 더 넣어 읽기 막이 떠 있으면 그 막은 읽기가 끝날 때 걷는다
@@ -1562,6 +1596,17 @@ def _int_or_none(text: str) -> Optional[int]:
         return int(text.strip())
     except ValueError:
         return None
+
+
+def _nf(b):
+    """버튼이 키보드 포커스를 가져가지 않게 — 누른 뒤 화살표가 버튼 사이를 옮겨 다녀 사진이 안 움직였다(Overkill 튜닝과 같게)."""
+    b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    return b
+
+
+def _num_text(v: float) -> str:
+    """하한 칸 · 칩 글자 — 칸이 받는 소수 2자리까지 그대로(``:g`` 는 6자리에서 잘라 12345.25 가 12345.2 로 바뀌었다)."""
+    return f"{v:.2f}".rstrip("0").rstrip(".")
 
 
 def _float(text: str) -> float:

@@ -494,3 +494,112 @@ def test_table_view_redraw_is_fast_when_visible(dlg):
     assert dlg.table.rowCount() == min(len(dlg._passed), 2000) > 100
     hh = dlg.table.horizontalHeader()
     assert hh.sectionResizeMode(0) == QHeaderView.ResizeMode.ResizeToContents
+
+
+def test_excel_labels_unique_when_parent_and_name_repeat(styled_qapp, tmp_path):
+    """부모 · 이름이 같은 폴더 셋(다른 보관 위치)도 엑셀 slot 이 하나로 섞이지 않는다."""
+    from aoi_verification.app.ui.widgets.zone_origin_dialog import ZoneOriginDialog
+    d = ZoneOriginDialog()
+    try:
+        roots = [tmp_path / a / "LOT" / "W1" for a in ("A", "B", "C")]
+        data = {r: [B.WaferItems(r, (_item(wafer=0, photo=r / "p.jpg"),), slot=str(i + 1))]
+                for i, r in enumerate(roots)}
+        d.set_wafers(roots, data)
+        picked, numbers = d.excel_picks()
+        assert len(picked) == 3 and all(len(v) == 1 for v in picked.values())
+        assert sorted(numbers.values()) == ["1", "2", "3"]
+    finally:
+        d.close()
+        d.deleteLater()
+
+
+# ---------------------------------------------------------------- 2차 점검 (2026-11-24)
+def test_nan_sizes_become_empty(monkeypatch, sample):
+    """flt 크기 · Contrast 가 NaN 이면 빈 값 — NaN 은 하한을 통과하고 정렬 순서를 흔들었다."""
+    import math
+    orig = B.P.load_all
+
+    def broken(folder):
+        defects, goods, note = orig(folder)
+        from dataclasses import replace
+        return [replace(defects[0], area=math.nan, contrast=math.nan)] + list(defects[1:]), list(goods), note
+    monkeypatch.setattr(B.P, "load_all", broken)
+    w = B.load_folder(SAMPLE)
+    first = next(i for i in w.items if i.kind == B.KIND_SURFACE and i.index == 0)
+    assert first.area is None and first.contrast is None
+    assert not B.Flags(min_contrast=1.0).ok(first)
+
+
+def test_limit_text_keeps_two_decimals():
+    """하한 칸 글자는 넣은 값 그대로 — 포커스만 옮겨도 12345.25 가 12345.2 로 바뀌었다."""
+    from aoi_verification.app.ui.widgets.zone_origin_dialog import _num_text
+    assert [_num_text(v) for v in (12345.25, 3.0, 0.5, 10.1)] == ["12345.25", "3", "0.5", "10.1"]
+
+
+def test_undo_reloads_half_read_folder(dlg, monkeypatch):
+    """읽는 중에 뺐다 [되돌리기] 하면 못 읽은 웨이퍼를 마저 읽는다(반만 보이고 멈추지 않게)."""
+    root = dlg._roots[0]
+    dlg.remove_folder(root)
+    gone = dlg._expand[root][0]
+    dlg._data.pop(gone)
+    started = []
+    monkeypatch.setattr(dlg, "_start_load", lambda: started.append(1))
+    dlg._undo()
+    assert started == [1] and root in dlg._roots
+
+
+def test_excel_names_do_not_follow_screen_sort(dlg2):
+    """엑셀 웨이퍼 이름은 화면 정렬과 상관없이 같다."""
+    before = dlg2.excel_picks()
+    dlg2.set_sort("area")
+    after = dlg2.excel_picks()
+    assert list(before[0]) == list(after[0]) and before[1] == after[1]
+    assert {k: sorted(map(str, v)) for k, v in before[0].items()} == {k: sorted(map(str, v)) for k, v in after[0].items()}
+
+
+def test_scan_waits_until_arrow_stops(dlg, monkeypatch):
+    """화살표로 지나가는 Defect 는 Scan 을 찾지 않는다 — 멈춘 Defect 하나만."""
+    import time
+    from dataclasses import replace
+    from PyQt6.QtWidgets import QApplication
+    import aoi_verification.app.ui.widgets.zone_origin_dialog as Z
+    for f, w in list(dlg._data.items()):
+        dlg._data[f] = replace(w, has_scan=True)
+    started = []
+    monkeypatch.setattr(Z._ScanFind, "start", lambda self: started.append(self._item[0]))
+    dlg._scans.clear()
+    for _ in range(5):
+        dlg.move_current(1, 0)
+    assert started == []
+    end = time.monotonic() + 2
+    while not started and time.monotonic() < end:
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert started == [Z.item_key(dlg.current())]
+    dlg._on_scan(started[0], None)
+
+
+def test_open_viewer_gets_scan_result(dlg):
+    """크게보기를 연 뒤 끝난 Scan 찾기도 뷰어에 넘어간다(이미 끝난 스레드의 신호를 놓치지 않게)."""
+    got = []
+
+    class _V:
+        def set_scan_crop(self, crop):
+            got.append(crop)
+    k = ("k",)
+    dlg._scan_viewer = (k, _V())
+    dlg._on_scan(k, None)
+    dlg._scan_viewer = None
+    assert got == [None]
+
+
+def test_arrows_still_move_after_clicking_sort(dlg):
+    """정렬 버튼을 누른 뒤에도 화살표가 사진을 옮긴다."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    dlg.show()
+    btn = next(iter(dlg.sort_btns.values()))
+    QTest.mouseClick(btn, Qt.MouseButton.LeftButton)
+    first = dlg.current()
+    QTest.keyClick(dlg.focusWidget() or dlg, Qt.Key.Key_Right)
+    assert dlg.current() is not first

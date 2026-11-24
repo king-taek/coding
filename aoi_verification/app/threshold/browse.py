@@ -238,8 +238,8 @@ def load_folder(folder: Path, wafer: int = 0, report: Callable = lambda msg, don
                 wafer, d.index, KIND_SURFACE, rec, zname, d.bin, _name(classes, d.bin), d.cls, _name(classes, d.cls),
                 abs(d.bin) in good_set,
                 _type_label(folder, SURFACE_PHOTO_TYPE, d.type_bits, surface_types), _caught(d, has_mask),
-                d.area * pxx * pxy if ok else None, d.width * pxx if ok else None, d.length * pxx if ok else None,
-                d.contrast or None, None, d.x, d.y, s_pic.get(d.index), w.lot, *cr(d.x, d.y)))
+                _num(d.area * pxx * pxy) if ok else None, _num(d.width * pxx) if ok else None,
+                _num(d.length * pxx) if ok else None, _num(d.contrast) or None, None, d.x, d.y, s_pic.get(d.index), w.lot, *cr(d.x, d.y)))
 
         if heights:
             hs = [_HRec(i, r.x, r.y) for i, r in enumerate(heights)]
