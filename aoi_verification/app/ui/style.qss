@@ -1466,19 +1466,21 @@ QPushButton[role="histToggle"]:disabled {
     border: 1px solid $line2;
     background: transparent;
 }
-/* GL 상태줄 읽기값의 구역 글자 — 하한 이하 파랑 · 사이 중립 · 상한 이상 빨강. */
+/* GL 상태줄 읽기값의 구역 글자 — 하한 이하 파랑 · 사이 중립 · 상한 이상 빨강.
+   ★ 파랑·빨강은 **차트 색과 같은 값**이다(`gl_charts._LOW`·`_HIGH`, E2b) — 강조색($accent)을
+     쓰면 차트의 하한 선과 다른 파랑이 된다.  test_gl_zone_colors 가 둘을 맞춰 본다. */
 QLabel[role="glZoneLow"], QLabel[role="glZoneMid"], QLabel[role="glZoneHigh"] {
     font-family: $font_mono;
 }
 QLabel[role="glZoneLow"] {
-    color: $accent;
+    color: #2F6FE0;
     font-weight: 700;
 }
 QLabel[role="glZoneMid"] {
     color: $ink2;
 }
 QLabel[role="glZoneHigh"] {
-    color: $danger;
+    color: #E5322A;
     font-weight: 700;
 }
 
