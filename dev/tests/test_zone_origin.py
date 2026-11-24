@@ -335,23 +335,28 @@ def test_typing_coord_then_moving_focus_does_not_crash(dlg):
     from PyQt6.QtTest import QTest
     from PyQt6.QtWidgets import QApplication
 
-    def settle():
-        for _ in range(5):
+    def settle(until=None):
+        # 바쁜 기계에서는 포커스 이동 · 한 박자 뒤 적용이 늦게 온다 — 조건이 맞을 때까지 최대 3초 기다린다.
+        end = time.monotonic() + (3.0 if until else 0.05)
+        while True:
             QApplication.processEvents()
+            if (until() if until else False) or time.monotonic() > end:
+                return
             time.sleep(0.01)
     dlg.show()
-    settle()
+    dlg.activateWindow()                         # 포커스 이동(editingFinished)은 활성 창에서만 온다
+    settle(dlg.isActiveWindow)
     ed = dlg.coord_edits["col"]
     ed.setFocus()
     QTest.keyClicks(ed, "4")
     QTest.keyClick(ed, Qt.Key.Key_Return)
-    settle()
+    settle(lambda: dlg._flags.col == 4)
     assert dlg._flags.col == 4
     ed = dlg.coord_edits["row"]
     ed.setFocus()
     QTest.keyClicks(ed, "3")
     dlg.coord_edits["col"].setFocus()          # 포커스 이동 → Row 의 editingFinished
-    settle()
+    settle(lambda: dlg._flags.row == 3)
     assert (dlg._flags.col, dlg._flags.row) == (4, 3)
     assert all((i.col, i.row) == (4, 3) for i in dlg._passed)
     for key in ("min_area", "min_width"):        # 파라미터 칸도 같은 길
@@ -362,5 +367,130 @@ def test_typing_coord_then_moving_focus_does_not_crash(dlg):
         e.setFocus()
         QTest.keyClicks(e, "1")
         dlg.coord_edits["row"].setFocus()
-        settle()
+        settle(lambda key=key: getattr(dlg._flags, key) == 1.0)
     assert dlg._flags.min_area == 1.0 and dlg._flags.min_width == 1.0
+
+
+# ---------------------------------------------------------------- 전체 점검에서 나온 것 (2026-11-24)
+@pytest.fixture
+def dlg2(styled_qapp, sample, tmp_path):
+    """LOT 둘(웨이퍼 하나씩) — 같은 샘플을 다른 폴더 · LOT 이름으로 한 번 더 넣는다."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from dataclasses import replace
+    from aoi_verification.app.ui.widgets.zone_origin_dialog import ZoneOriginDialog
+    other = tmp_path / "LOTB" / "W2"
+    w2 = replace(sample, folder=other, lot="LOT-B", wafer_id="W2", slot="7",
+                 items=tuple(replace(i, lot="LOT-B") for i in sample.items))
+    d = ZoneOriginDialog()
+    d.resize(1400, 900)
+    d.set_wafers([SAMPLE, other.parent], {SAMPLE: [sample], other.parent: [w2]})
+    yield d
+    d.close()
+    d.deleteLater()
+
+
+def test_wafer_from_other_lot_replaces_lot_pick(dlg2):
+    """LOT A 를 고른 채 LOT B 의 웨이퍼를 누르면 0 개가 됐다 — 웨이퍼를 고르면 다른 LOT 고름은 풀린다."""
+    dlg2.toggle("lot", "FLU-1122N")
+    wb = next(n for n in dlg2._order["wafer"] if dlg2.wafer_of(n).lot == "LOT-B")
+    dlg2.toggle("wafer", wb)
+    assert dlg2._sel["lot"] == set() and len(dlg2._passed) == 351
+    dlg2.toggle("lot", "FLU-1122N")                    # 다시 LOT A → B 웨이퍼 고름이 풀린다
+    assert dlg2._sel["wafer"] == set() and len(dlg2._passed) == 351
+
+
+def test_more_appends_same_order_as_full_render(dlg2):
+    """[더 보기] 는 이어 붙이기만 한다 — 결과(순서 · 줄 나눔)는 처음부터 그린 것과 같아야 한다."""
+    from aoi_verification.app.ui.widgets import zone_origin_dialog as Z
+    for _ in range(4):
+        dlg2.more()
+    inc_order, inc_rows = list(dlg2._tile_order), [list(r) for r in dlg2._tile_rows]
+    assert len(inc_order) == min(5 * Z.PAGE_TILES, len(dlg2._passed)) == len(dlg2._tiles)
+    dlg2._render()
+    assert dlg2._tile_order == inc_order and dlg2._tile_rows == inc_rows
+    assert [item_k for item_k in inc_order] == [Z.item_key(i) for i in dlg2._passed[:len(inc_order)]]
+
+
+def test_default_order_follows_slot_not_load_order(dlg2):
+    """기본 순서의 웨이퍼 차례는 읽은 순이 아니라 슬롯 순(왼쪽 목록과 같다)."""
+    first_group = dlg2._passed[0].first_name
+    group = [i for i in dlg2._passed if i.first_name == first_group]
+    slots = [dlg2.wafer_of(i.wafer).slot for i in group]
+    assert slots == sorted(slots, key=int)
+
+
+def test_broken_xy_does_not_fail_whole_wafer(monkeypatch, sample):
+    """flt 에 NaN 좌표가 한 건 있어도 그 Defect 번호만 비고 웨이퍼는 읽힌다."""
+    import math
+    orig = B.P.load_all
+
+    def broken(folder):
+        defects, goods, note = orig(folder)
+        from dataclasses import replace
+        return [replace(defects[0], x=math.nan)] + list(defects[1:]), list(goods), note
+    monkeypatch.setattr(B.P, "load_all", broken)
+    w = B.load_folder(SAMPLE)
+    assert w.note == "" and len(w.items) == len(sample.items)
+    assert sum(1 for i in w.items if i.col is None) == 1
+
+
+def test_unfinished_text_survives_side_redraw(dlg):
+    """쓰다 만 좌표('-' · Enter 전 숫자)는 왼쪽 칸을 다시 그려도 남는다 — [모두 지우기] 는 지운다."""
+    dlg.coord_edits["col"].setText("-")
+    dlg.coord_edits["row"].setText("7")
+    dlg.toggle_params()                             # 왼쪽 칸 다시 그리기
+    assert dlg.coord_edits["col"].text() == "-"
+    assert dlg.coord_edits["row"].text() == "7"
+    assert dlg._flags.row is None                   # 아직 적용 안 함
+    dlg.clear_all()
+    assert dlg.coord_edits["col"].text() == ""
+    assert dlg.coord_edits["row"].text() == ""
+
+
+def test_scan_find_runs_once_per_defect(dlg, monkeypatch):
+    """같은 Defect 의 Scan 찾기는 찾는 중이면 다시 띄우지 않는다(목록 오가기 · 크게보기)."""
+    import aoi_verification.app.ui.widgets.zone_origin_dialog as Z
+    started = []
+    monkeypatch.setattr(Z._ScanFind, "start", lambda self: started.append(self))
+    k = ("k",)
+    a = dlg._scan_thread(k, Path("."), (0.0, 0.0))
+    b = dlg._scan_thread(k, Path("."), (0.0, 0.0))
+    assert a is b and len(started) == 1
+    dlg._on_scan(k, None)                           # 끝나면 다음엔 새로
+    dlg._scan_thread(k, Path("."), (0.0, 0.0))
+    assert len(started) == 2
+    dlg._on_scan(k, None)
+
+
+def test_resize_relayouts_only_when_columns_change(dlg, monkeypatch):
+    """창 폭이 열 수를 바꿀 때만 타일을 다시 그린다 — 첫 묶음이 한 줄을 못 채워도 크기 바꿀 때마다 다시 그리지 않는다."""
+    from PyQt6.QtCore import QEvent
+    from PyQt6.QtGui import QResizeEvent
+    from PyQt6.QtCore import QSize
+    vp = dlg.grid_scroll.viewport()
+    ev = QResizeEvent(QSize(800, 600), QSize(790, 600))
+    monkeypatch.setattr(dlg, "_cols", lambda: dlg._last_cols)
+    dlg._relayout_timer.stop()
+    dlg.eventFilter(vp, ev)
+    assert not dlg._relayout_timer.isActive()
+    monkeypatch.setattr(dlg, "_cols", lambda: dlg._last_cols + 1)
+    dlg.eventFilter(vp, ev)
+    assert dlg._relayout_timer.isActive()
+    dlg._relayout_timer.stop()
+    assert ev.type() == QEvent.Type.Resize
+
+
+def test_table_view_redraw_is_fast_when_visible(dlg):
+    """보이는 표를 다시 그릴 때 칸마다 폭을 다시 재면 수백 줄에 몇십 초 걸렸다(2천 장에서 몇 분 멈춤, 2026-11-24)."""
+    import time
+    from PyQt6.QtWidgets import QApplication, QHeaderView
+    dlg.show()
+    dlg.set_view("table")
+    QApplication.processEvents()
+    t = time.monotonic()
+    dlg.set_sort("area")                            # 보이는 표를 다시 그린다
+    QApplication.processEvents()
+    assert time.monotonic() - t < 5.0
+    assert dlg.table.rowCount() == min(len(dlg._passed), 2000) > 100
+    hh = dlg.table.horizontalHeader()
+    assert hh.sectionResizeMode(0) == QHeaderView.ResizeMode.ResizeToContents

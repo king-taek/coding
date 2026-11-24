@@ -125,7 +125,12 @@ class _Load(QThread):
                                 f.cancel()
                         if fut.cancelled():
                             continue
-                        self.signals.wafer.emit(t, futs[fut], fut.result())
+                        try:
+                            got = fut.result()
+                        except Exception as e:      # noqa: BLE001 — 한 웨이퍼 실패가 나머지를 막지 않는다
+                            _LOG.exception("어느 Zone에서 왔니? 웨이퍼 읽기 실패: %s", futs[fut])
+                            got = B.WaferItems(futs[fut], note=_KO.ZO_READ_FAIL.format(err=e))
+                        self.signals.wafer.emit(t, futs[fut], got)
                         self.signals.progress.emit(t, i, n, _KO.ZO_LOADING_WAFERS.format(i=i, n=n))
             if stop():
                 return
@@ -258,6 +263,7 @@ class ZoneOriginDialog(QDialog):
         self._tile_order: list = []
         self._tile_rows: list = []
         self._tiles: dict = {}
+        self._last_cols = 0                # 타일을 그린 열 수 — 창 폭이 열 수를 바꿀 때만 다시 그린다
         self._keep_pos = 0
         self._scans: dict = {}            # item_key → Scan Crop QImage | None(없음)
         self._undo_snap: Optional[tuple] = None
@@ -269,6 +275,7 @@ class ZoneOriginDialog(QDialog):
         self._thumb_bus.ready.connect(self._on_thumb)
         self._thumb_pool = ThreadPoolExecutor(max_workers=THUMB_WORKERS, thread_name_prefix="zone-origin-thumb")
         self._wanted: set = set()
+        self._scan_threads: dict = {}       # 찾는 중인 Scan — 같은 Defect 를 두 번 찾지 않는다
         self._pending: set = set()
         self._picker = FolderPicker(self)
         self._picker.picked.connect(lambda p: p and self.add_folders([Path(p)]))
@@ -668,7 +675,8 @@ class ZoneOriginDialog(QDialog):
     def _sorted(self, passed: list) -> list:
         if self._sort is None:
             rank = {v: i for i, v in enumerate(self._order.get("first_name", []))}
-            return sorted(passed, key=lambda it: (rank.get(it.first_name, 1 << 30), it.wafer, it.kind, it.index))
+            return sorted(passed, key=lambda it: (rank.get(it.first_name, 1 << 30), self._wafer_rank(it.wafer),
+                                                  it.kind, it.index))
         return B.sort_items(passed, self._sort[0], self._sort[1])
 
     # ------------------------------------------------------------------ 그리기
@@ -758,6 +766,10 @@ class ZoneOriginDialog(QDialog):
         pos = bar.value()
         fw = QApplication.focusWidget()
         focus_key = next((k for k, e in self._edits().items() if e is fw), None)
+        # 쓰다 만 글자(Enter 전 · '-' 처럼 아직 수가 아닌 것)는 다시 그려도 남긴다 — 그 칸 값이 그대로일 때만.
+        drafts = {k: (e.text(), getattr(self._flags, k)) for k, e in self._edits().items()
+                  if e.property("shown") != e.text()}
+        self.coord_edits, self.min_edits = {}, {}
         inner = QWidget()
         il = QVBoxLayout(inner)
         il.setContentsMargins(8, 12, 8, 20)
@@ -820,6 +832,11 @@ class ZoneOriginDialog(QDialog):
                 row.addWidget(ed)
                 il.addLayout(row)
                 self.min_edits[key] = ed
+        for k, e in self._edits().items():
+            e.setProperty("shown", e.text())
+            text, was = drafts.get(k, (None, None))
+            if text is not None and was == getattr(self._flags, k):
+                e.setText(text)
         il.addStretch(1)
         # 옛 칸은 바로 지우지 않는다 — 이 그리기가 그 칸의 신호 안에서 불릴 수 있다.  신호를 막고 숨긴 뒤 나중에 지운다.
         old = self.side_scroll.takeWidget()
@@ -964,63 +981,78 @@ class ZoneOriginDialog(QDialog):
             self._tile_order = []
             return
         shown = self._passed[:self._shown]
-        self._tile_order = [item_key(i) for i in shown]
-        cols = self._cols()
-        groups: dict = {}
+        self._tile_order = []
+        self._grp_total: dict = {}
         if self._sort is None:
-            for it in shown:
-                groups.setdefault(it.first_name, []).append(it)
-            total: dict = {}
             for it in self._passed:
-                total[it.first_name] = total.get(it.first_name, 0) + 1
-        else:
-            groups = {"": shown}
-            total = {}
+                self._grp_total[it.first_name] = self._grp_total.get(it.first_name, 0) + 1
+        self._grp_name = None                 # 마지막으로 그린 묶음 · 줄 — [더 보기] 가 그 뒤에 이어 붙인다
+        self._grp_row = None
+        self._grp_index = 0
+        self._add_tiles(shown)
+        self._add_tail()
+        self._keep_pos = pos if keep_scroll else 0
+        call_later(self, 0, self._restore_scroll)
+
+    def _add_tiles(self, items: list) -> None:
+        """타일을 격자 끝에 이어 붙인다(묶음 머리 · 마지막 줄의 빈자리를 이어서 채운다)."""
+        cols = self._cols()
+        self._last_cols = cols
         mono = theme.FONT_MONO.split(",")[0].strip('" ')
         dec = dict((k, d) for k, _n, d in SORTS)
-        for gi, (gname, rows) in enumerate(groups.items()):
-            if gname:
-                head = QLabel(f'{html.escape(gname)}<span style="font-family: {mono}; font-weight: 400;'
-                              f' color: {theme.MUTE};">  {total[gname]:,}</span>', self.grid_host)
-                head.setProperty("role", "ovGroupName")
-                head.setTextFormat(Qt.TextFormat.RichText)
-                head.setContentsMargins(0, 0 if gi == 0 else 18, 0, 6)
-                self.grid.addWidget(head)
-            for start in range(0, len(rows), cols):
+        for it in items:
+            gname = it.first_name if self._sort is None else ""
+            if gname != self._grp_name:
+                self._grp_name, self._grp_row = gname, None
+                if gname:
+                    head = QLabel(f'{html.escape(gname)}<span style="font-family: {mono}; font-weight: 400;'
+                                  f' color: {theme.MUTE};">  {self._grp_total.get(gname, 0):,}</span>', self.grid_host)
+                    head.setProperty("role", "ovGroupName")
+                    head.setTextFormat(Qt.TextFormat.RichText)
+                    head.setContentsMargins(0, 0 if self._grp_index == 0 else 18, 0, 6)
+                    self.grid.addWidget(head)
+                    self._grp_index += 1
+            if self._grp_row is None or len(self._tile_rows[-1]) >= cols:
                 row = QWidget(self.grid_host)
                 row.setFixedHeight(TILE_PX)
                 rl = QHBoxLayout(row)
                 rl.setContentsMargins(0, 0, 0, 0)
                 rl.setSpacing(TILE_GAP)
-                self._tile_rows.append([])
-                for it in rows[start:start + cols]:
-                    k = item_key(it)
-                    tile = _Tile(it.photo, TILE_PX, row, tip=f"{it.first_name}\n{it.type_name}\n"
-                                                             f"{self.wafer_label(it.wafer)}")
-                    if it.photo is None:
-                        tile.pic.setText(_KO.ZO_NO_PHOTO)
-                        tile.pic.setStyleSheet(f"color: {theme.MUTE};")
-                    elif tile.wait_path is not None:
-                        self._want(tile.wait_path, TILE_PX, "thumb")
-                    if self._sort is not None:
-                        tile.set_caption(fmt_num(getattr(it, self._sort[0]), dec[self._sort[0]]))
-                    tile.set_open(self._open == k)
-                    tile.clicked.connect(lambda k=k: self.open_item(k))
-                    tile.enlarge.connect(lambda k=k: (self.open_item(k), self.enlarge_open()))
-                    rl.addWidget(tile)
-                    self._tiles[k] = tile
-                    self._tile_rows[-1].append(k)
                 rl.addStretch(1)
                 self.grid.addWidget(row)
+                self._grp_row = (row, rl)
+                self._tile_rows.append([])
+            row, rl = self._grp_row
+            k = item_key(it)
+            tile = _Tile(it.photo, TILE_PX, row, tip=f"{it.first_name}\n{it.type_name}\n"
+                                                     f"{self.wafer_label(it.wafer)}")
+            if it.photo is None:
+                tile.pic.setText(_KO.ZO_NO_PHOTO)
+                tile.pic.setStyleSheet(f"color: {theme.MUTE};")
+            elif tile.wait_path is not None:
+                self._want(tile.wait_path, TILE_PX, "thumb")
+            if self._sort is not None:
+                tile.set_caption(fmt_num(getattr(it, self._sort[0]), dec.get(self._sort[0], 1)))
+            tile.set_open(self._open == k)
+            tile.clicked.connect(lambda k=k: self.open_item(k))
+            tile.enlarge.connect(lambda k=k: (self.open_item(k), self.enlarge_open()))
+            rl.insertWidget(rl.count() - 1, tile)
+            self._tiles[k] = tile
+            self._tile_rows[-1].append(k)
+            self._tile_order.append(k)
+
+    def _add_tail(self) -> None:
+        """격자 끝 — 남은 게 있으면 [더 보기] 와 늘어나는 빈칸.  :meth:`more` 가 떼고 다시 붙인다."""
+        n0 = self.grid.count()
         if len(self._passed) > self._shown:
             more = NeonButton(_KO.ZO_MORE_FMT.format(n=f"{min(PAGE_TILES, len(self._passed) - self._shown):,}"),
                               role="ghost")
             more.clicked.connect(self.more)
             self.grid.addSpacing(10)
             self.grid.addWidget(more, 0, Qt.AlignmentFlag.AlignLeft)
+            self.more_btn = more
         self.grid.addStretch(1)
-        self._keep_pos = pos if keep_scroll else 0
-        call_later(self, 0, self._restore_scroll)
+        self._tail_n = self.grid.count() - n0
 
     def _restore_scroll(self) -> None:
         self.grid_scroll.verticalScrollBar().setValue(self._keep_pos)
@@ -1034,6 +1066,10 @@ class ZoneOriginDialog(QDialog):
         t = self.table
         t.blockSignals(True)
         t.setSortingEnabled(False)
+        # 채우는 동안은 칸 폭을 맞추지 않는다 — '내용에 맞춤' 이 켜진 채 보이는 표에 칸을 넣으면 한 칸마다 전체를
+        # 다시 재서 2천 줄이 몇 분 걸렸다(무작위 클릭 시험).  다 넣고 한 번만 맞춘다.
+        hh = t.horizontalHeader()
+        hh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         t.clearContents()
         t.setRowCount(len(rows))
         hdr = []
@@ -1060,6 +1096,7 @@ class ZoneOriginDialog(QDialog):
                 t.setItem(r, c, cell)
             if item_key(it) == self._open:
                 sel_row = r
+        hh.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         if sel_row >= 0:
             t.selectRow(sel_row)
         t.blockSignals(False)
@@ -1142,11 +1179,20 @@ class ZoneOriginDialog(QDialog):
                     DETAIL_PIC, DETAIL_PIC, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
             return
         self.scan_pic.setText(_KO.ZO_DETAIL_SCAN_WAIT)
-        th = _ScanFind(k, w.folder, (it.x, it.y))
-        th.signals.done.connect(self._on_scan)
-        th.start()
+        self._scan_thread(k, w.folder, (it.x, it.y))
+
+    def _scan_thread(self, k: tuple, folder: Path, xy: tuple) -> "_ScanFind":
+        """이 Defect 의 Scan 찾기 — 이미 찾는 중이면 그 스레드를 돌려준다(목록을 오가거나 크게보기를 눌러도 한 번만)."""
+        th = self._scan_threads.get(k)
+        if th is None:
+            th = _ScanFind(k, folder, xy)
+            th.signals.done.connect(self._on_scan)
+            self._scan_threads[k] = th
+            th.start()
+        return th
 
     def _on_scan(self, k: tuple, crop) -> None:
+        self._scan_threads.pop(k, None)
         self._scans[k] = crop
         if k == self._open:
             it = self.current()
@@ -1202,6 +1248,12 @@ class ZoneOriginDialog(QDialog):
     def toggle(self, k: str, v) -> None:
         s = self._sel[k]
         s.discard(v) if v in s else s.add(v)
+        # LOT 과 그 아래 웨이퍼는 한 묶음 — 다른 LOT 의 웨이퍼를 고르면 고른 LOT 이 그 웨이퍼를 가려 0 개가 됐다.
+        if k == "wafer" and v in s:
+            lot = getattr(self.wafer_of(v), "lot", None)
+            self._sel["lot"] &= {lot}
+        elif k == "lot" and v in s:
+            self._sel["wafer"] = {n for n in self._sel["wafer"] if getattr(self.wafer_of(n), "lot", None) == v}
         self._shown = PAGE_TILES
         self._render()
 
@@ -1220,6 +1272,8 @@ class ZoneOriginDialog(QDialog):
         self._render(keep_scroll=True)
 
     def clear_all(self) -> None:
+        for e in self._edits().values():        # 쓰다 만 글자도 지운다
+            e.setProperty("shown", e.text())
         for s in self._sel.values():
             s.clear()
         self._flags = B.Flags()
@@ -1243,8 +1297,22 @@ class ZoneOriginDialog(QDialog):
             self._render()
 
     def more(self) -> None:
+        """[더 보기] — 다음 묶음만 이어 붙인다(전부 다시 그리면 2천 장에서 누를 때마다 2초씩 걸렸다)."""
+        if self._view != "tiles" or not self._tile_order:
+            self._shown += PAGE_TILES
+            self._render(keep_scroll=True)
+            return
+        old = self._shown
         self._shown += PAGE_TILES
-        self._render(keep_scroll=True)
+        for _ in range(self._tail_n):                  # 끝의 간격 · [더 보기] · 빈칸을 뗀다(누른 버튼은 나중에 지운다)
+            item = self.grid.takeAt(self.grid.count() - 1)
+            w = item.widget() if item is not None else None
+            if w is not None:
+                w.hide()
+                w.deleteLater()
+        self._add_tiles(self._passed[old:self._shown])
+        self._add_tail()
+        self._render_bar()
 
     def _on_table_header(self, col: int) -> None:
         k, _n, d = TABLE_COLS[col]
@@ -1327,11 +1395,9 @@ class ZoneOriginDialog(QDialog):
             if k in self._scans:
                 viewer.set_scan_crop(self._scans[k])
             else:
-                th = _ScanFind(k, w.folder, (it.x, it.y))
-                th.signals.done.connect(self._on_scan)
-                th.signals.crop.connect(viewer.set_scan_crop)
-                th.start()
+                self._scan_thread(k, w.folder, (it.x, it.y)).signals.crop.connect(viewer.set_scan_crop)
         sheets.run(viewer, full_bleed=True)
+        viewer.deleteLater()            # 닫힌 뷰어가 이 창 아래 쌓이지 않게(sheets.run 은 닫힐 때까지 기다린다)
 
     def _enlarge_scan(self) -> None:
         it = self.current()
@@ -1341,6 +1407,7 @@ class ZoneOriginDialog(QDialog):
         from .zoom_window import FullscreenViewer
         viewer = FullscreenViewer(Path(crop.text("src") or _KO.ZO_DETAIL_SCAN), self, image=crop)
         sheets.run(viewer, full_bleed=True)
+        viewer.deleteLater()
 
     def open_info(self) -> None:
         it = self.current()
@@ -1403,7 +1470,8 @@ class ZoneOriginDialog(QDialog):
         exporter.start()
 
     def _on_excel_done(self, path: str) -> None:
-        self._loading.hide_overlay()
+        if not self._overlay_on:        # 저장 중에 폴더를 더 넣어 읽기 막이 떠 있으면 그 막은 읽기가 끝날 때 걷는다
+            self._loading.hide_overlay()
         self._saved = Path(path)
         QTimer.singleShot(0, self._offer_open)
 
@@ -1417,7 +1485,8 @@ class ZoneOriginDialog(QDialog):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path if choice == "open_file" else path.parent)))
 
     def _on_excel_failed(self, msg: str) -> None:
-        self._loading.hide_overlay()
+        if not self._overlay_on:
+            self._loading.hide_overlay()
         sheets.info(self, _KO.ZO_BTN_EXCEL, _KO.SAVE_FAIL_FMT.format(error=msg))
 
     # ------------------------------------------------------------------ 끌어다 놓기
@@ -1428,8 +1497,7 @@ class ZoneOriginDialog(QDialog):
     @tolerate_teardown
     def eventFilter(self, obj, ev):     # noqa: N802
         if ev.type() == QEvent.Type.Resize and obj is self.grid_scroll.viewport() and self._view == "tiles" \
-                and self._tile_rows and self._tile_rows[0] and len(self._tile_rows[0]) != self._cols() \
-                and len(self._passed) > len(self._tile_rows[0]):
+                and self._tile_order and self._last_cols != self._cols():
             self._relayout_timer.start()
         return super().eventFilter(obj, ev)
 
@@ -1508,7 +1576,7 @@ def _clear(lay) -> None:
         item = lay.takeAt(0)
         w = item.widget()
         if w is not None:
-            w.setParent(None)
+            w.hide()                # 부모에서 떼지 않는다 — 떼면 잠깐 맨 위 창이 돼 입력칸의 포커스(Enter 전 적용)를 가져갔다
             w.deleteLater()
         elif item.layout() is not None:
             _clear(item.layout())

@@ -187,10 +187,11 @@ def _num(v) -> Optional[float]:
 def load_folder(folder: Path, wafer: int = 0, report: Callable = lambda msg, done=0, total=0: None) -> WaferItems:
     """웨이퍼 폴더 하나 → :class:`WaferItems`(워커 스레드에서).  ``wafer`` = 화면이 그 폴더에 붙인 번호(Item.wafer)."""
     folder = Path(folder)
-    lot, wid = read_lot_ids(folder)
-    w = WaferItems(folder, slot=read_active_slot(folder) or "", has_scan=(folder / SI.SCAN_LIST_NAME).is_file(),
-                   lot=lot, wafer_id=wid)
+    w = WaferItems(folder, lot=folder.parent.name, wafer_id=folder.name)
     try:
+        w.lot, w.wafer_id = read_lot_ids(folder)
+        w.slot = read_active_slot(folder) or ""
+        w.has_scan = (folder / SI.SCAN_LIST_NAME).is_file()     # NAS 오류도 이 웨이퍼만 '읽기 실패' 로
         defects, goods, note = P.load_all(folder)
         if note:
             w.note = note
@@ -209,6 +210,8 @@ def load_folder(folder: Path, wafer: int = 0, report: Callable = lambda msg, don
         die_at, w.number_warn = _die_numbers(folder)
 
         def cr(x, y) -> tuple:
+            if not (math.isfinite(float(x)) and math.isfinite(float(y))):
+                return (None, None)                 # 깨진 좌표 한 건이 웨이퍼 전체를 '읽기 실패' 로 만들지 않게
             got = die_at(x, y)
             return got if got is not None else (None, None)
 
@@ -236,7 +239,7 @@ def load_folder(folder: Path, wafer: int = 0, report: Callable = lambda msg, don
                 abs(d.bin) in good_set,
                 _type_label(folder, SURFACE_PHOTO_TYPE, d.type_bits, surface_types), _caught(d, has_mask),
                 d.area * pxx * pxy if ok else None, d.width * pxx if ok else None, d.length * pxx if ok else None,
-                d.contrast or None, None, d.x, d.y, s_pic.get(d.index), lot, *cr(d.x, d.y)))
+                d.contrast or None, None, d.x, d.y, s_pic.get(d.index), w.lot, *cr(d.x, d.y)))
 
         if heights:
             hs = [_HRec(i, r.x, r.y) for i, r in enumerate(heights)]
@@ -250,7 +253,7 @@ def load_folder(folder: Path, wafer: int = 0, report: Callable = lambda msg, don
                     wafer, i, KIND_HEIGHT, rec, zname, first, _name(classes, first), cur, _name(classes, cur),
                     first in good_set,
                     _type_label(folder, H.HEIGHT_PHOTO_TYPE, r.type, surface_types), _KO.ZO_CAUGHT_HEIGHT,
-                    None, None, None, None, _num(r.height), float(r.x), float(r.y), h_pic.get(i), lot,
+                    None, None, None, None, _num(r.height), float(r.x), float(r.y), h_pic.get(i), w.lot,
                     *cr(r.x, r.y)))
         w.items = tuple(out)
         if not px:
