@@ -28,7 +28,7 @@ from .wafer_geometry import (CamtekGeometry, FALLBACK_CAMTEK, is_trusted_source,
 from .ini_text import read_ini_text
 
 __all__ = ["resolve", "load_folder", "load_abs_folder", "load_raw_folder",
-           "load_recipe_folder", "abs_coord", "has_ini"]
+           "load_recipe_folder", "abs_coord", "has_ini", "coord_from_xy"]
 
 _LOG = logging.getLogger("aoi.coords")
 
@@ -194,6 +194,16 @@ def _coord_from_raw(raw: tuple[float, float, int, int],
     # 아니면 틀렸을 수 있다 — 화면에 경고만(wafer_geometry.is_trusted_source).
     warn = "" if is_trusted_source(geom.source) else NUMBER_WARN_NO_TABLE
     return DefectCoord(col=col, row=row, x=x, y=y, source="camtek_ini", number_warn=warn)
+
+
+def coord_from_xy(X: float, Y: float, geom: CamtekGeometry,
+                  shift: tuple[int, int] = (0, 0)) -> DefectCoord:
+    """결과 파일(flt)의 절대 ``(X, Y)`` → DefectCoord — 사진 INI 경로(:func:`load_folder`)와 같은 계산.
+
+    INI 의 Col/Row 필드는 :func:`_coord_from_raw` 가 원래 쓰지 않으므로 0 을 넣는다.  ``shift`` =
+    :func:`display_shift` — 화면 번호는 ``screen_col/screen_row`` 로 읽는다."""
+    c = _coord_from_raw((float(X), float(Y), 0, 0), geom)
+    return replace(c, col_shift=shift[0], row_shift=shift[1]) if shift != (0, 0) else c
 
 
 def abs_coord(X: float, Y: float, col_i: int, row_i: int) -> DefectCoord:

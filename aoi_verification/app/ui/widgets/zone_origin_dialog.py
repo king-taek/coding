@@ -20,12 +20,13 @@ from __future__ import annotations
 import html
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QEvent, QObject, Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QDesktopServices, QDoubleValidator, QImage, QPixmap
+from PyQt6.QtGui import QDesktopServices, QDoubleValidator, QImage, QIntValidator, QPixmap
 from PyQt6.QtWidgets import (QAbstractItemView, QDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView,
                              QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QTableWidget,
                              QTableWidgetItem, QVBoxLayout, QWidget)
@@ -67,7 +68,8 @@ SORTS = (("area", "Area", 1), ("width", "Width", 2), ("length", "Length", 2), ("
 # 왼쪽 바 아래 하한 칸 — (Flags 키, 이름).  [파라미터 열기] 로 펴야 보인다.
 PARAMS = (("min_area", _KO.ZO_MIN_AREA), ("min_width", _KO.ZO_MIN_WIDTH), ("min_length", _KO.ZO_MIN_LENGTH),
           ("min_contrast", _KO.ZO_MIN_CONTRAST))
-TABLE_COLS = (("wafer", _KO.ZO_COL_WAFER, None), ("recipe", _KO.ZO_COL_RECIPE, None), ("zone", _KO.ZO_COL_ZONE, None),
+TABLE_COLS = (("lot", _KO.ZO_COL_LOT, None), ("wafer", _KO.ZO_COL_WAFER, None),
+              ("colrow", _KO.ZO_COL_COLROW, None), ("recipe", _KO.ZO_COL_RECIPE, None), ("zone", _KO.ZO_COL_ZONE, None),
               ("first_name", _KO.ZO_COL_CLASS, None), ("cur_name", _KO.ZO_COL_CUR, None),
               ("type_name", _KO.ZO_COL_TYPE, None),
               ("area", _KO.ZO_COL_AREA, 1), ("width", _KO.ZO_COL_WIDTH, 2), ("length", _KO.ZO_COL_LENGTH, 2),
@@ -197,6 +199,26 @@ class _FacetRow(QFrame):
         super().mousePressEvent(e)
 
 
+class _Disclosure(QLabel):
+    """LOT 줄 앞 ▸ / ▾ — 누르면 그 LOT 의 웨이퍼 목록을 펴고 접는다."""
+
+    clicked = pyqtSignal()
+
+    def __init__(self, opened: bool, parent=None) -> None:
+        super().__init__("▾" if opened else "▸", parent)
+        self.opened = opened
+        self.setProperty("role", "muted")
+        self.setFixedWidth(20)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(_KO.ZO_LOT_TOGGLE_TIP)
+
+    def mousePressEvent(self, e):   # noqa: N802
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(e)
+
+
 class _Pic(QLabel):
     """오른쪽 값 칸의 사진 한 장 — 누르면 크게."""
 
@@ -234,6 +256,7 @@ class ZoneOriginDialog(QDialog):
         self._sel: dict = {k: set() for k, _n in B.FACETS}
         self._flags = B.Flags()
         self._params_open = False         # [파라미터 열기] — 기본 접힘
+        self._lot_open: dict = {}         # LOT → 웨이퍼 목록을 펼쳤나(없으면 LOT 이 하나일 때만 펼침)
         self._sort: Optional[tuple] = None          # (키, 큰 순?)
         self._view = "tiles"
         self._shown = PAGE_TILES
@@ -571,8 +594,7 @@ class ZoneOriginDialog(QDialog):
         n = len(self._ids)
         self._ids[folder] = n
         self._folder_of[n] = folder
-        self._data[folder] = B.WaferItems(data.folder, tuple(_with_wafer(it, n) for it in data.items),
-                                          data.note, data.slot, data.cap, data.has_scan)
+        self._data[folder] = replace(data, items=tuple(_with_wafer(it, n) for it in data.items))
 
     def _on_loaded(self, token: int, ok: bool) -> None:
         if token != self._token:
@@ -607,7 +629,23 @@ class ZoneOriginDialog(QDialog):
         if folder is None:
             return "?"
         w = self._data.get(folder)
-        return _KO.ZO_WAFER_FMT.format(slot=w.slot or "?", name=folder.name) if w else folder.name
+        return _KO.ZO_WAFER_FMT.format(slot=w.slot or "?", name=w.wafer_id or folder.name) if w else folder.name
+
+    def wafer_of(self, n: int) -> Optional[B.WaferItems]:
+        return self._data.get(self._folder_of.get(n))
+
+    def _wafer_rank(self, n: int) -> tuple:
+        """LOT 안 웨이퍼 순서 — 슬롯 번호 순(모르면 뒤), 같으면 읽은 순."""
+        w = self.wafer_of(n)
+        slot = w.slot if w is not None else ""
+        return (int(slot) if slot.isdigit() else 1 << 30, n)
+
+    def lot_open(self, lot: str) -> bool:
+        return self._lot_open.get(lot, len(self._order.get("lot", [])) <= 1)
+
+    def toggle_lot(self, lot: str) -> None:
+        self._lot_open[lot] = not self.lot_open(lot)
+        self._render(keep_scroll=True)
 
     def facet_label(self, k: str, v) -> str:
         return self.wafer_label(v) if k == "wafer" else str(v)
@@ -622,8 +660,13 @@ class ZoneOriginDialog(QDialog):
                 v = getattr(it, k)
                 cnt[v] = cnt.get(v, 0) + 1
             keep = [v for v in self._order.get(k, []) if v in cnt]
-            new = sorted((v for v in cnt if v not in keep), key=(lambda v: v) if k == "wafer" else (lambda v: -cnt[v]))
-            self._order[k] = sorted(keep + new) if k == "wafer" else keep + new
+            if k == "wafer":
+                self._order[k] = sorted(cnt, key=self._wafer_rank)
+            elif k == "lot":
+                self._order[k] = sorted(cnt)
+            else:
+                new = sorted((v for v in cnt if v not in keep), key=lambda v: -cnt[v])
+                self._order[k] = keep + new
             self._sel[k] &= set(cnt)
 
     def compute(self) -> tuple:
@@ -714,6 +757,7 @@ class ZoneOriginDialog(QDialog):
         il.setContentsMargins(8, 12, 8, 20)
         il.setSpacing(1)
         self.facet_rows: dict = {}
+        self.lot_discs: dict = {}
         if not self._roots:
             hint = QLabel(_KO.ZO_EMPTY, inner)
             hint.setProperty("role", "muted")
@@ -721,7 +765,10 @@ class ZoneOriginDialog(QDialog):
             hint.setContentsMargins(8, 0, 8, 0)
             il.addWidget(hint)
         else:
+            self._render_coord(inner, il)
             for k, title in B.FACETS:
+                if k == "wafer":
+                    continue                        # LOT 아래에 펼쳐 그린다
                 head = QLabel(title, inner)
                 head.setProperty("role", "ovGroupHead")
                 head.setContentsMargins(8, 10, 0, 4)
@@ -730,14 +777,13 @@ class ZoneOriginDialog(QDialog):
                 top = max([counts[k].get(v, 0) for v in vals] or [1]) or 1
                 for v in vals:
                     n, on = counts[k].get(v, 0), v in self._sel[k]
-                    note = ""
-                    if k == "wafer":
-                        w = self._data.get(self._folder_of.get(v))
-                        note = _KO.ZO_FACET_CAP if w is not None and w.cap else ""
-                    row = _FacetRow(self.facet_label(k, v), n, on, note, inner)
+                    row = _FacetRow(self.facet_label(k, v), n, on, "", inner)
                     row.clicked.connect(lambda k=k, v=v: self.toggle(k, v))
-                    il.addWidget(row)
                     self.facet_rows[(k, v)] = row
+                    if k == "lot":
+                        self._render_lot(inner, il, v, row, counts)
+                        continue
+                    il.addWidget(row)
                     if k == "first_name":
                         cb = _CountBar(n / top, on, inner)
                         cb.setContentsMargins(30, 0, 8, 0)
@@ -773,6 +819,71 @@ class ZoneOriginDialog(QDialog):
         self.side_scroll.setWidget(inner)
         bar.setValue(pos)
 
+    def _render_coord(self, inner: QWidget, il: QVBoxLayout) -> None:
+        """맨 위 '좌표 (col, row)' — 장비 화면 번호를 넣으면 그 die 의 Defect 만.  빈칸 = 안 거름(음수도 된다)."""
+        head = QLabel(_KO.ZO_COORD_HEAD, inner)
+        head.setProperty("role", "ovGroupHead")
+        head.setContentsMargins(8, 0, 0, 4)
+        il.addWidget(head)
+        line = QHBoxLayout()
+        line.setContentsMargins(8, 1, 8, 1)
+        line.setSpacing(6)
+        self.coord_edits: dict = {}
+        for key, text in (("col", _KO.ZO_COORD_COL), ("row", _KO.ZO_COORD_ROW)):
+            lab = QLabel(text, inner)
+            lab.setProperty("role", "ovRowName")
+            line.addWidget(lab)
+            ed = QLineEdit(inner)
+            ed.setProperty("role", "zoParam")
+            ed.setFixedWidth(64)
+            ed.setAlignment(Qt.AlignmentFlag.AlignRight)
+            ed.setValidator(QIntValidator(-9999, 99999, ed))
+            v = getattr(self._flags, key)
+            ed.setText("" if v is None else str(v))
+            ed.editingFinished.connect(lambda key=key, ed=ed: self.set_flag(key, _int_or_none(ed.text())))
+            line.addWidget(ed)
+            line.addSpacing(6)
+            self.coord_edits[key] = ed
+        line.addStretch(1)
+        il.addLayout(line)
+        self.coord_warn = None
+        if self._flags.col is not None or self._flags.row is not None:
+            n = sum(1 for d in self._wafer_folders() if (w := self._data.get(d)) is not None and w.number_warn)
+            if n:
+                self.coord_warn = QLabel(_KO.ZO_COORD_WARN_FMT.format(n=n), inner)
+                self.coord_warn.setProperty("role", "ovRowNote")
+                self.coord_warn.setProperty("warn", "true")
+                self.coord_warn.setWordWrap(True)
+                self.coord_warn.setContentsMargins(8, 2, 8, 0)
+                il.addWidget(self.coord_warn)
+
+    def _render_lot(self, inner: QWidget, il: QVBoxLayout, lot: str, row: "_FacetRow", counts: dict) -> None:
+        """LOT 한 줄(▸ 로 펴기) + 펼치면 그 LOT 웨이퍼 줄들(들여 씀)."""
+        line = QHBoxLayout()
+        line.setContentsMargins(0, 0, 0, 0)
+        line.setSpacing(0)
+        opened = self.lot_open(lot)
+        disc = _Disclosure(opened, inner)
+        disc.clicked.connect(lambda lot=lot: self.toggle_lot(lot))
+        line.addWidget(disc)
+        line.addWidget(row, 1)
+        il.addLayout(line)
+        self.lot_discs[lot] = disc
+        if not opened:
+            return
+        for wn in self._order.get("wafer", []):
+            w = self.wafer_of(wn)
+            if w is None or w.lot != lot:
+                continue
+            n, on = counts["wafer"].get(wn, 0), wn in self._sel["wafer"]
+            wr = _FacetRow(self.wafer_label(wn), n, on, _KO.ZO_FACET_CAP if w.cap else "", inner)
+            wr.clicked.connect(lambda wn=wn: self.toggle("wafer", wn))
+            wrap = QHBoxLayout()
+            wrap.setContentsMargins(22, 0, 0, 0)
+            wrap.addWidget(wr)
+            il.addLayout(wrap)
+            self.facet_rows[("wafer", wn)] = wr
+
     def _render_sel(self) -> None:
         _clear(self._sel_lay)
         chips = []
@@ -781,6 +892,9 @@ class ZoneOriginDialog(QDialog):
                 if v in self._sel[k]:
                     chips.append((self.facet_label(k, v), lambda k=k, v=v: self.toggle(k, v)))
         f = self._flags
+        for key, name in (("col", "Col"), ("row", "Row")):
+            if getattr(f, key) is not None:
+                chips.append((f"{name} = {getattr(f, key)}", lambda key=key: self.set_flag(key, None)))
         for key, name in (("min_area", "Area"), ("min_width", "Width"), ("min_length", "Length"),
                           ("min_contrast", "Contrast")):
             if getattr(f, key):
@@ -918,6 +1032,8 @@ class ZoneOriginDialog(QDialog):
             for c, (k, _n, d) in enumerate(TABLE_COLS):
                 if k == "wafer":
                     text = self.wafer_label(it.wafer)
+                elif k == "colrow":
+                    text = _colrow(it)
                 elif k == "photo":
                     text = "●" if it.photo is not None else ""
                 elif d is not None:
@@ -946,7 +1062,12 @@ class ZoneOriginDialog(QDialog):
         if it is None:
             return
         _clear(self.kv)
-        rows = [(_KO.ZO_ROW_WAFER, self.wafer_label(it.wafer)), (_KO.ZO_ROW_RECIPE, it.recipe),
+        w = self.wafer_of(it.wafer)
+        rows = [(_KO.ZO_ROW_LOT, it.lot or "—"), (_KO.ZO_ROW_WAFER, (w.wafer_id if w else "") or "—"),
+                (_KO.ZO_ROW_SLOT, (w.slot if w else "") or "—"), (_KO.ZO_ROW_COLROW, _colrow(it))]
+        if w is not None and w.number_warn and it.col is not None:
+            rows.append(("", _KO.ZO_ROW_NUMBER_WARN))
+        rows += [None, (_KO.ZO_ROW_RECIPE, it.recipe),
                 (_KO.ZO_ROW_ZONE, it.zone), None, (_KO.ZO_ROW_CLASS, _class_name(it.first_name)),
                 (_KO.ZO_ROW_CUR, _class_name(it.cur_name)),
                 (_KO.ZO_ROW_TYPE, it.type_name), None]
@@ -1338,13 +1459,23 @@ class ZoneOriginDialog(QDialog):
 
 
 def _with_wafer(it: B.Item, n: int) -> B.Item:
-    from dataclasses import replace
     return it if it.wafer == n else replace(it, wafer=n)
 
 
 def _class_name(name: str) -> str:
     """'29 · B R Surface Dark' → 'B R Surface Dark' — 값 칸의 첫 분류 · 재 분류(현택님 예시 그대로)."""
     return name.split(" · ", 1)[-1]
+
+
+def _colrow(it: B.Item) -> str:
+    return f"{it.col}, {it.row}" if it.col is not None and it.row is not None else "—"
+
+
+def _int_or_none(text: str) -> Optional[int]:
+    try:
+        return int(text.strip())
+    except ValueError:
+        return None
 
 
 def _float(text: str) -> float:

@@ -13,7 +13,10 @@ Overkill 튜닝과 **같은 파일 · 같은 규칙**으로 읽는다(현택님 
 **분류 이름과 검출 종류는 다른 축이다** — 'B R Other' 는 크기 · Contrast 기준 묶음에 붙은 이름표라 실제 모양과
 다를 수 있다(B R Other ↔ Dark 조사, 2026-11-23).  그래서 둘을 따로 고르게 한다.
 
-좌표(col · row)는 여기서 계산하지 않는다 — 사진이 있으면 화면이 사진 정보(:mod:`coords.single_info`)로 보여 준다.
+좌표(col · row)는 사진 INI 경로(:func:`camtek_ini.load_folder`)와 **같은 함수**로 낸다 — flt 의 절대 X · Y 를
+:func:`camtek_ini._coord_from_raw` 에 넣고 화면 번호 시프트(:func:`camtek_ini.display_shift`)를 더한다(장비 화면 · Defects.csv
+번호).  die 격자를 못 구하면 비워 둔다(절대좌표 폴백을 쓰지 않는다).  근거: 멀티레시피 샘플 GX57527979 의 장비 Export
+``Defects.csv`` Surface · Height 351/351 이 col · row · die x · y 까지 같았다(관측 2026-11-24).
 전 구간 fail-safe — 못 읽은 것은 ``note`` 에 적고 raise 하지 않는다.
 """
 
@@ -28,6 +31,8 @@ from typing import Callable, Optional
 
 from .. import i18n
 from ..coords import abs_coord, camtek_ini, class_names
+from ..coords import wafer_geometry as WG
+from ..coords.ini_text import read_ini_text
 from ..coords import height_flt as H
 from ..coords.geometry import GEOMETRY_MATCH_TOL
 from ..coords.pixel_size import scan_pixel_size_xy
@@ -48,7 +53,8 @@ SURFACE_PHOTO_TYPE = 0      # 사진 정보 파일 Type — EquipmentClassificat
 
 # 골라 보는 칸 — (Item 속성, 화면 이름).  순서 = 화면 왼쪽 위→아래.
 FACETS = (("first_name", _KO.ZO_FACET_CLASS), ("cur_name", _KO.ZO_FACET_CUR), ("type_name", _KO.ZO_FACET_TYPE),
-          ("recipe", _KO.ZO_FACET_RECIPE), ("zone", _KO.ZO_FACET_ZONE), ("wafer", _KO.ZO_FACET_WAFER))
+          ("recipe", _KO.ZO_FACET_RECIPE), ("zone", _KO.ZO_FACET_ZONE), ("lot", _KO.ZO_FACET_LOT),
+          ("wafer", _KO.ZO_FACET_WAFER))
 
 # 정렬 — (키, 화면 이름).  값이 없는 Defect 는 늘 맨 뒤.
 SORT_KEYS = (("area", "Area"), ("width", "Width"), ("length", "Length"), ("contrast", "Contrast"),
@@ -78,6 +84,9 @@ class Item:
     x: float                    # 사진과 짝지은 좌표(µm) — Scan Crop 을 찾을 때 쓴다
     y: float
     photo: Optional[Path] = None
+    lot: str = ""               # LOT 이름(:func:`read_lot_ids`)
+    col: Optional[int] = None   # 장비 화면 번호(시프트 포함) — 모르면 None
+    row: Optional[int] = None
 
     @property
     def changed(self) -> bool:
@@ -93,6 +102,46 @@ class WaferItems:
     slot: str = ""              # 카세트 슬롯(WaferInfo.ini ActiveSlot) — 모르면 빈 글자
     cap: int = 0                # 장비 저장 상한에 닿았으면 그 상한(Defect 가 일부만 있다), 아니면 0
     has_scan: bool = False      # Scan 목록이 있다 — 상세에서 Scan Crop 을 찾을 수 있다
+    lot: str = ""               # LOT 이름
+    wafer_id: str = ""          # 웨이퍼 ID(모르면 폴더 이름)
+    number_warn: str = ""       # col · row 번호가 틀렸을 수 있다(DefectCoord.number_warn 과 같은 코드)
+
+
+_LOT_KEYS = ("GlobalLotId", "UseLot")
+
+
+def _ini_value(text: str, key: str) -> str:
+    for line in text.splitlines():
+        k, sep, v = line.partition("=")
+        if sep and k.strip().lower() == key.lower() and v.strip():
+            return v.strip()
+    return ""
+
+
+def read_lot_ids(folder: Path) -> tuple[str, str]:
+    """``(LOT, 웨이퍼 ID)`` — ``WaferInfo.ini`` 의 ``GlobalLotId``(없으면 ``UseLot``) · ``UseWaferID``.
+    못 읽으면 LOT = 부모 폴더 이름, 웨이퍼 ID = 폴더 이름."""
+    folder = Path(folder)
+    text = read_ini_text(folder / "WaferInfo.ini") or ""
+    lot = next((v for v in (_ini_value(text, k) for k in _LOT_KEYS) if v), "") or folder.parent.name
+    return lot, _ini_value(text, "UseWaferID") or folder.name
+
+
+def _die_numbers(folder: Path):
+    """폴더 → ``(절대 X, Y) → (화면 col, row) | None`` 함수와 번호 경고 코드(:func:`camtek_ini.coord_from_xy`).
+
+    ⚠ 미구분(확인한 표본 없음): 블록 제품(``geom.block``)과 레시피 N 이름표가 옮겨진 다중 레시피 폴더
+    (Kendall PI6 · PI2)에서 장비 화면이 이 번호와 같은지는 아직 모른다 — 사진 INI 경로와 같은 번호라는 것만 보장한다."""
+    geom = WG.camtek_geometry(folder)
+    if geom is None:
+        return (lambda x, y: None), ""
+    shift = camtek_ini.display_shift(folder)
+
+    def at(x: float, y: float):
+        c = camtek_ini.coord_from_xy(x, y, geom, shift)
+        return c.screen_col, c.screen_row
+    probe = camtek_ini.coord_from_xy(0.0, 0.0, geom, shift)
+    return at, probe.number_warn
 
 
 def _name(classes: dict, no: int) -> str:
@@ -138,7 +187,9 @@ def _num(v) -> Optional[float]:
 def load_folder(folder: Path, wafer: int = 0, report: Callable = lambda msg, done=0, total=0: None) -> WaferItems:
     """웨이퍼 폴더 하나 → :class:`WaferItems`(워커 스레드에서).  ``wafer`` = 화면이 그 폴더에 붙인 번호(Item.wafer)."""
     folder = Path(folder)
-    w = WaferItems(folder, slot=read_active_slot(folder) or "", has_scan=(folder / SI.SCAN_LIST_NAME).is_file())
+    lot, wid = read_lot_ids(folder)
+    w = WaferItems(folder, slot=read_active_slot(folder) or "", has_scan=(folder / SI.SCAN_LIST_NAME).is_file(),
+                   lot=lot, wafer_id=wid)
     try:
         defects, goods, note = P.load_all(folder)
         if note:
@@ -155,6 +206,11 @@ def load_folder(folder: Path, wafer: int = 0, report: Callable = lambda msg, don
         px = scan_pixel_size_xy(folder)
         pxx, pxy = (float(px[0]), float(px[1])) if px else (0.0, 0.0)
         heights = H.load_folder(folder)
+        die_at, w.number_warn = _die_numbers(folder)
+
+        def cr(x, y) -> tuple:
+            got = die_at(x, y)
+            return got if got is not None else (None, None)
 
         report(_KO.ZO_LOADING_PHOTOS)
         photos = _list_images(folder)
@@ -180,7 +236,7 @@ def load_folder(folder: Path, wafer: int = 0, report: Callable = lambda msg, don
                 abs(d.bin) in good_set,
                 _type_label(folder, SURFACE_PHOTO_TYPE, d.type_bits, surface_types), _caught(d, has_mask),
                 d.area * pxx * pxy if ok else None, d.width * pxx if ok else None, d.length * pxx if ok else None,
-                d.contrast or None, None, d.x, d.y, s_pic.get(d.index)))
+                d.contrast or None, None, d.x, d.y, s_pic.get(d.index), lot, *cr(d.x, d.y)))
 
         if heights:
             hs = [_HRec(i, r.x, r.y) for i, r in enumerate(heights)]
@@ -194,7 +250,8 @@ def load_folder(folder: Path, wafer: int = 0, report: Callable = lambda msg, don
                     wafer, i, KIND_HEIGHT, rec, zname, first, _name(classes, first), cur, _name(classes, cur),
                     first in good_set,
                     _type_label(folder, H.HEIGHT_PHOTO_TYPE, r.type, surface_types), _KO.ZO_CAUGHT_HEIGHT,
-                    None, None, None, None, _num(r.height), float(r.x), float(r.y), h_pic.get(i)))
+                    None, None, None, None, _num(r.height), float(r.x), float(r.y), h_pic.get(i), lot,
+                    *cr(r.x, r.y)))
         w.items = tuple(out)
         if not px:
             w.note = _KO.ZO_NO_PIXEL       # 크기 칸만 비었다 — 분류로 고르기는 된다
@@ -222,6 +279,8 @@ class Flags:
     min_width: float = 0.0      # µm
     min_length: float = 0.0     # µm
     min_contrast: float = 0.0
+    col: Optional[int] = None   # 좌표 — 장비 화면 번호(빈칸 = 안 거름)
+    row: Optional[int] = None
 
     def ok(self, it: Item) -> bool:
         if it.good and not self.good:
@@ -229,6 +288,10 @@ class Flags:
         if self.changed and not it.changed:
             return False
         if self.photo and it.photo is None:
+            return False
+        if self.col is not None and it.col != self.col:
+            return False
+        if self.row is not None and it.row != self.row:
             return False
         for k in ("area", "width", "length", "contrast"):
             lo = getattr(self, "min_" + k)

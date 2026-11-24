@@ -246,3 +246,82 @@ def test_caught_not_shown_anywhere(dlg):
     kv = [lab.text() for lab in dlg.kv_host.findChildren(QLabel)]
     assert "잡힌 곳" not in kv and not any(t.startswith(("검출 단계", "기준 묶음")) for t in kv)
     assert all("검출 단계" not in t.toolTip() and "기준 묶음" not in t.toolTip() for t in dlg._tiles.values())
+
+
+# ---------------------------------------------------------------- 좌표 · LOT (현택님 요청 2026-11-24)
+def _defects_csv(folder: Path) -> list:
+    import csv
+    with open(folder / "Defects.csv", encoding="utf-8", errors="replace") as f:
+        return list(csv.DictReader(f))
+
+
+def test_col_row_match_equipment_defects_csv(sample):
+    """골든(관측): 장비 Export ``Defects.csv`` 의 Col · Row 와 Surface · Height 351/351 이 정확히 같다(오차 0).
+    Coplanarity 1건은 이 화면이 읽지 않는 결과라 뺀다."""
+    want = Counter((int(r["Col"]), int(r["Row"])) for r in _defects_csv(SAMPLE)
+                   if not r["Type"].startswith("Coplanarity"))
+    got = Counter((i.col, i.row) for i in sample.items if not i.good)
+    assert sum(want.values()) == 351 and got == want
+    assert sample.number_warn == ""                  # 번호표([ExportData])로 정한 번호 — 경고 없음
+
+
+def test_col_row_uses_display_shift(tmp_path):
+    """합성 Recipe.ini(골든 아님, R4): 실물 FS UBM Defects.csv 14장은 화면 col 이 실제 die 보다 1 작다 —
+    잘라 둔 샘플엔 Recipe.ini 가 없어 시프트 −1 · 방향 2 를 적어 넣으면 col · row 가 14/14 같아야 한다."""
+    import shutil
+    src = ROOT / "dev" / "Threshold 확인" / "T254 FS UBM" / "27125535EWA5"
+    if not (src / "Surface.flt").is_file():
+        pytest.skip("샘플 없음")
+    want = Counter((int(r["Col"]), int(r["Row"])) for r in _defects_csv(src))
+    plain = tmp_path / "plain" / src.name
+    shutil.copytree(src, plain)
+    assert Counter((i.col, i.row) for i in B.load_folder(plain).items) != want    # 시프트 없으면 어긋난다
+    dst = tmp_path / "shift" / src.name                    # display_shift 는 폴더마다 캐시 — 새 폴더로
+    shutil.copytree(src, dst)
+    (dst / "Recipe.ini").write_text("[Display]\nDisplayColShift=-1\nDisplayRowShift=0\nWaferDisplayOrientation=2\n")
+    got = Counter((i.col, i.row) for i in B.load_folder(dst).items)
+    assert got == want and min(c for c, _r in got) == -1      # 맨 왼쪽 열은 화면 col −1
+
+
+def test_no_geometry_leaves_col_row_empty():
+    """die 격자를 못 구하면 번호를 비운다 — 절대좌표 폴백 번호를 지어내지 않는다."""
+    src = ROOT / "dev" / "Threshold 확인" / "T254 BS CUP BS_2" / "GX57010487"
+    if not (src / "Surface.flt").is_file():
+        pytest.skip("샘플 없음")
+    w = B.load_folder(src)
+    assert w.items and all(i.col is None and i.row is None for i in w.items)
+
+
+def test_lot_and_wafer_ids(sample):
+    assert (sample.lot, sample.wafer_id, sample.slot) == ("FLU-1122N", "GX57527979", "1")
+    assert {i.lot for i in sample.items} == {"FLU-1122N"}
+
+
+def test_flags_col_row():
+    it = _item(col=-1, row=5)
+    assert B.Flags(col=-1).ok(it) and B.Flags(col=-1, row=5).ok(it)
+    assert not B.Flags(col=0).ok(it) and not B.Flags(row=4).ok(it)
+    assert not B.Flags(col=1).ok(_item())                  # 번호 모름 → 좌표를 넣으면 빠진다
+
+
+def test_dialog_coord_filter_and_detail(dlg):
+    it = dlg._passed[0]
+    dlg.set_flag("col", it.col)
+    dlg.set_flag("row", it.row)
+    assert dlg._passed and all((i.col, i.row) == (it.col, it.row) for i in dlg._passed)
+    assert dlg.coord_edits["col"].text() == str(it.col) and dlg.coord_warn is None
+    from PyQt6.QtWidgets import QLabel
+    texts = [lab.text() for lab in dlg.kv_host.findChildren(QLabel)]
+    for key, val in (("LOT", "FLU-1122N"), ("Wafer", "GX57527979"), ("슬롯#", "1"),
+                     ("col, row", f"{dlg.current().col}, {dlg.current().row}")):
+        assert texts[texts.index(key) + 1] == val
+
+
+def test_dialog_lot_groups_wafers(dlg):
+    """LOT 한 줄 + ▸/▾ 로 그 LOT 웨이퍼를 펴고 접는다(LOT 이 하나면 처음부터 펼침)."""
+    assert ("lot", "FLU-1122N") in dlg.facet_rows and dlg.lot_open("FLU-1122N")
+    assert any(k == "wafer" for k, _v in dlg.facet_rows)
+    dlg.toggle_lot("FLU-1122N")
+    assert not dlg.lot_open("FLU-1122N") and not any(k == "wafer" for k, _v in dlg.facet_rows)
+    dlg.toggle("lot", "FLU-1122N")
+    assert len(dlg._passed) == 351 and dlg.chips_host.isVisibleTo(dlg)
