@@ -973,3 +973,19 @@ def test_scan_missing_shows_reason_and_toast(styled_qapp):
     d.close()
 
 
+
+
+def test_long_notes_do_not_widen_the_viewer(styled_qapp):
+    """긴 안내(상태줄 note · 머리줄 toast)가 한 줄로 서서 화면 최소 폭을 1332px 까지 키웠다 —
+    1100px 창에서 가로 스크롤이 생겼다(실측 2026-11-24).  줄을 바꿔 최소 폭을 지킨다."""
+    v = loader.ViewLoad(loader.GlImage(np.full((H, W), 9, np.uint8), 8, True, "c.jpg", []),
+                        scan_missing=True, source_path="c.jpg", scan_status="no_candidate")
+    d = _make(styled_qapp, view=v)
+    long = "아주 긴 안내 문장이 이어진다 · " * 12
+    d._set_note([long, long], warn=True)
+    d.toast.setText(long)
+    _pump()
+    assert d.note.wordWrap() and d.toast.wordWrap()
+    # 1100px 창 − 접힌 메뉴(76px) − 여백 안에 들어가야 한다.
+    assert d.minimumSizeHint().width() <= 1000, d.minimumSizeHint().width()
+    d.close()

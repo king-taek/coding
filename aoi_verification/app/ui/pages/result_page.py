@@ -228,12 +228,13 @@ class ResultPage(QWidget):
         self.review_unmatched_btn = NeonButton(
             i18n.KO.BTN_REVIEW_UNMATCHED, role="ghost",
         )
-        self.review_unmatched_btn.setMinimumWidth(200)
+        # ★ 고정 최소 폭을 두지 않는다 — 200/240 px 하한 때문에 800×600 창에서 버튼 줄이
+        #   창보다 넓어져 [엑셀로 저장] 이 오른쪽 끝에서 잘렸다(실측 2026-11-24).
         self.review_unmatched_btn.clicked.connect(self._on_review_unmatched)
         bar.addWidget(self.review_unmatched_btn)
 
         self.export_btn = NeonButton(i18n.KO.BTN_EXPORT_EXCEL, role="primary")
-        self.export_btn.setMinimumWidth(240)
+        self.export_btn.setMinimumWidth(160)      # 주 버튼은 조금 넓게 — 줄이 창을 넘지 않는 만큼만
         self.export_btn.setMinimumHeight(46)
         self.export_btn.clicked.connect(self._on_export)
         bar.addWidget(self.export_btn)

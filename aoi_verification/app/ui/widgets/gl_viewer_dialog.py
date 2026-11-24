@@ -267,7 +267,11 @@ class GlViewerDialog(QDialog):
         bar.addWidget(self.file_label)
         bar.addWidget(self.open_btn)
         bar.addStretch(1)
-        bar.addWidget(self.toast)
+        # ★ 긴 안내가 한 줄로 서면 그 폭이 창 최소 폭이 돼 1100px 창에 가로 스크롤이 생겼다
+        #   (최소 1332px, 실측 2026-11-24) — 줄을 바꿔 남는 폭 안에 담는다.
+        self.toast.setWordWrap(True)
+        self.toast.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        bar.addWidget(self.toast, 1)
         bar.addWidget(self.compare_btn)
         bar.addWidget(self.png_btn)
         bar.addWidget(self.xlsx_btn)
@@ -427,7 +431,10 @@ class GlViewerDialog(QDialog):
         self.note = QLabel("", bar)
         self.note.setProperty("role", "mutedSmall")
         self.note.setVisible(False)
-        row.addWidget(self.note)
+        # 긴 안내(Scan 못 찾음 · 밝기 분석 …)는 줄을 바꾼다 — 한 줄이면 창 최소 폭을 키운다.
+        self.note.setWordWrap(True)
+        self.note.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(self.note, 1)
         self.zoom_status = QLabel("", bar)
         self.zoom_status.setProperty("role", "mono")
         row.addSpacing(16)

@@ -266,6 +266,35 @@ def test_stat_tiles_are_not_clipped(styled_qapp, tmp_path):
         page.deleteLater()
 
 
+def test_export_button_is_fully_visible_at_800x600(styled_qapp, tmp_path):
+    """800×600 창에서 [엑셀로 저장] 이 오른쪽 끝에서 잘렸다 — 버튼 줄의 고정 최소 폭
+    (실패 검토 200 · 저장 240)이 창보다 넓은 줄을 만들었다(실측 2026-11-24)."""
+    from aoi_verification.app.models.result import FinalResult
+    from aoi_verification.app.ui.pages.result_page import ResultPage
+
+    res = FinalResult(mode="cross", ref_machine="17", val_machine="18",
+                      matches=_matches(3, tmp_path),
+                      unmatched_refs=[MissEntry(slot="S1", side="ref",
+                                                path=tmp_path / f"m{i}.jpg")
+                                      for i in range(120)])
+    page = ResultPage()
+    page.show_result(res, target_path=Path("C:/AOI_Verify/결과/r.xlsx"),
+                     val_pool={"S1": []}, coord_mode=True)
+    page.resize(800, 560)
+    page.show()
+    for _ in range(5):
+        styled_qapp.processEvents()
+    assert page.minimumSizeHint().width() <= 800, \
+        f"결과 화면 최소 폭 {page.minimumSizeHint().width()}px — 800px 창을 넘는다"
+    assert page.width() == 800
+    for b in (page.export_btn, page.review_unmatched_btn, page.new_btn):
+        right = b.mapTo(page, b.rect().topRight()).x()
+        assert b.mapTo(page, b.rect().topLeft()).x() >= 0
+        assert right < page.width(), f"'{b.text()}' 가 잘린다 (오른쪽 {right} ≥ {page.width()})"
+        assert b.width() >= b.sizeHint().width(), f"'{b.text()}' 글자가 잘린다"
+    page.deleteLater()
+
+
 def _tile_captions(page) -> list[tuple[str, str]]:
     from PyQt6.QtWidgets import QFrame, QLabel
     out = []
