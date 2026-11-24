@@ -39,7 +39,8 @@ from typing import Optional
 from . import abs_coord, camtek_ini, pixel_size
 from .ini_text import decode_ini_bytes
 
-__all__ = ["SCAN_LIST_NAME", "CROP_SIDE_UM", "Candidate", "ScanMatch",
+__all__ = ["SCAN_LIST_NAME", "CROP_SIDE_UM", "Candidate", "ScanMatch", "ScanHit", "ScanDefects",
+           "is_scan_name", "defects_in", "load_image",
            "parse_manifest", "scan_uv", "crop_box", "rank_candidates", "resolve", "resolve_xy", "resolve_xy_many",
            "cut", "load_crop", "crops_from", "load_full", "clear_caches"]
 
@@ -297,6 +298,124 @@ def _resolve(folder: Path, color: Path, get_xy, side_um: float) -> ScanMatch:
     return _rank(_prepare(folder, color), folder, color, get_xy, side_um)
 
 
+# ---------------------------------------------------------------------------
+# 거꾸로 — Scan 사진 한 장 → 그 안에 찍힌 Defect 들 (사진 정보 화면, 사용자 요청 2026-11-24)
+# ---------------------------------------------------------------------------
+NOT_LISTED = "not_listed"          # 이 Scan 이 목록 파일에 없다
+
+
+def _is_num(tok: str) -> bool:
+    try:
+        float(tok)
+        return True
+    except ValueError:
+        return False
+
+
+def is_scan_name(name: str) -> bool:
+    """Camtek Scan 사진 이름(``X.Y.t.jpeg`` · ``X.Y.t.N.jpeg``, X · Y 는 수)인가."""
+    toks = Path(name).stem.split(".")
+    if len(toks) == 4 and not toks[3].isdigit():
+        return False
+    return (len(toks) in (3, 4) and toks[2].lower() == "t"
+            and _is_num(toks[0]) and _is_num(toks[1]))
+
+
+@dataclass(frozen=True)
+class ScanHit:
+    """Scan 사진 안에 든 Defect 하나."""
+    path: Path                     # 그 Defect 의 Color 사진 경로 — 정보 조회 키(파일이 없어도 된다)
+    xy: tuple[float, float]        # 절대 X/Y(µm) — ColorImageGrabingInfo.ini
+    recipe: int                    # 그 Defect 를 찍은 레시피(``RecipeNumber``, 없으면 0)
+    uv: tuple[float, float]        # Scan 원본 픽셀
+    box: tuple[int, int, int, int]  # 300 µm Crop 범위
+
+
+@dataclass(frozen=True)
+class ScanDefects:
+    """:func:`defects_in` 결과.  ``status == OK`` 인데 ``hits`` 가 비면 '이 사진 안에 Defect 없음'."""
+    status: str
+    scan_path: Path
+    size_wh: Optional[tuple[int, int]] = None
+    pixel_xy: Optional[tuple[float, float]] = None
+    hits: tuple[ScanHit, ...] = field(default_factory=tuple)
+
+    @property
+    def ok(self) -> bool:
+        return self.status == OK
+
+
+def _hit_order(scan_recipe: Optional[int]):
+    """같은 레시피 Defect 먼저, 그다음 위→아래 · 왼쪽→오른쪽(사진을 읽는 순서)."""
+    same = scan_recipe if scan_recipe is not None else 1
+    return lambda h: (h.recipe not in (same, 0), h.uv[1], h.uv[0], h.path.name.casefold())
+
+
+def defects_in(scan_path, side_um: float = CROP_SIDE_UM) -> ScanDefects:
+    """Scan 사진 한 장 → 그 안에 든 Defect 들.  :func:`rank_candidates` 의 역방향이다 —
+    같은 :func:`scan_uv` · 같은 포함 조건(``0 ≤ u < W``, ``0 ≤ v < H``) · 같은 :func:`crop_box`.
+    그래서 INI 에 좌표가 있는 Color 사진에서 이 Scan 을 찾았다면, 이 Scan 에서도 그 Defect 가 같은 자리에 나온다.
+    (정방향은 INI 항목이 없으면 Color 파일명의 점표기로 물러서지만, 거꾸로는 INI 에 적힌 Defect 만 셈 수 있다.)
+
+    값은 전부 그 폴더 파일에서 읽는다: 중심 = ``ScanResultImageList.txt``(Scan 파일명의 두 수치는
+    절대좌표가 아니라 쓰지 않는다), 크기 = 실제 JPEG, 픽셀 = 그 Scan 레시피의 값(못 읽으면 실패),
+    Defect = ``ColorImageGrabingInfo.ini`` 의 X/Y.  레시피는 거르지 않는다(정방향도 거르지 않는다) —
+    같은 레시피를 먼저 늘어놓는다.  정렬 사진(``.wlup``)·Scan 이름은 Defect 가 아니라 뺀다.
+    Color 사진 항목이 없는 Defect(Surface.flt 에만 있는 것)는 아직 보이지 않는다.
+    예외를 밖으로 내지 않는다."""
+    scan = Path(scan_path)
+    folder = scan.parent
+    try:
+        lst = folder / SCAN_LIST_NAME
+        if not lst.exists():
+            return ScanDefects(NO_MANIFEST, scan)
+        status, rows = parse_manifest(decode_ini_bytes(lst.read_bytes()))
+        if status != OK:
+            return ScanDefects(status, scan)
+        center = next(((x, y) for n, x, y in rows if n.casefold() == scan.name.casefold()), None)
+        if center is None:
+            return ScanDefects(NOT_LISTED, scan)
+        wh = _image_size(str(scan))
+        if wh is None or wh[0] <= 0 or wh[1] <= 0:
+            return ScanDefects(UNREADABLE, scan)
+        recipe_n = tile_recipe(scan.name)
+        px = pixel_size.scan_pixel_size_xy_recipe(folder, recipe_n)
+        if px is None:
+            return ScanDefects(NO_PIXEL_SIZE, scan, wh)
+        from .wafer_geometry import is_alignment_photo
+        abs_xy = camtek_ini.load_abs_folder(folder)
+        if not abs_xy:
+            return ScanDefects(NO_COORDINATES, scan, wh, px)
+        names = camtek_ini.load_name_folder(folder)
+        recipes = camtek_ini.load_recipe_folder(folder)
+        try:
+            with os.scandir(folder) as it:
+                real = {Path(e.name).stem.lower(): e.path for e in it
+                        if e.is_file() and Path(e.name).suffix.lower() in (".jpeg", ".jpg")}
+        except OSError:
+            real = {}
+        hits = []
+        w, h = wh
+        for stem, xy in abs_xy.items():
+            name = names.get(stem, stem)
+            if is_alignment_photo(name) or is_scan_name(name):
+                continue
+            u, v = scan_uv(xy, center, wh, px)
+            if not (0.0 <= u < w and 0.0 <= v < h):
+                continue
+            # 사진이 폴더에 있으면 그 실제 경로, 없으면 INI 섹션 이름 그대로(어느 쪽이든 stem 이 INI 키와 같다).
+            path = Path(real[stem]) if stem in real else folder / name
+            if path.stem.lower() != stem:
+                path = folder / (name + ".jpeg")      # 섹션 이름에 확장자가 없을 때 — stem 이 잘리지 않게
+            hits.append(ScanHit(path, xy, int(recipes.get(stem, 0) or 0), (u, v),
+                                crop_box((u, v), px, side_um)))
+        hits.sort(key=_hit_order(recipe_n))
+        return ScanDefects(OK, scan, wh, px, tuple(hits))
+    except Exception:
+        _LOG.exception("Scan 사진 안 Defect 찾기 실패: %s", scan)
+        return ScanDefects(UNREADABLE, scan)
+
+
 def tile_recipe(name: str) -> Optional[int]:
     """Scan 파일명 ``X.Y.t.N.jpeg`` 의 레시피 번호 N.  ``X.Y.t.jpeg``(단일 레시피)면 None."""
     toks = Path(name).stem.split(".")
@@ -471,6 +590,15 @@ def crops_from(path, boxes) -> Optional[list]:
                 im = src.copy()  # EXIF 회전을 적용하지 않는다(raw 규약 — _decode 와 같다)
             im.load()
         return [cut(im, b) for b in boxes]
+    except Exception:
+        _LOG.warning("Scan 원본을 읽지 못함: %s", path)
+        return None
+
+
+def load_image(path):
+    """Scan 원본(raw, EXIF 회전 없음).  못 읽으면 None."""
+    try:
+        return _decode(Path(path))
     except Exception:
         _LOG.warning("Scan 원본을 읽지 못함: %s", path)
         return None
