@@ -7,8 +7,8 @@
 
 두 소비자가 필요로 하는 모양이 다르다:
 
-- 엑셀은 셀 안에 쌓을 **한 줄 문자열**("area 55.00 ㎛²")
-- 정보 화면은 제도 시트 표의 **라벨/값 2열**("area" · "55.00 ㎛²")
+- 엑셀은 셀 안에 쌓을 **한 줄 문자열**("area 55.00 ㎡")
+- 정보 화면은 제도 시트 표의 **라벨/값 2열**("area" · "55.00 ㎡")
 
 그래서 계측 하나를 :class:`Measure` 로 만들고 세 표기(label·value·line)를 **한 자리에서
 같은 수치로** 채운다.  따로 포맷하면 두 화면이 갈라진다.
@@ -34,15 +34,16 @@ from . import resolve as _resolve_coord
 from .models import KIND_HEIGHT, NUMBER_WARN_KLA_GUESS, NUMBER_WARN_NO_TABLE
 
 __all__ = ["Measure", "InfoRow", "InfoGroup", "measures", "geometry_lines",
-           "coord_lines", "defect_lines", "describe", "has_measurements"]
+           "coord_lines", "defect_lines", "describe", "describe_in_scan",
+           "scan_file_group", "has_measurements"]
 
 
 @dataclass(frozen=True)
 class Measure:
     """계측 항목 하나 — 두 화면이 쓰는 세 표기를 함께 들고 있다."""
     label: str    # 정보 화면 좌측 라벨 ("area")
-    value: str    # 정보 화면 우측 값, 모노로 찍힌다 ("55.00 ㎛²")
-    line: str     # 엑셀 셀 안 한 줄 ("area 55.00 ㎛²")
+    value: str    # 정보 화면 우측 값, 모노로 찍힌다 ("55.00 ㎡")
+    line: str     # 엑셀 셀 안 한 줄 ("area 55.00 ㎡")
     cluster: str = ""   # 정보 화면 묶음 — 같은 묶음끼리는 구분선 없이 붙인다
 
 
@@ -323,6 +324,40 @@ def describe(image_path: Path) -> list[InfoGroup]:
     groups.append(InfoGroup(i18n.KO.IMAGE_INFO_GROUP_DEFECT,
                             tuple(defect_rows)))
     return groups
+
+
+def scan_file_group(scan_path: Path) -> InfoGroup:
+    """흑백 Scan 사진 자체의 '파일' 덩이 — 파일명·폴더·WaferID 만.
+
+    Scan 사진에는 :func:`describe` 를 쓰지 않는다 — Scan 파일명의 두 수치는 절대좌표가 아닌데
+    점표기 해석(:func:`abs_coord.dotted_xy`)이 그것을 좌표로 읽어 엉뚱한 '절대 X / Y' 를 낸다."""
+    p = Path(scan_path)
+    rows = [InfoRow(i18n.KO.IMAGE_INFO_ROW_SCAN, p.name, mono=True, cluster=CLUSTER_FILE),
+            InfoRow(i18n.KO.IMAGE_INFO_ROW_FOLDER, str(p.parent), mono=True,
+                    cluster=CLUSTER_FILE)]
+    wafer_id = _safe(lambda: kla_info.read_wafer_id(p.parent))
+    if wafer_id:
+        rows.append(InfoRow(i18n.KO.IMAGE_INFO_ROW_WAFER_ID, wafer_id, mono=True,
+                            cluster=CLUSTER_FILE))
+    return InfoGroup(i18n.KO.IMAGE_INFO_GROUP_FILE, tuple(rows))
+
+
+def describe_in_scan(scan_path: Path, defect_path: Path) -> list[InfoGroup]:
+    """흑백 Scan 사진 안에서 찾은 Defect 하나 — 그 Defect 의 Color 사진과 **같은 생산자**
+    (:func:`describe`)로 만들고, '파일' 덩이 맨 위에 연 Scan 사진 이름을 붙인다.
+    Defect 의 파일명 줄은 'Defect 사진' 으로 부른다(사진이 폴더에 없어도 정보파일로 읽힌다)."""
+    groups = describe(Path(defect_path))
+    out = []
+    for g in groups:
+        if g.title == i18n.KO.IMAGE_INFO_GROUP_FILE:
+            rows = [InfoRow(i18n.KO.IMAGE_INFO_ROW_SCAN, Path(scan_path).name, mono=True,
+                            cluster=CLUSTER_FILE)]
+            rows += [InfoRow(i18n.KO.IMAGE_INFO_ROW_DEFECT_PHOTO, r.value, r.mono, r.stamp,
+                             r.cluster) if r.label == i18n.KO.IMAGE_INFO_ROW_FILE else r
+                     for r in g.rows]
+            g = InfoGroup(g.title, tuple(rows))
+        out.append(g)
+    return out
 
 
 def has_measurements(groups: list[InfoGroup]) -> bool:
