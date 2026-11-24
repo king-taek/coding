@@ -44,6 +44,21 @@ ENTRIES = [
         ],
     },
     {
+        "id": "2026-11-24-overkill-report-live",
+        "date": "2026-11-24",
+        "headline": "Overkill 튜닝 보고서를\n눌러 볼 수 있습니다",
+        "summary": "Defect Map · 사진 · 사진 정보 · 고른 목록 · 웨이퍼별 표가 들어가고, 변경 전 · 후를 바꿔 봅니다.\n"
+                   "내보낼 때 사진 크기 · 견본 · Scan 사진 · Defect Map 을 고릅니다.",
+        "others": [
+            ("Overkill 튜닝", "펼친 사진에서 바로 [Defect] · [Overkill] 로 가릅니다 — Z 로 되돌립니다"),
+            ("Overkill 튜닝", "[Classify 가져오기] — 사람이 바꾼 분류를 꼭 잡기 · Overkill 로 한 번에 넣습니다"),
+            ("Overkill 튜닝", "[선택 목록] — 고른 것을 CSV 로 저장하고 다시 열어 그대로 고릅니다"),
+            ("Defect 정보 조회", "LOT · Wafer ID · 슬롯 줄이 붙고, 묶음마다 상자로 나눴습니다"),
+            ("Defect 정보 조회", "사진 여러 장이나 폴더를 넣으면 아래 띠에서 ◀ ▶ 로 넘겨 봅니다"),
+            ("Defect 정보 조회", "[GL 보기] 이름을 [GL 히스토그램] 으로 바꿨습니다"),
+        ],
+    },
+    {
         "id": "2026-11-24-zone-origin-simple",
         "date": "2026-11-24",
         "headline": "어느 Zone에서 왔니? 화면을\n간단히 했습니다",
@@ -52,6 +67,9 @@ ENTRIES = [
         "others": [
             ("어느 Zone에서 왔니?", "Area · Width · Length · Contrast 하한을 [파라미터 열기] 안에 접어 두었습니다"),
             ("사진 정보", "흑백 Scan 사진(….t.N.jpeg)만 넣어도 그 안의 Defect 를 찾아 잘라 보이고, 컬러 사진과 같은 정보를 보입니다 — 여럿이면 ◀ ▶ 로 넘깁니다"),
+            ("Defect Map", "고른 사진 map 에 사진을 더 끌어 놓으면 ‘현재 map 에 추가 · 새로 그리기’ 를 고릅니다"),
+            ("Defect Map", "KLA · Camtek 사진이 한 map 에 섞이면 빨간 경고가 뜹니다"),
+            ("Defect Map", "흑백 Scan 사진을 넣으면 그 안에 든 Defect 들을 찍습니다"),
         ],
     },
     {

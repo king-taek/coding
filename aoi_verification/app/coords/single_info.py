@@ -29,7 +29,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import i18n
-from . import abs_coord, geometry, kla_info
+from . import abs_coord, geometry
+from ..models import lot_info
 from . import resolve as _resolve_coord
 from .models import KIND_HEIGHT, NUMBER_WARN_KLA_GUESS, NUMBER_WARN_NO_TABLE
 
@@ -272,14 +273,10 @@ def describe(image_path: Path) -> list[InfoGroup]:
     file_rows = [
         InfoRow(i18n.KO.IMAGE_INFO_ROW_FILE, p.name, mono=True,
                 cluster=CLUSTER_FILE),
+        *_id_rows(p.parent),
         InfoRow(i18n.KO.IMAGE_INFO_ROW_FOLDER, str(p.parent), mono=True,
                 cluster=CLUSTER_FILE),
     ]
-    wafer_id = _safe(lambda: kla_info.read_wafer_id(p.parent))
-    if wafer_id:
-        file_rows.append(
-            InfoRow(i18n.KO.IMAGE_INFO_ROW_WAFER_ID, wafer_id, mono=True,
-                    cluster=CLUSTER_FILE))
     coord = _safe(lambda: _resolve_coord(p))
     if coord is not None:
         file_rows.append(InfoRow(
@@ -338,12 +335,9 @@ def scan_file_group(scan_path: Path) -> InfoGroup:
     점표기 해석(:func:`abs_coord.dotted_xy`)이 그것을 좌표로 읽어 엉뚱한 '절대 X / Y' 를 낸다."""
     p = Path(scan_path)
     rows = [InfoRow(i18n.KO.IMAGE_INFO_ROW_SCAN, p.name, mono=True, cluster=CLUSTER_FILE),
+            *_id_rows(p.parent),
             InfoRow(i18n.KO.IMAGE_INFO_ROW_FOLDER, str(p.parent), mono=True,
                     cluster=CLUSTER_FILE)]
-    wafer_id = _safe(lambda: kla_info.read_wafer_id(p.parent))
-    if wafer_id:
-        rows.append(InfoRow(i18n.KO.IMAGE_INFO_ROW_WAFER_ID, wafer_id, mono=True,
-                            cluster=CLUSTER_FILE))
     return InfoGroup(i18n.KO.IMAGE_INFO_GROUP_FILE, tuple(rows))
 
 
@@ -363,6 +357,16 @@ def describe_in_scan(scan_path: Path, defect_path: Path) -> list[InfoGroup]:
             g = InfoGroup(g.title, tuple(rows))
         out.append(g)
     return out
+
+
+def _id_rows(folder: Path) -> list[InfoRow]:
+    """LOT · Wafer ID · Slot# 세 줄 — 장비 파일에서 못 읽은 칸은 '—'(현택님 결정 2026-11-24: 줄은 늘 둔다)."""
+    ids = _safe(lambda: lot_info.read_wafer_ids(folder)) or lot_info.WaferIds()
+    blank = i18n.KO.IMAGE_INFO_UNKNOWN
+    return [InfoRow(label, value or blank, mono=True, cluster=CLUSTER_FILE)
+            for label, value in ((i18n.KO.IMAGE_INFO_ROW_LOT, ids.lot),
+                                 (i18n.KO.IMAGE_INFO_ROW_WAFER_ID, ids.wafer_id),
+                                 (i18n.KO.IMAGE_INFO_ROW_SLOT, ids.slot))]
 
 
 def has_measurements(groups: list[InfoGroup]) -> bool:

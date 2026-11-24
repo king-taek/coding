@@ -55,7 +55,7 @@ from PyQt6.QtCore import (QBuffer, QCoreApplication, QEvent, QIODevice, QLocale,
 from PyQt6.QtGui import (QColor, QDesktopServices, QDoubleValidator, QFont, QFontMetrics, QImage, QPainter, QPainterPath,
                          QPen, QPixmap, QPolygonF)
 from PyQt6.QtWidgets import (QAbstractButton, QAbstractSlider, QApplication, QButtonGroup, QDialog, QFrame, QHBoxLayout,
-                             QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+                             QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
 from ...config import CONFIG, Sizing
@@ -65,8 +65,10 @@ from ...coords import scan_crop_cache as SCC
 from ...coords import scan_image as SI
 from ...coords import surface_flt as _flt
 from ...coords.pixel_size import scan_pixel_size_xy
-from ...models.lot_info import read_active_slot
+from ...models.lot_info import read_active_slot, read_wafer_ids
 from ...models.slot import _list_images, list_slot_dirs
+from ...threshold import classify as CL
+from ...threshold import pick_list as PL
 from ...threshold import preview as P
 from ...threshold import report as RP
 from ...threshold import rich as RS
@@ -78,7 +80,7 @@ from .. import motion
 from ..deferred import call_later
 from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import guess_kinds, install_paste, local_paths, split_paths
-from ..folder_picker import FolderPicker, SavePicker
+from ..folder_picker import FilePicker, FolderPicker, SavePicker
 from ..undo_keys import bind_undo
 from . import photo_menu
 from . import sheet_host as sheets
@@ -1528,9 +1530,9 @@ class _ZoneRow(QAbstractButton):
         p.end()
 
 
-def _data_uri(photo) -> str:
+def _data_uri(photo, px: int = EXPORT_PHOTO_PX) -> str:
     """사진 → 작은 JPEG ``data:`` 주소(HTML 안에 넣는다).  못 읽으면 빈 문자열."""
-    pix = _pixmap(photo, EXPORT_PHOTO_PX, kind="mid")
+    pix = _pixmap(photo, px, kind="mid")
     if pix.isNull():
         return ""
     buf = QBuffer()
@@ -1716,6 +1718,11 @@ class ThresholdPreviewDialog(QDialog):
         self._pick_bus.done.connect(self._on_pick_computed)
         self._pick_token = 0              # [적용] 계산의 세대 — 늦게 온 옛 결과는 버린다
         self._pick_touched: set = set()   # 마지막 [적용] 에서 고른 것이 바뀐 Zone — 그 Zone 저장분만 고친다
+        self._mark_undo: list = []        # 값 띠 [Defect] · [Overkill] 직전 상태 — Z 로 하나씩 되돌린다
+        self._keep_open = False           # 다음 다시 그리기에서 펼친 값 띠를 닫지 않는다(띠에서 가른 직후)
+        self._has_classify = False        # 사람이 검토로 바꾼 분류가 있다 — [Classify 가져오기] 를 켠다
+        from .report_options_dialog import ReportOptions
+        self._report_opts = ReportOptions()  # 보고서 내보내기 설정 — 이 화면을 닫을 때까지 남는다
         self._pick_dlg: Optional[QDialog] = None   # 열려 있는 [Defect 고르기] 팝업
         self._pick_refresh = QTimer(self)          # 사진이 한 장씩 올 때마다 팝업 전체를 훑지 않게 모아서 한 번
         self._pick_refresh.setSingleShot(True)
@@ -1759,6 +1766,10 @@ class ThresholdPreviewDialog(QDialog):
         self._picker.picked.connect(lambda p: p and self.add_folders([Path(p)]))
         self._save_picker = SavePicker(self, purpose="threshold_export")
         self._save_picker.picked.connect(self._export_to)
+        self._list_save_picker = SavePicker(self, purpose="overkill_list")     # 선택 목록 CSV
+        self._list_save_picker.picked.connect(self.save_list)
+        self._list_open_picker = FilePicker(self, purpose="overkill_list")
+        self._list_open_picker.picked.connect(lambda got: self.open_list(got[0]))
         self._build()
         for b in self.findChildren(QPushButton):     # 열릴 때 첫 버튼이 포커스 링을 달고 나오지 않게
             b.setAutoDefault(False)
@@ -1942,11 +1953,24 @@ class ThresholdPreviewDialog(QDialog):
         self.pick_open_btn.clicked.connect(self.open_pick_dialog)
         self.pick_open_btn.setVisible(self._mode == "auto")
         srow.addWidget(self.pick_open_btn)
+        self.classify_btn = NeonButton(_KO.OVERKILL_CLASSIFY_OPEN, role="ghost")   # 자동 추천 모드에서만 — 사람이 바꾼 분류가 있을 때
+        self.classify_btn.clicked.connect(self.open_classify_dialog)
+        self.classify_btn.setVisible(self._mode == "auto")
+        self.classify_btn.setEnabled(False)
+        srow.addWidget(self.classify_btn)
         self.saved_btn = NeonButton(_KO.OVERKILL_SAVED_LOAD, role="textAction")   # 자동 추천 모드에서만 — 저장해 둔 선택
         self.saved_btn.clicked.connect(self.load_saved_picks)
         self.saved_btn.setVisible(self._mode == "auto")
         self.saved_btn.setEnabled(False)
         srow.addWidget(self.saved_btn)
+        self.list_btn = NeonButton(_KO.OVERKILL_LIST, role="textAction")   # 고른 것 ↔ CSV(현택님 2026-11-24 안 B) — 줄이 넘치지 않게 메뉴 하나
+        list_menu = QMenu(self.list_btn)
+        self.list_save_act = list_menu.addAction(_KO.OVERKILL_LIST_SAVE, self._on_list_save)
+        self.list_open_act = list_menu.addAction(_KO.OVERKILL_LIST_OPEN, self._on_list_open)
+        self.list_btn.clicked.connect(lambda: list_menu.popup(self.list_btn.mapToGlobal(QPoint(0, self.list_btn.height()))))
+        self.list_btn.setVisible(self._mode == "auto")
+        self.list_btn.setEnabled(False)
+        srow.addWidget(self.list_btn)
         self.reset_btn = NeonButton(_KO.THRESH_PREVIEW_RESET, role="textAction")
         self.reset_btn.setToolTip(_KO.THRESH_PREVIEW_RESET_TIP)
         self.reset_btn.clicked.connect(self.reset)
@@ -2537,6 +2561,9 @@ class ThresholdPreviewDialog(QDialog):
         폴더를 더하거나 빼도 남아 있는 웨이퍼의 꼭 잡기와, 합치기 기준(첫 폴더의 레시피)이 같으면 바꾼 값도 이어 간다.
         기준이 바뀌면(첫 폴더를 뺐을 때) 바꾼 값 · 꼭 잡기를 처음으로 되돌리고 알린다."""
         prev = self._w
+        self._mark_undo = []
+        self._keep_open = False
+        self._has_classify = w is not None and any(CL.changed(d) for d in w.defects)
         kept_picks = {(_folder_of(prev, d), d.index) for d in self._picked.values()} if prev else set()
         both = prev is not None and w is not None and not prev.note and not w.note
         same = both and same_base(prev, w)
@@ -3085,7 +3112,9 @@ class ThresholdPreviewDialog(QDialog):
         # 끄는 동안은 다시 그릴 사진이 적을 때만 바로 바꾼다 — [남음] 탭에 사진 1,110장이면 한 칸마다 0.7 초씩 멈춰
         # 손잡이 · 화면이 깨져 보였다(실측 2026-11-21).  많으면 손을 뗄 때 한 번만 그린다.
         if final or (drop <= LIVE_TILES_MAX and min(len(self._items()), self._shown) <= LIVE_TILES_MAX):
-            self._open = None if self._tab != "good" else self._open
+            if not self._keep_open:
+                self._open = None if self._tab != "good" else self._open
+            self._keep_open = False
             self._render_tiles()
 
     @staticmethod
@@ -3111,6 +3140,8 @@ class ThresholdPreviewDialog(QDialog):
             self.miss_box.setVisible(False)
             self.ov_box.setVisible(False)
             self.pick_open_btn.setEnabled(False)
+            self.classify_btn.setEnabled(False)
+            self.list_btn.setEnabled(False)
             return 0
         self.summary.setVisible(True)
         self._tabs_host.setVisible(True)
@@ -3150,6 +3181,11 @@ class ThresholdPreviewDialog(QDialog):
         self.miss_box.setVisible(bool(missed))
         self.pick_open_btn.setVisible(auto)
         self.pick_open_btn.setEnabled(True)
+        self.classify_btn.setVisible(auto)
+        self.classify_btn.setEnabled(self._has_classify)
+        self.list_btn.setVisible(auto)
+        self.list_btn.setEnabled(True)
+        self.list_save_act.setEnabled(bool(self._picked or self._overkill))
         self.saved_btn.setVisible(auto)
         marked = len(self._overkill)
         self.ov_label.setText(f"{self._overkill_gone(self._ov)}/{marked}" if marked else "")
@@ -3389,6 +3425,18 @@ class ThresholdPreviewDialog(QDialog):
         sub.setProperty("role", "muted")
         top.addWidget(sub, 1)
         k = key_of(d)
+        self.mark_btns = {}
+        for kind, text, mine in (("defect", _KO.OVERKILL_MARK_DEFECT, self._picked),
+                                 ("overkill", _KO.OVERKILL_MARK_OVERKILL, self._overkill)):
+            b = QPushButton(text, box)              # 바로 가른다(현택님 2026-11-24 안 D) — 켜짐은 색으로만
+            b.setProperty("role", "ovBoxToggle")
+            b.setCheckable(True)
+            b.setChecked(k in mine)
+            b.setAutoDefault(False)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda _c=False, i=k, kd=kind: self.mark(i, kd))
+            top.addWidget(b)
+            self.mark_btns[kind] = b
         close = NeonButton(_KO.OVERKILL_DETAIL_CLOSE, role="textAction")
         close.clicked.connect(lambda _c=False, i=k: self._toggle(i))
         top.addWidget(close)
@@ -3635,6 +3683,11 @@ class ThresholdPreviewDialog(QDialog):
             self.move_current(*step)
             e.accept()
             return
+        if (e.key() == Qt.Key.Key_Z and not e.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+                and self._mark_undo and self._pick_dlg is None and not isinstance(self.focusWidget(), QLineEdit)):
+            self.undo_mark()
+            e.accept()
+            return
         super().keyPressEvent(e)
 
     def _outer_scroll(self) -> Optional[QScrollArea]:
@@ -3799,6 +3852,7 @@ class ThresholdPreviewDialog(QDialog):
         self._picked = {k: d for k, d in self._picked.items() if (d.zone_dir, d.zone) != z}
         self._overkill = {k: d for k, d in self._overkill.items() if (d.zone_dir, d.zone) != z}
         self._rec_zones.discard(z)
+        self._mark_undo = []
         self._open = None
         self._save_picks({z} if had else set())   # 고른 것 없이 값만 되돌렸으면 저장분은 그대로
         self._render()
@@ -3841,6 +3895,133 @@ class ThresholdPreviewDialog(QDialog):
             del self._ov[k]
         self._ov.update(rec)
         self._rec_zones = zones_now
+
+    def mark(self, k: tuple, kind: str) -> None:
+        """값 띠 [Defect] · [Overkill] — 이 사진을 바로 가르고 기준을 다시 계산한다(현택님 2026-11-24 안 D).
+
+        같은 버튼을 다시 누르면 뺀다.  한쪽에 넣으면 다른 쪽에서는 빠진다.  Z 로 하나씩 되돌린다."""
+        w = self._w
+        d = self._tile_defects.get(k) or (next((x for x in w.defects if key_of(x) == k), None) if w else None)
+        if w is None or d is None:
+            return
+        self._mark_undo.append((dict(self._picked), dict(self._overkill), dict(self._ov), set(self._rec_zones)))
+        picked, over = dict(self._picked), dict(self._overkill)
+        mine, other = (picked, over) if kind == "defect" else (over, picked)
+        if k in mine:
+            del mine[k]
+        else:
+            mine[k] = d
+            other.pop(k, None)
+        self._keep_open = True
+        self._on_pick_applied(picked, over)
+
+    def undo_mark(self) -> None:
+        """Z — 값 띠에서 마지막으로 가른 것을 되돌린다(기준값도 그 전으로)."""
+        if not self._mark_undo or self._w is None:
+            return
+        picked, over, ov, rec_zones = self._mark_undo.pop()
+        touched = {(d.zone_dir, d.zone) for src in (self._picked, self._overkill, picked, over) for d in src.values()}
+        self._pick_token += 1                       # 계산 중인 [적용] 결과가 늦게 와도 버린다
+        if self._overlay_on:
+            self._loading.hide_overlay()
+            self._overlay_on = False
+        self._picked, self._overkill, self._ov, self._rec_zones = picked, over, ov, rec_zones
+        self._save_picks(touched)
+        self._render_zones()
+        self._render_rules()
+        self._keep_open = True
+        self._changed(True)
+
+    def open_classify_dialog(self) -> None:
+        """[Classify 가져오기] — 사람이 바꾼 분류를 꼭 잡기 · Overkill 로 한 번에 넣는다(현택님 2026-11-24 안 A)."""
+        w = self._w
+        if w is None or w.note or self._pick_dlg is not None:
+            return
+        from .classify_import_dialog import ClassifyImportDialog
+        dlg = ClassifyImportDialog(CL.class_rows(w.defects, w.classes), key_of, parent=self)
+        dlg.applied.connect(self._on_classify_applied)
+        dlg.finished.connect(dlg.deleteLater)
+        sheets.run(dlg)
+
+    def _on_classify_applied(self, picked: dict, over: dict) -> None:
+        self._add_marks(picked, over)
+
+    def _add_marks(self, picked: dict, over: dict) -> None:
+        """가져온 것(Classify · 선택 목록)을 지금 고른 것에 더한다 — 한 Defect 는 한쪽에만.  Z 로 한 번에 되돌린다."""
+        if self._w is None or not (picked or over):
+            return
+        self._mark_undo.append((dict(self._picked), dict(self._overkill), dict(self._ov), set(self._rec_zones)))
+        new_p, new_o = dict(self._picked), dict(self._overkill)
+        for k, d in picked.items():
+            new_p[k] = d
+            new_o.pop(k, None)
+        for k, d in over.items():
+            new_o[k] = d
+            new_p.pop(k, None)
+        self._on_pick_applied(new_p, new_o)
+
+    def _list_rows(self) -> list:
+        """고른 것 → CSV 줄(:data:`PL.HEAD` 순서).  꼭 잡기 먼저, 그다음 Overkill."""
+        w = self._w
+        ids: dict = {}
+        rows = []
+        for mark, src in ((PL.DEFECT, self._picked), (PL.OVERKILL, self._overkill)):
+            for d in sorted(src.values(), key=lambda x: (x.wafer, x.index)):
+                folder = _folder_of(w, d)
+                if folder not in ids:
+                    ids[folder] = read_wafer_ids(folder)
+                photo = self._pic(d)
+                name = (Path(photo.text("src")).name if photo.text("src") else "") if isinstance(photo, QImage) \
+                    else (photo.name if photo is not None else "")
+                vals = []
+                for feat, _n, _u, _s, dec in (_FEATURES[2], _FEATURES[0], _FEATURES[1], _FEATURES[3]):
+                    v = P._value(d, feat)
+                    vals.append("" if v is None else f"{w.to_um(feat, v):.{dec}f}")
+                rows.append((mark, name, folder.name, ids[folder].lot, ids[folder].slot,
+                             w.label((d.zone_dir, d.zone))[0], d.index, f"{d.x:.3f}", f"{d.y:.3f}", *vals))
+        return rows
+
+    def _on_list_save(self) -> None:
+        if self._w is None or not (self._picked or self._overkill):
+            return
+        from ...utils import paths
+        start = paths.results_dir()             # 저장 기본 폴더는 결과 폴더 하나(현택님 Q3 A안)
+        base = self._roots[0].name if len(self._roots) == 1 else self._w.folder.name
+        name = _KO.OVERKILL_LIST_FILE_FMT.format(base=base, stamp=f"{datetime.now():%Y%m%d_%H%M}")
+        self._list_save_picker.open(_KO.OVERKILL_LIST_SAVE, str(start / name), _KO.OVERKILL_LIST_FILTER, "csv")
+
+    def save_list(self, path: str) -> None:
+        if not path or self._w is None:
+            return
+        try:
+            PL.write_csv(Path(path), self._list_rows())
+        except OSError as exc:
+            _LOG.warning("선택 목록 저장 실패: %s", exc)
+            self._show_notice(_KO.OVERKILL_LIST_SAVE_FAILED.format(e=exc), "warn")
+            return
+        self._show_notice(_KO.OVERKILL_LIST_SAVED.format(n=len(self._picked) + len(self._overkill)), "ok")
+
+    def _on_list_open(self) -> None:
+        if self._w is None:
+            return
+        from ...utils import paths
+        self._list_open_picker.open(_KO.OVERKILL_LIST_OPEN, str(paths.results_dir()), _KO.OVERKILL_LIST_FILTER)
+
+    def open_list(self, path: str) -> None:
+        """선택 목록 CSV → 지금 폴더의 같은 Defect 를 고른다(웨이퍼 · 번호 · 좌표가 모두 맞는 것만)."""
+        w = self._w
+        if not path or w is None:
+            return
+        try:
+            entries = PL.read_csv(Path(path))
+        except (OSError, ValueError, UnicodeDecodeError) as exc:
+            _LOG.warning("선택 목록 읽기 실패: %s", exc)
+            self._show_notice(_KO.OVERKILL_LIST_FAILED.format(e=exc), "warn")
+            return
+        picked, over = PL.match(entries, w.defects, lambda d: _folder_of(w, d).name)
+        self._show_notice(_KO.OVERKILL_LIST_LOADED.format(n=len(entries), k=len(picked) + len(over)),
+                          "ok" if len(picked) + len(over) == len(entries) else "warn")
+        self._add_marks({key_of(d): d for d in picked}, {key_of(d): d for d in over})
 
     # ------------------------------------------------------------------ 고른 것 저장 · 불러오기
     def _wafer_folders(self) -> list:
@@ -4081,6 +4262,11 @@ class ThresholdPreviewDialog(QDialog):
         """저장 창은 ``open()`` 으로 — ``exec()`` 는 Windows 에서 UI 스레드를 세운다(:mod:`..folder_picker`)."""
         if not self._ov or self._w is None:
             return
+        from .report_options_dialog import ReportOptionsDialog
+        opts = ReportOptionsDialog(self._report_opts, self)      # 사진 크기 · 견본 · Map(현택님 2026-11-24 안 8)
+        opts.finished.connect(opts.deleteLater)
+        if sheets.run(opts) != QDialog.DialogCode.Accepted:
+            return
         # 기본 폴더는 다른 저장과 같은 결과 폴더(현택님 2026-11-25 Q3 A안 — 전엔 바탕화면).
         from ...utils import paths
         start = paths.results_dir()
@@ -4093,7 +4279,7 @@ class ThresholdPreviewDialog(QDialog):
         if not path:
             return
         try:
-            self.export_html(Path(path))
+            self.export_html(Path(path), self._report_opts)
         except OSError as exc:
             _LOG.warning("Threshold HTML 저장 실패: %s", exc)
             self.check_label.setText(_KO.THRESH_EXPORT_FAILED.format(e=exc))
@@ -4101,8 +4287,12 @@ class ThresholdPreviewDialog(QDialog):
         self.saved_line.show_saved(path)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
-    def export_html(self, path: Path) -> None:
-        """바꾼 값 · 새로 빠지는 수 · 분포 · Zone 마다 대표 사진 :data:`EXPORT_SAMPLES` 장을 HTML 한 장에."""
+    def export_html(self, path: Path, opts=None) -> None:
+        """바꾼 값 · 새로 빠지는 수 · 분포 · Zone 마다 대표 사진 :data:`EXPORT_SAMPLES` 장을 HTML 한 장에.
+
+        아래에 눌러 보는 부분(:meth:`_live_payload`)을 붙인다 — ``opts`` 는 :class:`ReportOptions`(없으면 처음 값)."""
+        from .report_options_dialog import ReportOptions
+        opts = opts or ReportOptions()
         w = self._w
         changes = []
         for (zdir, zid, cls, feat), px in sorted(self._ov.items(), key=lambda kv: tuple(map(str, kv[0]))):
@@ -4148,15 +4338,73 @@ class ThresholdPreviewDialog(QDialog):
             have = sorted(((d, why) for d, why in drops if self._pic(d) is not None),
                           key=lambda t: -self._below(t[0], t[1]))     # 기준 바로 아래부터 멀리까지
             samples = tuple(RP.Sample(_data_uri(self._pic(d)), self._class_name(d.bin), self._why_text(d, why))
-                            for d, why in RP.pick_samples(have, EXPORT_SAMPLES))
+                            for d, why in RP.pick_samples(have, EXPORT_SAMPLES)) if opts.drop_samples else ()
             zones.append(RP.ZoneResult(name + (f" · {rec}" if rec else ""), self._count(key), len(drops),
                                        samples, len(drops) - len(have), new))
         where = (str(w.folder) if len(w.folders) <= 1 else
                  f"{w.folder.parent}  ·  " + ", ".join(f.name for f in w.folders))
         text = RP.build_html(folder=where, when=f"{datetime.now():%Y-%m-%d %H:%M}",
                              total=len(w.defects), dropped=total_drop, changes=changes, zones=zones,
-                             appeared=total_new)
+                             appeared=total_new, live=self._live_payload(opts))
         Path(path).write_text(text, encoding="utf-8")
+
+    def _live_payload(self, opts) -> dict:
+        """눌러 보는 보고서 자료 — Defect 는 **전부** 점으로, 사진은 고른 것 + (고르면) Zone 견본만(용량, 현택님 2026-11-24)."""
+        w = self._w
+        drop: dict = {}
+        for key in self.zone_keys():
+            for d, why in self.dropped(key):
+                drop[key_of(d)] = why
+        zones: dict = {}
+        classes: dict = {}
+        with_photo = [d for d in w.defects if self._pic(d) is not None]
+        want: list = [d for src in (self._picked, self._overkill) for d in src.values()]
+        for key in self.zone_keys():
+            inz = [d for d in with_photo if (d.zone_dir, d.zone) == key]
+            if opts.drop_samples:
+                gone = sorted((d for d in inz if key_of(d) in drop), key=lambda d: -self._below(d, drop[key_of(d)]))
+                want += RP.pick_samples(gone, EXPORT_SAMPLES)
+            if opts.keep_samples:
+                want += RP.pick_samples([d for d in inz if key_of(d) not in drop], EXPORT_SAMPLES)
+        photos: list = []
+        photo_of: dict = {}
+        names: dict = {}
+        for d in want:
+            k = key_of(d)
+            if k in photo_of:
+                continue
+            pic = self._pic(d)
+            if pic is None or (isinstance(pic, QImage) and not opts.scan):
+                continue
+            uri = _data_uri(pic, opts.px)
+            if uri:
+                photo_of[k] = len(photos)
+                photos.append(uri)
+        folders = w.folders or (w.folder,)
+        ids = [read_wafer_ids(f) for f in folders]
+        out = []
+        for d in w.defects:
+            k = key_of(d)
+            zname, rec = w.label((d.zone_dir, d.zone))
+            zi = zones.setdefault(zname + (f" · {rec}" if rec else ""), len(zones))
+            ci = classes.setdefault(self._class_name(d.bin), len(classes))
+            pic = self._pic(d)
+            if k not in names:
+                names[k] = (Path(pic.text("src")).name if pic.text("src") else "") if isinstance(pic, QImage) \
+                    else (pic.name if pic is not None else "")
+            vals = {}
+            for feat, item, _u, _s, dec in _FEATURES:
+                v = P._value(d, feat)
+                vals[item.lower()] = None if v is None or (feat == R.FEATURE_CONTRAST and v == 0) \
+                    else round(w.to_um(feat, v), dec)
+            out.append({"i": d.index, "w": d.wafer, "z": zi, "c": ci, "x": round(d.x, 3), "y": round(d.y, 3), **vals,
+                        "r": 1 if k in drop else 0, "m": 1 if k in self._picked else 2 if k in self._overkill else 0,
+                        "p": photo_of.get(k, -1), "f": names[k]})
+        base = self._roots[0].name if len(self._roots) == 1 else w.folder.name
+        return {"t": RP.live_strings(), "map": bool(opts.map), "zones": list(zones), "classes": list(classes),
+                "wafers": [{"name": f.name, "lot": i.lot, "slot": i.slot} for f, i in zip(folders, ids)],
+                "defects": out, "photos": photos, "head": list(PL.HEAD),
+                "csvName": _KO.OVERKILL_LIST_FILE_FMT.format(base=base, stamp=f"{datetime.now():%Y%m%d_%H%M}")}
 
     def _below(self, d: P.Defect, why) -> float:
         """걸린 값 ÷ 지금 기준 — 항목(Width · Contrast)이 달라도 '기준에서 얼마나 아래' 로 비교한다."""

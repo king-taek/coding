@@ -207,7 +207,7 @@ def test_overkill_export_shows_the_saved_line(styled_qapp, tmp_path, monkeypatch
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     dlg = T.ThresholdPreviewDialog()
     try:
-        monkeypatch.setattr(dlg, "export_html", lambda p: None)
+        monkeypatch.setattr(dlg, "export_html", lambda p, *a: None)
         monkeypatch.setattr(T.QDesktopServices, "openUrl", lambda url: True)
         dlg._export_to(str(tmp_path / "o.html"))
         assert not dlg.saved_line.isHidden() and dlg.saved_line.saved_path() == tmp_path / "o.html"

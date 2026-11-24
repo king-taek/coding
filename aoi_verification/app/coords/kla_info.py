@@ -30,7 +30,7 @@ from .ini_text import decode_ini_bytes, read_ini_text
 
 _LOG = logging.getLogger("aoi.coords")
 
-__all__ = ["resolve", "load_folder", "load_folder_raw", "read_wafer_id",
+__all__ = ["resolve", "load_folder", "load_folder_raw", "read_wafer_id", "read_lot_id",
            "read_slot_no", "read_header_ids", "peek_die_pitch"]
 
 # 정보파일 후보에서 제외할 확장자 — 사진/패스/설정/스크립트/윈도 썸네일 캐시.
@@ -197,6 +197,25 @@ def wafer_id_from_info_name(folder: Path) -> Optional[str]:
 
 # 예전에는 이 함수 자체가 캐시였다 — 호출부(테스트 픽스처)의 `cache_clear()` 를 그대로 받는다.
 read_wafer_id.cache_clear = read_header_ids.cache_clear
+
+
+_LOT_PAT = re.compile(r'^\s*LotID\s+"([^"]*)"', re.IGNORECASE | re.MULTILINE)
+
+
+def read_lot_id(folder: Path) -> Optional[str]:
+    """정보파일 헤더의 ``LotID "TB500INT.271@6324";`` — 없으면 None.
+
+    :func:`read_header_ids` 처럼 후보를 순서대로 보고 ``LotID`` 가 있는 첫 파일의 값을 쓴다."""
+    for p in _info_candidates(Path(folder)):
+        try:
+            with p.open("rb") as fh:
+                text = decode_ini_bytes(fh.read(_HEAD_BYTES))
+        except OSError:
+            continue
+        m = _LOT_PAT.search(text)
+        if m and m.group(1).strip():
+            return m.group(1).strip()
+    return None
 
 
 def read_slot_no(folder: Path) -> Optional[str]:
