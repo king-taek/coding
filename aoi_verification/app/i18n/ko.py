@@ -61,15 +61,9 @@ BTN_START_PREPARING = "준비 중…"
 BTN_BROWSE = "폴더 선택…"
 BTN_VERIFY = "검증"
 BTN_EXCLUDE = "제외"
-BTN_UNDO = "되돌리기(Z)"
-# 단축키를 라벨에 적는다 — 선별 화면은 "되돌리기(Z)" 라 여기서 Z 를 눌러 보게 된다.
-#   매칭 화면은 Z 가 선별 화면과 충돌해 Ctrl+Z 만 받는다(match_page 주석).
-BTN_MATCH_UNDO = "되돌리기(Ctrl+Z)"
-# ★ 예전 문구는 "직전 매칭/매칭없음 결정을 취소합니다" 였다.  그 '매칭없음' 을 만들던
-#   [매칭 없음] 버튼과 `N` 단축키는 제거됐으므로(2단계는 언제나 자동 — 그 사이 눌리면
-#   처리 중이던 사진이 조용히 미탐으로 확정됐다), 사람이 만들 수 없는 결정 종류를
-#   되돌리기 툴팁이 계속 약속하고 있었다.  남은 결정은 '매치' 하나다.
-MATCH_UNDO_TOOLTIP = "직전 매치 결정을 취소합니다 (Ctrl+Z)"
+# 되돌리기 키는 앱 어디서나 Z(Ctrl+Z 도 받음, `ui/undo_keys.py`) — 라벨에도 같은 꼴로 적는다
+#   (현택님 결정 2026-11-24).  선별·매칭·Overkill·Zone 이 이 라벨을 함께 쓴다.
+BTN_UNDO = "되돌리기 (Z)"
 # ⚠ 도달 불가 — SKIPPED_SECTION_DEFER_FMT 주석 참조(보류 풀이 항상 비어 버튼이 숨는다).
 BTN_RETRY_SKIP = "보류 재시도"
 BTN_SELECT_MODE = "선택 모드"
@@ -1146,7 +1140,7 @@ OVERKILL_VIEW_SCAN = "스캔"
 OVERKILL_VIEW_NO_COLOR = "이 폴더에는 컬러 사진이 없습니다"
 OVERKILL_VIEW_NO_SCAN = "이 폴더에는 스캔 사진 목록이 없습니다"
 OVERKILL_FILTER_ONLY = "{name} 만 보는 중 · {n:,}"
-OVERKILL_UNDO = "되돌리기"
+OVERKILL_UNDO = BTN_UNDO
 OVERKILL_NOTICE_REMOVED = "{name} 를 뺐습니다"
 OVERKILL_NOTICE_PICKS_LOST = " · 꼭 잡기 {n}개도 빠짐"
 OVERKILL_NOTICE_ADDED = "{name} 를 더했습니다 · 웨이퍼 {w}장 · Defect {n:,}"
@@ -1464,7 +1458,7 @@ GL_TOOL_MOVE = "이동"
 GL_TOOL_RECT = "사각형"
 GL_TOOL_CIRCLE = "원"
 GL_FIT = "맞춤"
-GL_UNDO = "되돌리기"
+GL_UNDO = BTN_UNDO              # 그림 버튼이라 툴팁으로 뜬다
 GL_CLEAR = "모두 지우기"
 GL_ROI_DEFECT = "Defect"
 GL_DEFECT_GO = "Defect 위치"
@@ -1582,7 +1576,7 @@ OVERKILL_PICK_PANE_DEFECT = "Defect"
 OVERKILL_PICK_PANE_FMT = "{name}  {n}"
 OVERKILL_PICK_BTN_OVERKILL = "← Overkill"
 OVERKILL_PICK_BTN_DEFECT = "Defect →"
-OVERKILL_PICK_BTN_UNDO = "되돌리기"
+OVERKILL_PICK_BTN_UNDO = BTN_UNDO
 OVERKILL_PICK_BTN_CANCEL = "취소"
 OVERKILL_PICK_BTN_APPLY_FMT = "적용 · Defect {n}"
 OVERKILL_PICK_ALL_PHOTOS = "전체 사진"

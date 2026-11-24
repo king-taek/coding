@@ -79,6 +79,7 @@ from ..deferred import call_later
 from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import guess_kinds, install_paste, local_paths, split_paths
 from ..folder_picker import FolderPicker, SavePicker, last_dir
+from ..undo_keys import bind_undo
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
@@ -1861,6 +1862,7 @@ class ThresholdPreviewDialog(QDialog):
         nl.addWidget(self.notice_label, 1)
         self.undo_btn = NeonButton(_KO.OVERKILL_UNDO, role="ghost")
         self.undo_btn.clicked.connect(self._undo)
+        bind_undo(self.undo_btn, self._undo)         # Z — 버튼이 보일 때(되돌릴 것이 있을 때)만 산다
         nl.addWidget(self.undo_btn)
         self.notice.setVisible(False)
         main.addWidget(self.notice)
@@ -3927,6 +3929,10 @@ class ThresholdPreviewDialog(QDialog):
         dlg.applied.connect(self._on_pick_applied)
         dlg.finished.connect(self._on_pick_closed)
         self._pick_dlg = dlg
+        # ★ '폴더 뺐다 [되돌리기 (Z)]' 알림을 걷는다 — 남겨 두면 뒤의 Z 와 시트의 Z 가 둘 다 살아
+        #   Qt 가 '모호한 단축키' 로 보고 **어느 쪽도 발화하지 않는다**(실측).  고르기를 적용한 뒤
+        #   그 되돌리기를 누르면 옛 값(ov·고름)이 새로 고른 값을 덮으므로 어차피 걷는 게 맞다.
+        self._hide_notice()
         sheets.run(dlg, full_bleed=True)          # 창 전체로 — 큰 사진이 자리를 다 쓴다
 
     def _on_pick_closed(self, _code: int = 0) -> None:

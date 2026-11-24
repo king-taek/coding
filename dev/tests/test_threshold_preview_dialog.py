@@ -475,6 +475,38 @@ def test_remove_is_synchronous_and_undo_restores(styled_qapp, tmp_path, monkeypa
         dlg.deleteLater()
 
 
+def test_z_undoes_folder_removal_and_pick_sheet_clears_it(styled_qapp, tmp_path, monkeypatch):
+    """'폴더 뺐다' 알림의 [되돌리기 (Z)] 는 Z 키로도 돈다(현택님: 되돌리기는 어디서나 Z).
+    [고르기] 시트를 열면 알림을 걷는다 — 뒤의 Z 와 시트의 Z 가 함께 살면 둘 다 죽는다."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    a, lot = _lot_setup(tmp_path)
+    _no_load(monkeypatch, T)
+    shown = _capture_run(monkeypatch, T)
+    dlg = T.ThresholdPreviewDialog()
+    dlg.resize(1280, 800)
+    try:
+        _prime(dlg, T, a, lot)
+        dlg.set_folders([a, lot])
+        dlg.set_mode("auto")
+        dlg.show()
+        dlg.activateWindow()
+        styled_qapp.processEvents()
+        dlg.remove_folder(lot)
+        styled_qapp.processEvents()
+        QTest.keyClick(dlg, Qt.Key.Key_Z)
+        styled_qapp.processEvents()
+        assert dlg._roots == [a, lot] and not dlg.notice.isVisibleTo(dlg)
+        dlg.remove_folder(lot)
+        assert dlg.undo_btn.isVisibleTo(dlg)
+        dlg.open_pick_dialog()
+        assert len(shown) == 1
+        assert not dlg.notice.isVisibleTo(dlg) and dlg._undo_snap is None
+    finally:
+        dlg.deleteLater()
+
+
 def test_duplicate_add_flashes_and_does_not_reload(styled_qapp, tmp_path, monkeypatch):
     """이미 고른 폴더 · LOT 안 웨이퍼 · 웨이퍼를 이미 다 가진 LOT 을 또 더하면 읽지 않고 그 칩을 반짝이고 '이미 있습니다'."""
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T

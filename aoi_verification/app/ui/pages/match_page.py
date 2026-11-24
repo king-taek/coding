@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from PyQt6.QtCore import QByteArray, Qt, pyqtSignal
-from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
                               QProgressBar, QScrollArea, QSizePolicy, QSlider,
                               QSplitter, QStackedWidget, QVBoxLayout, QWidget)
@@ -22,6 +21,7 @@ from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
 from ... import config, i18n
 from .. import theme
 from ..deferred import call_later
+from ..undo_keys import bind_undo
 from ...models.result import MatchResult
 from ...models.slot import ImageItem
 from ...utils import prefs as _prefs
@@ -317,9 +317,8 @@ class MatchPage(ProgressRowMixin, QWidget):
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 6, 0, 0)
         # 되돌리기 (#C1) — 직전 매칭/매칭없음 결정을 취소하고 그 기준 사진을 다시
-        # 큐 맨 앞으로 복귀.  Stage 1 은 Z 를 쓰므로 충돌을 피해 Ctrl+Z 사용.
-        self.undo_btn = NeonButton(i18n.KO.BTN_MATCH_UNDO, role="ghost")
-        self.undo_btn.setToolTip(i18n.KO.MATCH_UNDO_TOOLTIP)
+        # 큐 맨 앞으로 복귀.  키는 Z · Ctrl+Z(`bind_undo`, 아래 단축키 자리).
+        self.undo_btn = NeonButton(i18n.KO.BTN_UNDO, role="ghost")
         self.undo_btn.clicked.connect(self._undo_match)
         self.undo_btn.setEnabled(False)
         bar.addWidget(self.undo_btn)
@@ -407,8 +406,9 @@ class MatchPage(ProgressRowMixin, QWidget):
         #   버튼만 지우고 단축키를 남기면 **보이지 않는 손잡이**가 되어 더 나쁘다:
         #   화면에 아무 것도 없는데 키 하나로 사실이 아닌 미탐이 확정된다.
         #   ‘S’(잠시 보류) 는 이미 #3 에서 비활성화됐다.
-        # 되돌리기 (#C1) — Stage 1 의 Z 와 충돌하지 않도록 Ctrl+Z.
-        QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._undo_match)
+        # 되돌리기 (#C1) — 앱 어디서나 Z(Ctrl+Z 도).  선별 화면과 같은 키여도 둘은 한 번에
+        #   보이지 않으므로(쌓인 페이지) 부딪치지 않는다.  자동 사슬 중에는 덮개가 막는다.
+        bind_undo(self, self._undo_match)
 
     # ------------------------------------------------------------------
     def resizeEvent(self, event):                       # noqa: N802

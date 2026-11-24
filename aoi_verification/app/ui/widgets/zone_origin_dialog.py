@@ -44,6 +44,7 @@ from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
 from ..deferred import call_later
 from ..teardown import tolerate_teardown
+from ..undo_keys import bind_undo
 from .threshold_preview_dialog import (_CountBar, _OnMark, _ThumbBus, _Tile, _mid_key, _tile_key, expand_root,
                                        no_flt_dirs, scan_crops)
 
@@ -329,6 +330,7 @@ class ZoneOriginDialog(QDialog):
         nl.addWidget(self.notice_label, 1)
         self.undo_btn = _nf(NeonButton(_KO.OVERKILL_UNDO, role="ghost"))
         self.undo_btn.clicked.connect(self._undo)
+        bind_undo(self.undo_btn, self._undo)         # Z — 버튼이 보일 때(되돌릴 것이 있을 때)만 산다
         nl.addWidget(self.undo_btn)
         self.notice.setVisible(False)
         root.addWidget(self.notice)

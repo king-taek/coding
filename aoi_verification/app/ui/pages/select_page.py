@@ -33,6 +33,7 @@ from ... import config, i18n
 from .. import theme
 from ..deferred import call_later
 from ..teardown import tolerate_teardown
+from ..undo_keys import bind_undo
 from ...models.slot import ImageItem
 from ...utils import prefs as _prefs
 from .progress_row import ProgressRowMixin
@@ -615,8 +616,7 @@ class SelectPage(ProgressRowMixin, QWidget):
             sc = QShortcut(QKeySequence(key), self,
                            activated=lambda a=action: self._decide_input(a))
             sc.setAutoRepeat(False)
-        QShortcut(QKeySequence("Z"), self, activated=self._undo)
-        QShortcut(QKeySequence.StandardKey.Undo, self, activated=self._undo)   # Ctrl+Z
+        bind_undo(self, self._undo)                                        # Z · Ctrl+Z
         # Ctrl+A — 좌측 후보 패널 전체 선택 (#2).
         QShortcut(QKeySequence.StandardKey.SelectAll, self,
                   activated=self._select_all_candidates)

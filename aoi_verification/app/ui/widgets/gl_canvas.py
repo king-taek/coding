@@ -563,7 +563,9 @@ class GlCanvas(QWidget):
         elif k in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             self.delete_selected()
             e.accept()
-        elif k == Qt.Key.Key_Z and mods & Qt.KeyboardModifier.ControlModifier:
+        elif k == Qt.Key.Key_Z and not mods & (Qt.KeyboardModifier.ShiftModifier
+                                               | Qt.KeyboardModifier.AltModifier):
+            # 되돌리기는 앱 어디서나 Z — Ctrl+Z 도 그대로 받는다(`ui/undo_keys.py`).
             self.undo()
             e.accept()
         elif k == Qt.Key.Key_Escape:

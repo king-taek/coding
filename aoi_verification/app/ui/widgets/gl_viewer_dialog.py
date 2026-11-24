@@ -355,7 +355,7 @@ class GlViewerDialog(QDialog):
         col.addWidget(sep)
         col.addSpacing(2)
         self.undo_btn = self._tool_button(_KO.GL_UNDO, lambda: self.canvas.undo(), icon="undo",
-                                          tip=f"{_KO.GL_UNDO} (Ctrl+Z)")
+                                          tip=_KO.GL_UNDO)
         col.addWidget(self.undo_btn)
         self.clear_btn = self._tool_button(_KO.GL_CLEAR, self._clear_rois, icon="clear")
         col.addWidget(self.clear_btn)

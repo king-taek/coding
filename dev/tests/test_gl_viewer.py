@@ -209,7 +209,7 @@ def test_removed_widgets_are_gone(dlg):
     for attr in ("overlay_cb", "range_cb", "thr_range"):                            # D1 · D2 — 따로 있던 막대·토글
         assert not hasattr(dlg, attr), attr
     names = {b.accessibleName() for b in dlg.findChildren(QAbstractButton)}
-    assert {"되돌리기", "모두 지우기"} <= names                # 그림 버튼은 이름으로 찾는다
+    assert {"되돌리기 (Z)", "모두 지우기"} <= names            # 그림 버튼은 이름으로 찾는다
     from aoi_verification.app.ui.widgets import gl_charts
     assert not hasattr(gl_charts, "ProfileChart")
     assert not hasattr(gl_charts.HistogramChart, "set_log")
