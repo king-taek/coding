@@ -1402,7 +1402,7 @@ class SetupPage(QWidget):
         self._sync_engine_controls()
         _prefs.patch(legacy_engine=key, engine_mode=self._current_engine_mode())
 
-    # 도구 레일 폭 — 가장 긴 이름 'Wafer Map 보기' 가 들어가는 하한.
+    # 도구 레일 폭 — 가장 긴 메뉴 이름('어느 Zone에서 왔니?'·'Defect 정보 조회')이 들어가는 하한.
     _RAIL_W = 200
     # 접은 메뉴의 버튼 한 변 — 아이콘(20) 양옆 16px.
     _RAIL_ICON_W = 52

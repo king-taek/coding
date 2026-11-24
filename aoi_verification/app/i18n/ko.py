@@ -1056,8 +1056,9 @@ IMAGE_INFO_SOURCE_NAMES = {
 }
 
 # 다이얼로그.
-IMAGE_INFO_BUTTON = "사진 정보 보기"
-IMAGE_INFO_TITLE = "단일 사진 정보"
+# ★ 메뉴 이름 = 화면 제목 = 이 화면을 여는 다른 버튼 이름(현택님 2026-11-24).
+IMAGE_INFO_BUTTON = "Defect 정보 조회"
+IMAGE_INFO_TITLE = IMAGE_INFO_BUTTON
 IMAGE_INFO_SUBTITLE = "결과 엑셀에 찍히는 것과 같은 좌표·계측값을 사진 한 장에서 바로 읽습니다"
 IMAGE_INFO_PICK = "사진 선택"
 IMAGE_INFO_PICK_ANOTHER = "다른 사진"
@@ -1312,8 +1313,10 @@ THRESH_EXPORT_OLD_NEW = "레시피 → 변경"
 THRESH_EXPORT_SHAPE = "분포"
 
 # ── Wafer map ────────────────────────────────────────────────────────────────
-WAFER_MAP_BUTTON = "Wafer Map 보기"
-WAFER_MAP_TITLE = "Wafer Map"
+# ★ 메뉴 이름 = 화면 제목 = 결과 화면 버튼 이름(현택님 2026-11-24).  엑셀 시트 이름
+#   (WAFER_MAP_SHEET)은 그대로 — 이전 결과 엑셀 읽기가 그 이름으로 시트를 건너뛴다.
+WAFER_MAP_BUTTON = "Defect Map"
+WAFER_MAP_TITLE = WAFER_MAP_BUTTON
 WAFER_MAP_SUBTITLE = "Defect 사진을 웨이퍼 위 실제 위치에 찍습니다 — 휠: 확대 · 드래그: 이동 · 점에 마우스: 사진 · 점 더블클릭: 상세 정보"
 WAFER_MAP_PICK_FOLDER = "폴더 선택"
 WAFER_MAP_PICK_FOLDER_ANOTHER = "다른 폴더"
@@ -1550,12 +1553,12 @@ NOTCH_LOG_FMT = "Notch 방향 보정(매칭 전용): {dirs}"
 COORD_CAL_LOADING = "좌표 보정 준비 중 — 두 장비의 좌표를 읽고 있습니다…"
 
 # ── GL 히스토그램 뷰어 ────────────────────────────────────────────────────
-IMAGE_INFO_GL = "GL 보기"
 GL_BUTTON = "GL 히스토그램"
+IMAGE_INFO_GL = GL_BUTTON          # 이 화면을 여는 버튼 = 메뉴 이름
 GL_BUTTON_TOOLTIP = "사진의 밝기(GL) 분포를 히스토그램으로 봅니다"
 GL_COMING_SOON = "Coming soon"
 GL_COMING_SOON_TOOLTIP = "GL 히스토그램 — 준비 중입니다"
-GL_TITLE = "GL 히스토그램"
+GL_TITLE = GL_BUTTON
 GL_OPEN = "사진 열기"
 GL_OPEN_FILTER_FMT = "사진 ({patterns});;모든 파일 (*.*)"
 GL_EMPTY_HINT = "사진을 열거나 이곳에 끌어다 놓으세요"
@@ -1777,7 +1780,7 @@ ZO_ROW_CLASS = "첫 분류"
 ZO_ROW_CUR = "재 분류"
 ZO_ROW_TYPE = "검출 종류"
 ZO_BTN_ENLARGE = "크게 보기"
-ZO_BTN_INFO = "사진 정보로 보기"
+ZO_BTN_INFO = IMAGE_INFO_BUTTON   # 이 화면을 여는 버튼 = 메뉴 이름
 ZO_BTN_EXCEL = "엑셀로 저장"
 ZO_BTN_EXCEL_TIP = "지금 고른 Defect 중 사진 있는 것을 Defect 추출과 같은 엑셀로 저장"
 ZO_EXCEL_NONE = "저장할 사진이 없습니다 — 사진 있는 Defect 를 고르세요"

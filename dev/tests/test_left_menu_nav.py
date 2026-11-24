@@ -427,3 +427,37 @@ def test_fold_keeps_every_row_at_the_same_height(styled_qapp):
         assert ys() == unfolded
     finally:
         page.close()
+
+
+def test_tool_screen_title_is_its_menu_name(styled_qapp, no_sheets):
+    """도구 화면 제목 = 왼쪽 메뉴 이름(현택님 2026-11-24) — 'Defect 정보 조회' · 'Defect Map' …"""
+    page = _page(styled_qapp)
+    try:
+        assert page.image_info_btn.property("_railText") == "Defect 정보 조회"
+        assert page.wafer_map_btn.property("_railText") == "Defect Map"
+        for key, btn in (("image_info", page.image_info_btn),
+                         ("wafer_map", page.wafer_map_btn),
+                         ("gl", page.gl_btn), ("threshold", page.threshold_btn),
+                         ("zone_origin", page.zone_origin_btn)):
+            page.show_page(key)
+            styled_qapp.processEvents()
+            assert page.tool_title() == btn.property("_railText"), key
+        # 이 화면들을 여는 다른 버튼도 같은 이름이다.
+        assert i18n.KO.ZO_BTN_INFO == i18n.KO.IMAGE_INFO_BUTTON
+        assert i18n.KO.IMAGE_INFO_GL == i18n.KO.GL_BUTTON
+    finally:
+        page.close()
+
+
+def test_rail_names_fit_the_rail(styled_qapp):
+    """펼친 메뉴에서 이름이 잘리지 않는다 — `_RAIL_W` 는 가장 긴 이름이 들어가는 하한."""
+    page = _page(styled_qapp)
+    try:
+        assert not page.is_rail_folded()
+        for b in (*page._tool_buttons, page.update_btn):
+            if not b.isVisible():
+                continue
+            assert b.sizeHint().width() <= b.width(), \
+                f"'{b.text()}' 가 메뉴 폭({b.width()}px)보다 넓다({b.sizeHint().width()}px)"
+    finally:
+        page.close()
