@@ -96,6 +96,15 @@ def test_missing_geometry_warns(qapp, tmp_path):
     page.deleteLater()
 
 
+def test_missing_geometry_warning_is_one_short_sentence():
+    """경고는 짧은 한 문장 — 서식 기호('**')·파일 이름·줄바꿈이 없다(사용자 결정 2026-11-24)."""
+    text = i18n.KO.DIE_SIZE_NOT_FOUND
+    assert "**" not in text
+    assert "\n" not in text
+    assert ".ini" not in text and "DieStep" not in text
+    assert len(text) <= 40
+
+
 # ---------------------------------------------------------------------------
 # ★ die 크기를 몰라도 좌표가 나오는 슬롯은 **경고하지 않는다**
 #

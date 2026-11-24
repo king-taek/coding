@@ -371,11 +371,9 @@ DIE_SIZE_CHECKING = "die 크기 확인 중…"
 # ⚠ **Camtek INI 좌표가 있는데 die pitch 를 못 정한 경우에만** 띄운다.
 # KLA 슬롯·LIVE 파일명 슬롯은 die 크기 없이도 좌표가 나오므로 경고 대상이 아니다.
 # 매칭 자체는 절대 wafer 좌표로 정상 동작한다 — 못 하는 건 die 단위 표기뿐이다.
-DIE_SIZE_NOT_FOUND = (
-    "die 크기를 찾지 못해 **절대 wafer 좌표**로 매칭합니다 (매칭은 정상).\n"
-    "die 내부 좌표·row 표기를 보려면 결과 폴더에 "
-    "Params_WaferInfo.ini(DieStep_X/Y) 또는 ProductInfo.ini(XDieIndex/YDieIndex) 가 필요합니다."
-)
+# ★ 짧은 한 문장 — 이 라벨은 서식 없는 글자라 '**' 가 그대로 보였고, 파일 이름 안내는
+#   사용자가 할 수 있는 일이 아니다(사용자 결정 2026-11-24, 설명 문장 금지).
+DIE_SIZE_NOT_FOUND = "die 크기를 못 찾아 절대 좌표로 매칭합니다."
 ENGINE_EFFICIENCY_CPU_ONLY = (
     "가속 장치(Intel GPU)가 없어 CPU만으로 고효율 모드를 실행합니다."
 )
