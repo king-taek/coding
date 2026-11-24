@@ -50,6 +50,8 @@ from .threshold_preview_dialog import (_CountBar, _OnMark, _ThumbBus, _Tile, _mi
 
 _LOG = logging.getLogger("aoi.zone_origin")
 _KO = i18n.KO
+# 알림·경고 줄 모양 — Overkill 튜닝(`threshold_preview_dialog`)의 줄과 같은 둥근 안쪽 줄(E2a).
+_INNER_BAR = "border-radius: 6px; margin: 4px 12px 0 12px;"
 
 LOAD_WORKERS = 6            # 웨이퍼를 동시에 읽는 수(Overkill 튜닝과 같다 — NAS 왕복 지연을 겹친다)
 THUMB_WORKERS = 3
@@ -330,7 +332,8 @@ class ZoneOriginDialog(QDialog):
 
         self.notice = QFrame(self)
         self.notice.setObjectName("notice")
-        self.notice.setStyleSheet(f"QFrame#notice {{ background: {theme.ACCENT_TINT}; }}")
+        # 알림·경고 줄은 Overkill 튜닝과 같은 '둥근 안쪽 줄'(E2a) — 창 가장자리에 붙지 않게 좌우 12 를 띄운다.
+        self.notice.setStyleSheet(f"QFrame#notice {{ background: {theme.ACCENT_TINT}; {_INNER_BAR} }}")
         nl = QHBoxLayout(self.notice)
         nl.setContentsMargins(16, 4, 8, 4)
         self.notice_label = QLabel("", self.notice)
@@ -348,7 +351,7 @@ class ZoneOriginDialog(QDialog):
 
         self.alert = QFrame(self)
         self.alert.setObjectName("alert")
-        self.alert.setStyleSheet(f"QFrame#alert {{ background: {theme.DANGER_TINT}; }}")
+        self.alert.setStyleSheet(f"QFrame#alert {{ background: {theme.DANGER_TINT}; {_INNER_BAR} }}")
         al = QHBoxLayout(self.alert)
         al.setContentsMargins(16, 6, 16, 6)
         self.alert_label = QLabel("", self.alert)

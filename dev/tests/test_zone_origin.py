@@ -603,3 +603,10 @@ def test_arrows_still_move_after_clicking_sort(dlg):
     first = dlg.current()
     QTest.keyClick(dlg.focusWidget() or dlg, Qt.Key.Key_Right)
     assert dlg.current() is not first
+
+
+def test_notice_and_alert_bars_are_rounded_inner_bars(dlg):
+    """알림·경고 줄은 Overkill 처럼 둥글고 창 가장자리에서 떨어진 안쪽 줄(E2a)."""
+    for bar in (dlg.notice, dlg.alert):
+        sheet = bar.styleSheet()
+        assert "border-radius: 6px" in sheet and "margin: 4px 12px 0 12px" in sheet, sheet
