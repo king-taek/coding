@@ -119,8 +119,8 @@ def display_shift(folder: Path) -> tuple[int, int]:
     예전처럼 더하고 경고한다.
 
     매칭·Wafer map 위치에는 쓰지 않는다 — KLA·LOT 맵 txt·시프트 없는 레시피는 실제 die
-    번호를 쓰므로, 시프트를 섞으면 같은 die 가 1 어긋난다.  값은 줄 끝 ``; 주석`` 을
-    버리고 정수로 읽으며, 정수가 아니면 경고하고 0 으로 둔다(화면 표기만 바뀌므로 매칭은 안전)."""
+    번호를 쓰므로, 시프트를 섞으면 같은 die 가 1 어긋난다.  값은 줄 끝 ``; 주석`` 을 버리고
+    정수로 읽으며, 정수가 아니면 경고하고 0 으로 둔다(화면 표기만 바뀌므로 매칭은 안전)."""
     p = Path(folder) / _RECIPE_INI
     text = read_ini_text(p)
     if text is None:
