@@ -232,9 +232,9 @@ UNMATCHED_SHEET_TITLE = BTN_REVIEW_UNMATCHED
 #   좌표 모드로 검증했는데 후보 순서가 좌표와 무관해 보여 혼란을 준 지점이다.
 UNMATCHED_REVIEW_COORD_NOTE = "후보 순서는 좌표 거리가 아니라 사진 유사도입니다"
 UNMATCHED_REVIEW_NO_CANDIDATES = "이 슬롯에는 검증 장비 후보가 없습니다."
-UNMATCHED_REVIEW_DONE_FMT = "{n} 건의 신규 매칭을 확정했습니다."
+UNMATCHED_REVIEW_DONE_FMT = "Defect {n}개의 신규 매치를 확정했습니다."
 UNMATCHED_REVIEW_EMPTY = "검토할 매치 실패 사진이 없습니다."
-UNMATCHED_CONFIRM_ON_CLOSE = "선택한 대로 매치할까요?"
+UNMATCHED_CONFIRM_ON_CLOSE = "선택한 대로 매치를 확정할까요?"
 # 버튼 이름은 크게 보기(BTN_EXPAND_*·BTN_CONFIRM_AS_MATCH)와 같게 둔다 — 같은 동작이다.
 BTN_UNMATCHED_CONFIRM = "이 후보로 매치"
 BTN_UNMATCHED_SELECT_THIS = "이 후보로 선택"
@@ -1350,7 +1350,7 @@ EXTRACT_NONE_CHOSEN_BODY = (
     "설정 화면으로 돌아갈까요? (아니오 = 선별 화면에 남기)"
 )
 EXTRACT_SUMMARY_TITLE = "Defect 추출"
-EXTRACT_SUMMARY_FMT = "슬롯 {wafers}개 · Defect {n}건"
+EXTRACT_SUMMARY_FMT = "슬롯 {wafers}개 · Defect {n}개"
 # 저장 방식 — Recipe 로 나눌지(사용자 결정: 시트 분리 / 열 나란히 둘 다, 요약 창에서 고른다).
 # 줄마다 그림이 뜻을 말한다 — 설명문 없음(현택님 2026-11-24, K2 B안).
 EXTRACT_SAVE_SINGLE = "한 시트로 저장"

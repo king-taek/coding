@@ -1,6 +1,6 @@
 """팝업 손질(현택님 2026-11-24) — 키·포커스·버튼·제목.
 
-- 매치 없음 검토: Esc·제목줄 [닫기] 도 '선택한 대로 매치할까요?' 를 먼저 묻는다.
+- 매치 없음 검토: Esc·제목줄 [닫기] 도 '선택한 대로 매치를 확정할까요?' 를 먼저 묻는다.
   버튼 이름은 크게 보기와 같고, [검토 종료]·'?' 도움말은 없다.
 - Notch 방향: [취소]·Esc·✕ = 매칭을 시작하지 않고 설정 화면으로(예전엔 닫기 = 확인).
 - 저장 결과 시트 제목은 앱 이름이 아니라 '저장 완료' / '저장 실패'.
@@ -130,7 +130,7 @@ def test_unmatched_buttons_match_expand_view(styled_qapp):
 
 
 def test_unmatched_close_prompt_is_short():
-    assert i18n.KO.UNMATCHED_CONFIRM_ON_CLOSE == "선택한 대로 매치할까요?"
+    assert i18n.KO.UNMATCHED_CONFIRM_ON_CLOSE == "선택한 대로 매치를 확정할까요?"
 
 
 def test_title_bar_close_goes_through_reject(host):
