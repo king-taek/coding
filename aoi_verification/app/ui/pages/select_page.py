@@ -835,7 +835,7 @@ class SelectPage(ProgressRowMixin, QWidget):
             self.lot_counts_label.setText("")
             return
         parts = [f"{slot} {totals[slot]}" for slot in sorted(totals)]
-        self._lot_counts_full = i18n.KO.LOT_COUNTS_PREFIX + "  ·  ".join(parts)
+        self._lot_counts_full = i18n.KO.LOT_COUNTS_PREFIX + " · ".join(parts)
         self.lot_counts_label.setToolTip(self._lot_counts_full)
         self._elide_lot_counts()
 

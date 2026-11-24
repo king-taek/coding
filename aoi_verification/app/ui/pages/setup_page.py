@@ -1280,7 +1280,7 @@ class SetupPage(QWidget):
         # 101단계를 1219px 에 펼치면 단계당 12px 이라 정밀 조절이 오히려 어렵다.
         self.slider.setMaximumWidth(self._SLIDER_MAX_W)
         self.slider.setMinimumWidth(self._SLIDER_MIN_W)
-        self.threshold_label = QLabel(f"{self.slider.value()} %", self._threshold_row)
+        self.threshold_label = QLabel(f"{self.slider.value()}%", self._threshold_row)
         # 값은 모노 + 우측 정렬 — 자릿수가 바뀌어도 좌우로 춤추지 않는다.
         self.threshold_label.setProperty("role", "mono")
         self.threshold_label.setAlignment(Qt.AlignmentFlag.AlignRight
@@ -2427,7 +2427,7 @@ class SetupPage(QWidget):
         self.show_page("wafer_map")
 
     def _on_threshold_changed(self, v: int) -> None:
-        self.threshold_label.setText(f"{v} %")
+        self.threshold_label.setText(f"{v}%")
         self._refresh_mode_badge()
         _prefs.patch(threshold=v / 100.0)
 

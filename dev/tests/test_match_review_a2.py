@@ -84,7 +84,7 @@ def test_all_rows_stay_visible_and_done_passes_everything(qapp):
     page._on_done()
     kept, unmatched = got[0]
     assert len(kept) + len(unmatched) == 3
-    assert len(unmatched) == 1 and unmatched[0].note == "미매칭 (사용자 검토)"
+    assert len(unmatched) == 1 and unmatched[0].note == "매치 없음 (사용자 검토)"
     page.deleteLater()
 
 

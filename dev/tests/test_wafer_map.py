@@ -1258,7 +1258,7 @@ def test_tooltip_shows_die_internal_xy_like_the_equipment(tmp_path):
     (p,) = wm.build_map(resolve_batch([folder / "a.jpeg"])).points
     assert (p.die_x, p.die_y) == (80.0, 496.0)
     html = WaferMapView.tooltip_html(p)
-    assert f"col {p.col} · row {p.row} · x 80 · y 496" in html
+    assert f"col {p.col} / row {p.row} · x 80 / y 496 µm" in html
 
 
 def test_lot_merge_keeps_each_slots_cell_when_centers_differ(tmp_path):

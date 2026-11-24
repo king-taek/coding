@@ -166,7 +166,7 @@ SETUP_MACHINE_PLACEHOLDER = "호기"
 STAGE1_TITLE = "후보 선별"
 STAGE2_TITLE = "매칭 · 유사도 기반"
 STAGE2_TITLE_COORD = "매칭 · 좌표 기반"
-STAGE2_COORD_OFFSET_FMT = "  ·  보정 가로 {dx:+.0f} · 세로 {dy:+.0f} µm"
+STAGE2_COORD_OFFSET_FMT = " · 보정 가로 {dx:+.0f} · 세로 {dy:+.0f} µm"
 RESULT_TITLE = "결과"
 # 결과 요약 — 핵심 수치는 타일로, 나머지는 문장으로.
 RESULT_MACHINES_FMT = "기준 장비: {ref}    검증 장비: {val}"
@@ -303,7 +303,7 @@ MODE_BADGE_CAPTION = "판정 기준"
 JUDGE_NAME_COORD = "좌표 매칭 · 허용 오차"
 JUDGE_VALUE_COORD_FMT = "{tol:.0f} µm"
 JUDGE_NAME_LEGACY_FMT = "구형 {sub} · 유사도 임계치"
-JUDGE_VALUE_LEGACY_FMT = "{th:.0f} %"
+JUDGE_VALUE_LEGACY_FMT = "{th:.0f}%"
 COORD_NO_DATA_MSG = (
     "좌표 정보가 없습니다.\n\n"
     "이미지 파일명 또는 폴더에 좌표 데이터(Camtek LIVE / INI / KLA .001)가\n"
@@ -316,7 +316,7 @@ SCORE_DIST_FMT = "{dist:.0f} µm"
 SCORE_DIST_OVER_FMT = "{dist:.0f} µm (허용 초과)"
 # 구형(유사도) 엔진의 점수 표기 — 좌표 모드의 µm 거리에 대응.  같은 포맷이 네 곳
 # (매치 검토 행·차순위 타일·매칭 목록·실패 검토)에 흩어져 갈라져 있었다.
-SCORE_SIMILARITY_FMT = "{pct:.1f} %"
+SCORE_SIMILARITY_FMT = "{pct:.1f}%"
 ENGINE_MODE_BASIC = "기본 모드"
 ENGINE_MODE_EFFICIENCY = "고효율 모드 (사진이 많을 때 권장)"
 COORD_TOLERANCE_LABEL = "허용 오차"
@@ -744,7 +744,7 @@ SLOT_SELECT_TILE_COUNT_FMT = "기준 {ref} · 검증 {val}"
 SLOT_SELECT_TILE_COUNT_PENDING = "확인 중…"
 SLOT_SELECT_TILE_COUNT_NONE = "—"      # 검증 폴더에 그 슬롯이 없다
 # KLA 폴더 타일 이름 — 폴더명(검사 시각) 대신 정보파일의 WaferID·Slot 번호(사용자 요청).
-SLOT_SELECT_KLA_FMT = "{wafer_id}  ·  슬롯 #{slot}"
+SLOT_SELECT_KLA_FMT = "{wafer_id} · 슬롯 #{slot}"
 SLOT_MAP_FOLDER_TIP_FMT = "폴더: {folder}"
 # 진행 범위 타일 — 상태를 옆 라벨이 아니라 타일 자신이 말한다.
 SCOPE_TITLE = "진행 범위"
@@ -889,8 +889,10 @@ EXPORT_ORIGINAL_QUALITY_TOOLTIP = "파일이 커지고 저장이 느려집니다
 
 # ── 단일 사진 정보 ─────────────────────────────────────────────────────────
 # 사진 한 장에서 뽑은 결함 계측.  `coords.single_info` 가 유일한 생산자이고 두 화면이
-# **같은 수치**를 쓴다 — 엑셀 미매칭 행(D열)은 `_FMT`(한 줄), 정보 화면은
+# **같은 수치**를 쓴다 — 엑셀 매치 없음 행(D열)은 `_FMT`(한 줄), 정보 화면은
 # `_LABEL`/`_VALUE_FMT`(제도 시트 표의 2열).  셋은 한 자리에서 같은 값으로 채워진다.
+# ⚠ 단위 글자가 다르다: 화면(`_VALUE_FMT`)은 µm, 엑셀 D열(`_FMT`)은 ㎛ 그대로 —
+#   `utils/excel_ref` 가 D열 좌표 줄을 ㎛ 로 되읽는다(옛 결과 파일 호환).
 DEFECT_RECIPE_ZONE_LABEL = "recipe / zone"
 DEFECT_RECIPE_ZONE_VALUE_FMT = "{recipe} / {zone}"
 DEFECT_RECIPE_ZONE_FMT = "recipe {recipe} / zone {zone}"
@@ -902,13 +904,17 @@ DEFECT_TYPE_NAME_LABEL = "defect"
 DEFECT_CLASS_LABEL = "classify"
 # Height.flt(3D) Defect 의 높이 — 장비 Export 의 Height 값.
 DEFECT_HEIGHT_LABEL = "height"
-DEFECT_HEIGHT_VALUE_FMT = "{v:.2f} ㎛"
+DEFECT_HEIGHT_VALUE_FMT = "{v:.2f} µm"
+DEFECT_HEIGHT_FMT = "height {v:.2f} ㎛"
 DEFECT_AREA_LABEL = "area"
-DEFECT_AREA_VALUE_FMT = "{v:.2f} ㎛²"
+DEFECT_AREA_VALUE_FMT = "{v:.2f} µm²"
+DEFECT_AREA_FMT = "area {v:.2f} ㎛²"
 DEFECT_WIDTH_LABEL = "width"
-DEFECT_WIDTH_VALUE_FMT = "{v:.2f} ㎛"
+DEFECT_WIDTH_VALUE_FMT = "{v:.2f} µm"
+DEFECT_WIDTH_FMT = "width {v:.2f} ㎛"
 DEFECT_LENGTH_LABEL = "length"
-DEFECT_LENGTH_VALUE_FMT = "{v:.2f} ㎛"
+DEFECT_LENGTH_VALUE_FMT = "{v:.2f} µm"
+DEFECT_LENGTH_FMT = "length {v:.2f} ㎛"
 DEFECT_CONTRAST_LABEL = "contrast"
 DEFECT_CONTRAST_VALUE_FMT = "{v:.2f}"
 # contrast 는 일부 자재(예: PI)만 측정 — 0 은 ‘측정 안 함’이라 0.00 대신 ‘—’.
@@ -917,7 +923,7 @@ DEFECT_COLROW_LABEL = "col / row"
 DEFECT_COLROW_VALUE_FMT = "{col} / {row}"
 DEFECT_COLROW_FMT = "col {col} / row {row}"
 DEFECT_XY_LABEL = "x / y"
-DEFECT_XY_VALUE_FMT = "{x:.0f} / {y:.0f} ㎛"
+DEFECT_XY_VALUE_FMT = "{x:.0f} / {y:.0f} µm"
 DEFECT_XY_FMT = "x {x:.0f} / y {y:.0f} ㎛"
 DEFECT_KLA_NATIVE_LABEL = "KLA원본 x / y"
 # die pitch 를 못 찾아 die 로 쪼개지 못한 경우(source="camtek_abs") — 있는 사실만 적는다.
@@ -955,8 +961,8 @@ IMAGE_INFO_ROW_WAFER_ID = "WaferID"
 IMAGE_INFO_ROW_SOURCE = "좌표 출처"
 IMAGE_INFO_ROW_ABS_XY = "절대 X / Y"
 IMAGE_INFO_ROW_PIXEL = "픽셀 크기"
-IMAGE_INFO_ABS_XY_FMT = "{x:.0f} / {y:.0f} ㎛"
-IMAGE_INFO_PIXEL_FMT = "{v:.3f} ㎛/px"
+IMAGE_INFO_ABS_XY_FMT = "{x:.0f} / {y:.0f} µm"
+IMAGE_INFO_PIXEL_FMT = "{v:.3f} µm/px"
 # 판정 스탬프 — 측정정보 유무를 한눈에.  미지원/없음은 GEOM_* 를 그대로 쓴다.
 IMAGE_INFO_STAMP_MEASURED = "측정정보 있음"
 # DefectCoord.source 코드 → 사람이 읽는 이름.
@@ -997,7 +1003,7 @@ IMAGE_INFO_OPEN_TIP = "크게 보기"
 # ── 흑백 Scan 사진만 넣었을 때 — 그 안에 찍힌 Defect 를 찾아 잘라 보인다(사용자 요청 2026-11-24) ──
 IMAGE_INFO_ROW_SCAN = "Scan 사진"
 IMAGE_INFO_ROW_DEFECT_PHOTO = "Defect 사진"
-SCAN_DEFECT_TITLE_FMT = "Defect 위치 ({um:.0f} ㎛)"
+SCAN_DEFECT_TITLE_FMT = "Defect 위치 ({um:.0f} µm)"
 SCAN_DEFECT_STEP_FMT = "Defect {i} / {n}"
 SCAN_DEFECT_PREV = "◀"
 SCAN_DEFECT_NEXT = "▶"
@@ -1022,10 +1028,10 @@ SCAN_EXPORT_PHASE = "엑셀로 저장 중 — Scan 이미지 확인"
 COUNT_PLUS_N_FMT = "+{n}"
 # 진행 표시는 **두 등급**으로 나뉜다 — 슬롯명은 보조(mute), 수치는 모노 본문 잉크.
 # 화면의 핵심 상태('몇 장 남았나')가 가장 약한 잉크에 묻혀 있던 것을 올린 결과다.
-PROGRESS_SLOT_ONLY_FMT = "{slot}  ·"
+PROGRESS_SLOT_ONLY_FMT = "{slot} ·"
 PROGRESS_COUNT_FMT = "{done} / {total}"
-GROUP_HEADER_FMT = "{slot}  ·  {count}장"
-GROUP_HEADER_NO_FMT = "{slot}\n#{no}  ·  {count}장"
+GROUP_HEADER_FMT = "{slot} · {count}장"
+GROUP_HEADER_NO_FMT = "{slot}\n#{no} · {count}장"
 # 후보 선별 상단의 슬롯별 전체 장수 — 참고용 (#2).  ★ 'LOT' 이 아니다.
 LOT_COUNTS_PREFIX = "슬롯별 장수:  "
 
@@ -1260,8 +1266,8 @@ WAFER_MAP_DISCLAIMER = (
 )
 WAFER_MAP_TIP_NO_DIE = "die 인덱스 없음(절대좌표)"
 # die 안쪽 x·y — 장비·Conder scan 과 같은 표기.  아래 X·Y 는 웨이퍼 중심 기준이라 다르다.
-WAFER_MAP_TIP_DIE_FMT = "col {col} · row {row} · x {x:,.0f} · y {y:,.0f} ㎛"
-WAFER_MAP_TIP_XY_FMT = "웨이퍼 중심 기준 X {x:,.0f} · Y {y:,.0f} ㎛"
+WAFER_MAP_TIP_DIE_FMT = "col {col} / row {row} · x {x:,.0f} / y {y:,.0f} µm"
+WAFER_MAP_TIP_XY_FMT = "웨이퍼 중심 기준 X {x:,.0f} / Y {y:,.0f} µm"
 WAFER_MAP_SHEET = "Wafer Map"
 WAFER_MAP_SHEET_COL_SLOT = "슬롯"
 WAFER_MAP_SHEET_COL_REF = "기준"

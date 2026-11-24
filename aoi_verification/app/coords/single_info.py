@@ -72,9 +72,11 @@ CLUSTER_SIZE = "size"     # area · width · length · contrast(또는 height) �
 CLUSTER_STAMP = "stamp"   # 측정정보 판정 스탬프
 
 
-def _m(label: str, value: str, cluster: str = "") -> Measure:
-    """label/value 가 그대로 이어붙는 계측 — 엑셀 줄은 "라벨 값"."""
-    return Measure(label=label, value=value, line=f"{label} {value}",
+def _m(label: str, value: str, cluster: str = "", line: str = "") -> Measure:
+    """label/value 가 그대로 이어붙는 계측 — 엑셀 줄은 "라벨 값".
+
+    단위가 붙는 값은 ``line`` 을 따로 준다 — 화면 값은 µm, 엑셀 줄은 ㎛ 다(ko.py 주석)."""
+    return Measure(label=label, value=value, line=line or f"{label} {value}",
                    cluster=cluster)
 
 
@@ -121,18 +123,21 @@ def geometry_measures(image_path: Path) -> tuple[str, list[Measure]]:
             return "ok", head + [
                 _m(i18n.KO.DEFECT_HEIGHT_LABEL,
                    i18n.KO.DEFECT_HEIGHT_VALUE_FMT.format(v=g.height_um),
-                   CLUSTER_SIZE),
+                   CLUSTER_SIZE, i18n.KO.DEFECT_HEIGHT_FMT.format(v=g.height_um)),
             ]
         # contrast 는 일부 자재(예: PI)만 측정 — 0 은 '측정 안 함'이라 0.00 대신 '—'.
         contrast_val = (i18n.KO.DEFECT_CONTRAST_NONE_VALUE if g.contrast == 0
                         else i18n.KO.DEFECT_CONTRAST_VALUE_FMT.format(v=g.contrast))
         return "ok", head + [
             _m(i18n.KO.DEFECT_AREA_LABEL,
-               i18n.KO.DEFECT_AREA_VALUE_FMT.format(v=g.area_um2), CLUSTER_SIZE),
+               i18n.KO.DEFECT_AREA_VALUE_FMT.format(v=g.area_um2), CLUSTER_SIZE,
+               i18n.KO.DEFECT_AREA_FMT.format(v=g.area_um2)),
             _m(i18n.KO.DEFECT_WIDTH_LABEL,
-               i18n.KO.DEFECT_WIDTH_VALUE_FMT.format(v=g.width_um), CLUSTER_SIZE),
+               i18n.KO.DEFECT_WIDTH_VALUE_FMT.format(v=g.width_um), CLUSTER_SIZE,
+               i18n.KO.DEFECT_WIDTH_FMT.format(v=g.width_um)),
             _m(i18n.KO.DEFECT_LENGTH_LABEL,
-               i18n.KO.DEFECT_LENGTH_VALUE_FMT.format(v=g.length_um), CLUSTER_SIZE),
+               i18n.KO.DEFECT_LENGTH_VALUE_FMT.format(v=g.length_um), CLUSTER_SIZE,
+               i18n.KO.DEFECT_LENGTH_FMT.format(v=g.length_um)),
             _m(i18n.KO.DEFECT_CONTRAST_LABEL, contrast_val, CLUSTER_SIZE),
         ]
     except Exception:
