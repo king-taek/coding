@@ -247,18 +247,6 @@ def test_select_stamp_paints_border():
     assert img.pixelColor(1, 45) != QColor("#000000"), "테두리가 안 찍혔다"
 
 
-# ── 15안: 스위치 노브가 움직이는 동안 출발·도착을 안다 ────────────────────
-def test_switch_knob_records_from_to(styled_qapp, motion_on):
-    from aoi_verification.app.ui.widgets.switch_row import ToggleSwitch
-    sw = ToggleSwitch(False)
-    sw.show()
-    sw.set_on(True)
-    assert (sw._knob_from, sw._knob_to) == (0.0, 1.0)
-    _spin(styled_qapp, motion.DUR_KNOB + 80)
-    assert sw._pos == pytest.approx(1.0)
-    sw.deleteLater()
-
-
 # ── 16안: 슬롯 타일 체크 배지는 선택 상태를 따른다 ───────────────────────
 def test_slot_tile_badge_follows_check(styled_qapp, motion_on):
     from aoi_verification.app.ui.widgets.slot_select_dialog import _SlotTile

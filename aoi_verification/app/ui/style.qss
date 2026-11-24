@@ -729,8 +729,7 @@ QWidget[role="loadingPanel"] {
 /* 패널 안 컨테이너 — 맨 QWidget 은 전역 규칙의 $bg 를 물려받아 패널 면 위에 색이 다른
    띠로 보인다.  투명으로 못 박는다. */
 QWidget[role="loadingBarHost"],
-QWidget[role="rowHost"],
-QWidget[role="switchRowText"] {
+QWidget[role="rowHost"] {
     background: transparent;
 }
 /* ── 로딩 패널(개선안 2a — 원형 웨이퍼 맵) ──────────────────────────────

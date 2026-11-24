@@ -840,7 +840,9 @@ def test_view_options_in_both_stages_and_apply_to_both_maps(qt, tmp_path):
     try:
         _wait_build(qt, dlg)
         views = (dlg.left.view, dlg.right.view)
-        assert dlg.fill_btn.isCheckable()
+        from PyQt6.QtWidgets import QCheckBox
+        # 켜기/끄기는 체크박스(F10) — 누르는 버튼이 아니다.
+        assert type(dlg.fill_btn) is QCheckBox and type(dlg.unmatched_first_btn) is QCheckBox
         assert not any(v.fill_dies() for v in views)
         assert dlg.unmatched_first_btn.isHidden()   # 색칠 전에는 안 보인다
         dlg.fill_btn.setChecked(True)

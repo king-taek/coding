@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
-from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QFrame,
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFrame,
                              QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget)
 
 from ..folder_picker import FolderPicker
@@ -335,20 +335,18 @@ class WaferMapDialog(QDialog):
         self.resize(1100, 720)
 
     def _add_view_options(self, top) -> None:
-        """보기 옵션 — die 색칠 · 점 크기 · 노치 방향.  두 단계 모두, 두 맵에 **함께** 건다."""
-        self.fill_btn = NeonButton(i18n.KO.WAFER_MAP_FILL_DIES, role="ghost")
-        self.fill_btn.setCheckable(True)
+        """보기 옵션 — die 색칠 · 점 크기 · 노치 방향.  두 단계 모두, 두 맵에 **함께** 건다.
+
+        켜기/끄기는 체크박스다(F10, 현택님 2026-11-24) — 누르는 버튼이면 눌린 상태가
+        잘 안 보이고, 설정·결과 화면의 같은 일과 모양이 달랐다."""
+        self.fill_btn = QCheckBox(i18n.KO.WAFER_MAP_FILL_DIES, self)
         self.fill_btn.setToolTip(i18n.KO.WAFER_MAP_FILL_DIES_TIP)
-        self.fill_btn.setAutoDefault(False)
         self.fill_btn.toggled.connect(self._on_fill_toggled)
         top.addWidget(self.fill_btn)
         # 결과 단계에서만, die 색칠이 켜졌을 때만 보인다(_on_fill_toggled).
-        self.unmatched_first_btn = NeonButton(i18n.KO.WAFER_MAP_UNMATCHED_FIRST,
-                                              role="ghost")
-        self.unmatched_first_btn.setCheckable(True)
+        self.unmatched_first_btn = QCheckBox(i18n.KO.WAFER_MAP_UNMATCHED_FIRST, self)
         self.unmatched_first_btn.setChecked(True)
         self.unmatched_first_btn.setToolTip(i18n.KO.WAFER_MAP_UNMATCHED_FIRST_TIP)
-        self.unmatched_first_btn.setAutoDefault(False)
         self.unmatched_first_btn.toggled.connect(self._on_unmatched_first_toggled)
         self.unmatched_first_btn.hide()
         top.addWidget(self.unmatched_first_btn)

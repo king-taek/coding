@@ -12,7 +12,7 @@ import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
 
-from PyQt6.QtCore import QPoint                                 # noqa: E402
+from PyQt6.QtCore import QPoint, Qt                             # noqa: E402
 from PyQt6.QtWidgets import QApplication                        # noqa: E402
 
 from aoi_verification.app.ui.pages import setup_page as sp      # noqa: E402
@@ -120,7 +120,7 @@ def test_fresh_prefs_starts_in_coordinate(qapp):
     from aoi_verification.app.utils.prefs import EngineMode
     page = sp.SetupPage()
     try:
-        assert page.legacy_switch.is_on() is False
+        assert page.legacy_switch.isChecked() is False
         assert page._current_engine_mode() == EngineMode.COORDINATE
     finally:
         page.deleteLater()
@@ -147,11 +147,11 @@ def test_switch_and_sub_choice_drive_engine_mode(qapp):
     from aoi_verification.app.utils.prefs import EngineMode
     page = sp.SetupPage()
     try:
-        page.legacy_switch.set_on(True, emit=True)
+        page.legacy_switch.setChecked(True)
         assert page._current_engine_mode() == EngineMode.BASIC
         page.legacy_group.set_current_key(EngineMode.EFFICIENCY, emit=True)
         assert page._current_engine_mode() == EngineMode.EFFICIENCY
-        page.legacy_switch.set_on(False, emit=True)
+        page.legacy_switch.setChecked(False)
         assert page._current_engine_mode() == EngineMode.COORDINATE
     finally:
         page.deleteLater()
@@ -180,7 +180,7 @@ def test_only_the_active_engine_params_are_visible(qapp):
         assert page._threshold_row.isVisibleTo(page) is False
         assert page.legacy_group.isVisibleTo(page) is False
         # 구형 모드: 허용 오차는 **자리를 지키되 비활성**, 나머지가 나타난다.
-        page.legacy_switch.set_on(True, emit=True)
+        page.legacy_switch.setChecked(True)
         for _ in range(6):
             qapp.processEvents()
         assert page._tol_row.isVisibleTo(page) is True, "숨기면 토글이 튄다"
@@ -189,7 +189,7 @@ def test_only_the_active_engine_params_are_visible(qapp):
         assert page._threshold_row.isVisibleTo(page) is True
         assert page.legacy_group.isVisibleTo(page) is True
         # 되돌리면 원래대로 — 한쪽만 바뀌고 굳지 않는다.
-        page.legacy_switch.set_on(False, emit=True)
+        page.legacy_switch.setChecked(False)
         for _ in range(6):
             qapp.processEvents()
         assert page._tol_row.isEnabled() is True
@@ -214,13 +214,13 @@ def test_legacy_toggle_does_not_move_when_switched(qapp):
             return page.legacy_switch.mapTo(page, QPoint(0, 0)).y()
 
         before = _toggle_y()
-        page.legacy_switch.set_on(True, emit=True)
+        page.legacy_switch.setChecked(True)
         for _ in range(8):
             qapp.processEvents()
         assert _toggle_y() == before, \
             f"구형 모드를 켜자 토글이 {before}px → {_toggle_y()}px 로 움직였다"
 
-        page.legacy_switch.set_on(False, emit=True)
+        page.legacy_switch.setChecked(False)
         for _ in range(8):
             qapp.processEvents()
         assert _toggle_y() == before
@@ -259,7 +259,7 @@ def test_active_mode_is_stated_in_words(qapp):
     try:
         # 좌표 매칭(기본)은 문장을 두지 않는다(사용자 요청).
         assert page._engine_inert_hint.text() == ""
-        page.legacy_switch.set_on(True, emit=True)
+        page.legacy_switch.setChecked(True)
         assert "구형" in page._engine_inert_hint.text()
     finally:
         page.deleteLater()
@@ -276,7 +276,7 @@ def test_collect_input_uses_explicit_switch(qapp, monkeypatch, tmp_path):
         page.val_path_edit.setText(str(val))
         inp = page._collect_input()
         assert inp is not None and inp.engine_mode == EngineMode.COORDINATE
-        page.legacy_switch.set_on(True, emit=True)
+        page.legacy_switch.setChecked(True)
         page.legacy_group.set_current_key(EngineMode.EFFICIENCY, emit=True)
         inp2 = page._collect_input()
         assert inp2 is not None and inp2.engine_mode == EngineMode.EFFICIENCY
@@ -404,59 +404,35 @@ def test_no_horizontal_scroll_at_800x600(qapp):
 
 # ※ `capture_draft`/`restore_draft`/`_recreate_pages` 를 쓰던 테스트 3개는 없앴다 —
 #    페이지를 다시 만드는 전환(색 모드)이 사라져 입력값을 옮겨 심을 일이 없다.
-def test_switch_does_not_toggle_on_press_alone(qapp):
-    """★ press 즉시 토글하면 터치 패널의 스크롤 제스처가 판정 엔진을 바꾼다."""
-    from PyQt6.QtCore import QPointF, Qt as _Qt
-    from PyQt6.QtGui import QMouseEvent
+def test_setup_toggles_are_checkboxes_box_first(qapp):
+    """켜기/끄기는 모두 체크박스 — 상자가 글자 **왼쪽**(F10, 현택님 2026-11-24).
 
-    from aoi_verification.app.ui.widgets.switch_row import SwitchRow
-    row = SwitchRow("구형 모드", checked=False)
+    예전 커스텀 스위치(트랙+노브)는 결과 화면 옵션(체크박스)과 같은 일을 다른 모양으로 했다."""
+    import importlib.util
+
+    from PyQt6.QtWidgets import QCheckBox
+    page = sp.SetupPage()
     try:
-        row.resize(300, 40)
-        sw = row.switch
-        center = QPointF(sw.width() / 2, sw.height() / 2)
-        press = QMouseEvent(QMouseEvent.Type.MouseButtonPress, center,
-                            _Qt.MouseButton.LeftButton, _Qt.MouseButton.LeftButton,
-                            _Qt.KeyboardModifier.NoModifier)
-        sw.mousePressEvent(press)
-        assert sw.is_on() is False, "press 만으로 토글됐다"
-
-        # 위젯 **밖**에서 release → 취소(드래그로 빠져나간 경우)
-        outside = QPointF(sw.width() + 40, sw.height() + 40)
-        rel_out = QMouseEvent(QMouseEvent.Type.MouseButtonRelease, outside,
-                              _Qt.MouseButton.LeftButton, _Qt.MouseButton.LeftButton,
-                              _Qt.KeyboardModifier.NoModifier)
-        sw.mouseReleaseEvent(rel_out)
-        assert sw.is_on() is False, "밖에서 release 했는데 토글됐다"
-
-        # 안에서 press→release → 실행
-        sw.mousePressEvent(press)
-        rel_in = QMouseEvent(QMouseEvent.Type.MouseButtonRelease, center,
-                             _Qt.MouseButton.LeftButton, _Qt.MouseButton.LeftButton,
-                             _Qt.KeyboardModifier.NoModifier)
-        sw.mouseReleaseEvent(rel_in)
-        assert sw.is_on() is True, "정상 클릭이 토글되지 않았다"
+        for box in (page.legacy_switch, page._cross_switch, page._map_switch):
+            assert type(box) is QCheckBox, type(box)
+            assert box.layoutDirection() == Qt.LayoutDirection.LeftToRight
+        assert importlib.util.find_spec(
+            "aoi_verification.app.ui.widgets.switch_row") is None, "옛 스위치 위젯이 남아 있다"
     finally:
-        row.deleteLater()
+        page.deleteLater()
 
 
-def test_switch_hot_zone_is_not_the_whole_row(qapp):
-    """넓은 카드 안에서 행 전체가 핫존이면 보이지 않는 1300px 클릭영역이 생긴다."""
-    from aoi_verification.app.ui.widgets.switch_row import SwitchRow
-    row = SwitchRow("유사도 엔진(구형) 사용",
-                    description="끄면 좌표 매칭을 씁니다 — 권장 기본값.")
+def test_checkbox_empty_area_is_not_a_hot_zone(qapp):
+    """넓은 카드 안에서 줄 전체가 핫존이면 보이지 않는 클릭영역이 생긴다 — 상자·글자만 누른다."""
+    page = sp.SetupPage()
     try:
-        row.resize(1300, 60)
-        row.show()
-        for _ in range(8):
-            qapp.processEvents()
-        # 제목은 자기 글자 폭만 차지해야 한다(여백까지 늘어나면 다시 넓은 핫존).
-        assert row._title.width() < row.width() * 0.5, \
-            f"제목 폭 {row._title.width()} / 행 폭 {row.width()}"
-        # 행 자신은 mousePressEvent 를 재정의하지 않는다(빈 여백 클릭 = 무반응).
-        assert "mousePressEvent" not in SwitchRow.__dict__
+        box = page.legacy_switch
+        box.resize(1300, box.sizeHint().height())
+        mid = box.height() // 2
+        assert box.hitButton(QPoint(4, mid)), "상자를 눌러도 안 바뀐다"
+        assert not box.hitButton(QPoint(1290, mid)), "빈 여백을 눌러도 바뀐다"
     finally:
-        row.deleteLater()
+        page.deleteLater()
 
 
 # ── Overkill 튜닝 버튼은 개발자 모드 없이도 보인다 ─────────────────────────────

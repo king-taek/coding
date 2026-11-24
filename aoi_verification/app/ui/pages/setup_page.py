@@ -11,7 +11,7 @@ from typing import Optional
 from PyQt6.QtCore import (QObject, QSize, Qt, QThread, QTimer,
                           QVariantAnimation, pyqtSignal)
 from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import (QApplication, QBoxLayout, QDoubleSpinBox, QFrame,
+from PyQt6.QtWidgets import (QApplication, QBoxLayout, QCheckBox, QDoubleSpinBox, QFrame,
                               QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                               QMessageBox, QScrollArea, QSizePolicy,
                               QStackedWidget, QVBoxLayout, QWidget)
@@ -34,7 +34,6 @@ from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
 from ..widgets.no_wheel_slider import NoWheelDoubleSpinBox, NoWheelSlider
 from ..widgets.option_group import OptionGroup
-from ..widgets.switch_row import SwitchRow
 from ..widgets import sheet_host as sheets
 
 # 조용히 삼키던 사실을 남기는 로거 — `main._setup_logging` 이 캐시 폴더의 app.log 로
@@ -486,7 +485,7 @@ class SetupPage(QWidget):
         ★ 배지와 C안 요약이 각자 문장을 만들어 같은 사실을 서로 다른 말로 했다
         (배지 '구형 고효율 · 유사도 임계치 55 %' vs 요약 '구형 유사도 엔진 (임계치 55 %)').
         판정 기준은 하나이므로 문장도 하나에서 나와야 한다."""
-        if self.legacy_switch.is_on():
+        if self.legacy_switch.isChecked():
             sub = (i18n.KO.ENGINE_MODE_EFFICIENCY_SHORT
                    if self.legacy_group.current_key() == EngineMode.EFFICIENCY
                    else i18n.KO.ENGINE_MODE_BASIC_SHORT)
@@ -507,7 +506,7 @@ class SetupPage(QWidget):
         # 구형은 예외 경로 — 배지가 색으로도 말하게 한다(모르고 켜둔 채 실행 방지).
         card = getattr(self, "_mode_badge_card", None)
         if card is not None:
-            state = "legacy" if self.legacy_switch.is_on() else ""
+            state = "legacy" if self.legacy_switch.isChecked() else ""
             card.setProperty("badgeState", state)
             card.style().unpolish(card)
             card.style().polish(card)
@@ -1128,10 +1127,9 @@ class SetupPage(QWidget):
 
         # Defect 추출 전용 — 엑셀에 Wafer Map 시트를 넣을지(사용자 결정: 끌 수 있게).
         # 추출 모드에서만 보인다(`set_extract_mode`).  마지막 선택을 기억한다.
-        self._map_switch = SwitchRow(
-            i18n.KO.EXTRACT_WAFER_MAP_SWITCH,
-            checked=bool(getattr(_prefs_now, "extract_wafer_map", True)),
-            compact=True, parent=card)
+        # ★ 앱의 켜기/끄기는 모두 체크박스다 — 상자가 글자 왼쪽(F10, 현택님 2026-11-24).
+        self._map_switch = QCheckBox(i18n.KO.EXTRACT_WAFER_MAP_SWITCH, card)
+        self._map_switch.setChecked(bool(getattr(_prefs_now, "extract_wafer_map", True)))
         self._map_switch.toggled.connect(
             lambda on: _prefs.patch(extract_wafer_map=bool(on)))
         self._map_switch.setVisible(False)
@@ -1139,8 +1137,7 @@ class SetupPage(QWidget):
 
         # 교차검증(양방향) — 매칭 전용(추출에서는 숨긴다).  기억하지 않는다 — 앱을 켤
         # 때마다 꺼진 채 시작한다(사용자 결정 2026-10-24).
-        self._cross_switch = SwitchRow(i18n.KO.CROSS_SWITCH, checked=False, compact=True,
-                                       parent=card)
+        self._cross_switch = QCheckBox(i18n.KO.CROSS_SWITCH, card)
         self._cross_switch.toggled.connect(self.cross_mode_changed)
         col.addWidget(self._cross_switch)
 
@@ -1246,12 +1243,8 @@ class SetupPage(QWidget):
         #   자체를 없애 같은 실수가 재발할 수 없게 한다.
         _legacy_on, _legacy_sub = self._resolved_legacy_state(_prefs_now)
 
-        # 스위치는 제목 **바로 옆**(사용자 요청 — 카드 오른쪽 끝에 떨어져 있었다).
-        self.legacy_switch = SwitchRow(
-            i18n.KO.LEGACY_SWITCH_TITLE,
-            checked=_legacy_on, compact=True,
-            parent=engine_card,
-        )
+        self.legacy_switch = QCheckBox(i18n.KO.LEGACY_SWITCH_TITLE, engine_card)
+        self.legacy_switch.setChecked(_legacy_on)
         # 언제 이 모드를 쓰는지는 툴팁으로 — 화면을 조용하게 유지한다.
         self.legacy_switch.setToolTip(i18n.KO.LEGACY_MODE_HINT)
         self.legacy_switch.toggled.connect(self._on_legacy_toggled)
@@ -1326,7 +1319,7 @@ class SetupPage(QWidget):
 
         ★ 접이식 펼침 상태(is_expanded 등)를 절대 읽지 않는다 — 설명을 읽는 행위가
         엔진을 바꾸던 버그의 재발 방지."""
-        if not self.legacy_switch.is_on():
+        if not self.legacy_switch.isChecked():
             return EngineMode.COORDINATE
         sub = self.legacy_group.current_key()
         return sub if sub in (EngineMode.BASIC, EngineMode.EFFICIENCY) \
@@ -1354,7 +1347,7 @@ class SetupPage(QWidget):
         `setEnabled(False)` 는 자식에 전파되므로 행 전체가 한 번에 회색이 된다.
 
         지금 어느 엔진이 도는지는 `_engine_inert_hint` 한 줄과 상단 모드 배지가 말한다."""
-        legacy_on = self.legacy_switch.is_on()
+        legacy_on = self.legacy_switch.isChecked()
         # P12A — 원인(스위치 노브)이 먼저, 결과(종속 줄)가 40ms 뒤에 바뀐다.  옛 모습을
         # 찍어 두었다가 그 위에 얹어 흐린다(허용 오차 줄 회색↔활성, 사라지는 줄).
         dep = motion.enabled() and self.isVisible()
@@ -1973,7 +1966,7 @@ class SetupPage(QWidget):
 
     def is_cross_mode(self) -> bool:
         """교차검증 스위치 — 추출 모드에서는 숨겨지므로 꺼진 것으로 본다."""
-        return not self._extract_mode and self._cross_switch.is_on()
+        return not self._extract_mode and self._cross_switch.isChecked()
 
     def set_extract_mode(self, on: bool) -> None:
         """Defect 추출 ↔ 매칭 검증.  **같은 화면**에서 한쪽만 받도록 바꾼다(사용자 결정).
@@ -2540,7 +2533,7 @@ class SetupPage(QWidget):
         if not roots:
             return None
         root = roots[0]
-        wafer_map = self._map_switch.is_on()
+        wafer_map = self._map_switch.isChecked()
         machine = (self.ref_machine_edit.text().strip()
                    or i18n.KO.DEFAULT_REF_MACHINE)
         automation = self.auto_group.current_key() or AutomationLevel.USER_SELECT
