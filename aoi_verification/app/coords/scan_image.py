@@ -286,7 +286,7 @@ def resolve_xy(folder, xy, side_um: float = CROP_SIDE_UM) -> ScanMatch:
 
 
 def resolve_xy_many(folder, xys, side_um: float = CROP_SIDE_UM) -> list:
-    """:func:`resolve_xy` 를 한 폴더의 결함 여럿에 — 목록·폴더 mtime stat 과 픽셀 크기 조회를 **한 번만** 한다.
+    """:func:`resolve_xy` 를 한 폴더의 결함 여러에 — 목록·폴더 mtime stat 과 픽셀 크기 조회를 **한 번만** 한다.
     결과는 ``xys`` 와 같은 순서·같은 값(하나씩 부른 것과 같다).  NAS 에서는 결함마다 stat 2번이 왕복이라
     120개만 해도 1초 넘게 걸렸다(측정)."""
     folder = Path(folder)
@@ -355,7 +355,7 @@ def defects_in(scan_path, side_um: float = CROP_SIDE_UM) -> ScanDefects:
     """Scan 사진 한 장 → 그 안에 든 Defect 들.  :func:`rank_candidates` 의 역방향이다 —
     같은 :func:`scan_uv` · 같은 포함 조건(``0 ≤ u < W``, ``0 ≤ v < H``) · 같은 :func:`crop_box`.
     그래서 INI 에 좌표가 있는 Color 사진에서 이 Scan 을 찾았다면, 이 Scan 에서도 그 Defect 가 같은 자리에 나온다.
-    (정방향은 INI 항목이 없으면 Color 파일명의 점표기로 물러서지만, 거꾸로는 INI 에 적힌 Defect 만 셈 수 있다.)
+    (정방향은 INI 항목이 없으면 Color 파일명의 점표기로 물러서지만, 거꾸로는 INI 에 적힌 Defect 만 셀 수 있다.)
 
     값은 전부 그 폴더 파일에서 읽는다: 중심 = ``ScanResultImageList.txt``(Scan 파일명의 두 수치는
     절대좌표가 아니라 쓰지 않는다), 크기 = 실제 JPEG, 픽셀 = 그 Scan 레시피의 값(못 읽으면 실패),
