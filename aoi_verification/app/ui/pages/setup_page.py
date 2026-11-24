@@ -702,6 +702,7 @@ class SetupPage(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(10)
         label = QLabel("", host)
+        label.setProperty("role", "cardTitle")   # '검증 1'(첫 줄 제목)과 같은 글씨 — 번호가 같은 급이다
         edit = QLineEdit(host)
         edit.setMinimumWidth(self._VAL_ROW_EDIT_MIN_W)
         edit.setPlaceholderText(i18n.KO.SETUP_FOLDER_PLACEHOLDER)

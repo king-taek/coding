@@ -384,6 +384,9 @@ def test_setup_val_row_labels_and_remove_buttons_line_up(styled_qapp, isolated_c
     assert len(set(removes)) == 1, f"✕ 가 한 열이 아니다: {removes}"
     assert removes[0] > labels[0], "✕ 는 라벨 오른쪽"
     assert set(edits) == {x_of(page.val_path_edit)}, "입력란이 첫 장비와 같은 자리에서 시작해야 한다"
+    assert {r["label"].property("role") for r in page._val_rows} == {head.property("role")}
+    assert all(r["label"].width() >= r["label"].sizeHint().width() for r in page._val_rows), \
+        "'검증 N' 글자가 잘린다"
     page.close()
     page.deleteLater()
 
