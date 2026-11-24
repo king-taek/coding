@@ -45,6 +45,7 @@ from ..workers import thumb_plan      # 순수 로직(Qt·numpy 없음) — 무�
 from .pages.setup_page import SetupInput, SetupPage
 from .widgets.journey_rail import JourneyRail
 from .widgets.loading_overlay import LoadingOverlay
+from .widgets import kla_side_dialog
 from .widgets import sheet_host as sheets
 from .widgets.sheet_host import SheetHost
 from .widgets.window_controls import add_fullscreen_shortcut
@@ -1004,21 +1005,16 @@ class MainWindow(MultiValFlow, QMainWindow):
     def _ask_kla_side(self) -> Optional[str]:
         """매칭 실패 폴더가 있을 때 'KLA 가 어느 쪽인가?' 를 묻는다.
 
-        반환 "ref"/"val"/"both" 또는 None(KLA 아님 → 파일명/OCR 자동 매칭 건너뜀)."""
+        반환 "ref"/"val"/"both", None(KLA 아님 → 파일명/OCR 자동 매칭 건너뜀),
+        또는 ``kla_side_dialog.CANCEL``([취소]·Esc → 검증 시작을 멈춘다)."""
         # ★ 네 경우(기준/검증/둘다/KLA 아님)를 모두 유지한다 — 한쪽만 추가하지 말 것
-        #   (CLAUDE.md 규칙).  강조 문장은 인라인 HTML 대신 시트의 warn 라벨이 담당한다
-        #   (색을 f-string 으로 굽지 않는다).
-        # ★ `tiles=True` — 넷은 **대등한 선택지**다.  예전엔 '기준' 만 파란 주 버튼이라
-        #   "왜 저것만 강조돼 있지?" 로 읽혔다(사용자 지적).  정답이 정해져 있지 않으면
-        #   기본값을 세우지도 않는다(`default` 없음).  순서는 읽는 순서대로.
-        return sheets.choose(
-            self, i18n.KO.KLA_ASK_TITLE, i18n.KO.KLA_ASK_SIDE_BODY,
-            [("ref", i18n.KO.KLA_SIDE_REF, "option"),
-             ("val", i18n.KO.KLA_SIDE_VAL, "option"),
-             ("both", i18n.KO.KLA_SIDE_BOTH, "option"),
-             (None, i18n.KO.KLA_SIDE_NONE, "option")],
-            heading=i18n.KO.KLA_ASK_SIDE_HEADING, tiles=True,
-        )
+        #   (CLAUDE.md 규칙).  그림 카드 넷, 한 번 눌러 확정(현택님 2026-11-24, K1 A안).
+        dlg = kla_side_dialog.KlaSideDialog(self)
+        try:
+            sheets.run(dlg)
+            return dlg.answer
+        finally:
+            dlg.deleteLater()
 
     def _resolve_and_merge_kla(self, sr: ScanResult, kla_side: str,
                                on_done) -> None:
@@ -1432,6 +1428,10 @@ class MainWindow(MultiValFlow, QMainWindow):
             side = self._kla_machine_side(inp)
             if side is None:
                 side = self._ask_kla_side()
+                if side == kla_side_dialog.CANCEL:
+                    # [취소]·Esc — 'KLA 아님' 과 달리 진행하지 않고 설정 화면으로.
+                    self._cancel_scan()
+                    return
             if side:
                 # OCR 은 백그라운드 워커에서 → 끝나면 on_done 으로 다음 단계 진행.
                 self._resolve_and_merge_kla(

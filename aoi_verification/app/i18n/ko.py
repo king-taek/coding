@@ -797,13 +797,11 @@ LOAD_KLA_INFO = "KLA 슬롯 매칭 중 — 정보파일 분석…"
 LOAD_KLA_OCR = "KLA WaferID 판독 (OCR) 중…"
 
 # slot 매칭 실패 시 'KLA 가 어느 쪽?' 확인 — 호기가 K-n 이면 자동, 아니면 묻는다.
-KLA_ASK_TITLE = "KLA 장비 확인"
-# 팝업 최상단에 크게·색상으로 강조되는 핵심 질문(#2).
-KLA_ASK_SIDE_HEADING = "KLA 장비가 어느 쪽인가요?"
-KLA_ASK_SIDE_BODY = "KLA(WaferID) 장비 위치를 선택하세요. 없으면 ‘KLA 아님’."
+# 그림 카드 넷 + [취소](BTN_CANCEL) — 설명문 없음(현택님 2026-11-24, K1 A안).
+KLA_ASK_TITLE = "KLA 장비는 어느 쪽?"
 KLA_SIDE_REF = "기준"
 KLA_SIDE_VAL = "검증"
-KLA_SIDE_BOTH = "둘다"
+KLA_SIDE_BOTH = "둘 다"
 KLA_SIDE_NONE = "KLA 아님"
 
 INFO_RESUME_TITLE = "이전 검증 설정 복원"
