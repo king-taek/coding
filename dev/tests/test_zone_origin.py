@@ -325,3 +325,42 @@ def test_dialog_lot_groups_wafers(dlg):
     assert not dlg.lot_open("FLU-1122N") and not any(k == "wafer" for k, _v in dlg.facet_rows)
     dlg.toggle("lot", "FLU-1122N")
     assert len(dlg._passed) == 351 and dlg.chips_host.isVisibleTo(dlg)
+
+
+def test_typing_coord_then_moving_focus_does_not_crash(dlg):
+    """좌표를 넣고 Enter → 다른 칸으로 옮기면 프로그램이 꺼졌다(신호를 낸 입력칸을 그리기가 지움, 2026-11-24).
+    적용은 한 박자 뒤 · 옛 칸은 나중에 지운다.  커서는 쓰던 칸으로 돌아온다."""
+    import time
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QApplication
+
+    def settle():
+        for _ in range(5):
+            QApplication.processEvents()
+            time.sleep(0.01)
+    dlg.show()
+    settle()
+    ed = dlg.coord_edits["col"]
+    ed.setFocus()
+    QTest.keyClicks(ed, "4")
+    QTest.keyClick(ed, Qt.Key.Key_Return)
+    settle()
+    assert dlg._flags.col == 4
+    ed = dlg.coord_edits["row"]
+    ed.setFocus()
+    QTest.keyClicks(ed, "3")
+    dlg.coord_edits["col"].setFocus()          # 포커스 이동 → Row 의 editingFinished
+    settle()
+    assert (dlg._flags.col, dlg._flags.row) == (4, 3)
+    assert all((i.col, i.row) == (4, 3) for i in dlg._passed)
+    for key in ("min_area", "min_width"):        # 파라미터 칸도 같은 길
+        if not dlg._params_open:
+            dlg.toggle_params()
+            settle()
+        e = dlg.min_edits[key]
+        e.setFocus()
+        QTest.keyClicks(e, "1")
+        dlg.coord_edits["row"].setFocus()
+        settle()
+    assert dlg._flags.min_area == 1.0 and dlg._flags.min_width == 1.0

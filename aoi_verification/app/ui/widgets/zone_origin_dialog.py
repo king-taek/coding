@@ -27,7 +27,7 @@ from typing import Optional
 
 from PyQt6.QtCore import QEvent, QObject, Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QDoubleValidator, QImage, QIntValidator, QPixmap
-from PyQt6.QtWidgets import (QAbstractItemView, QDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView,
+from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView,
                              QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QTableWidget,
                              QTableWidgetItem, QVBoxLayout, QWidget)
 
@@ -742,9 +742,22 @@ class ZoneOriginDialog(QDialog):
         self.alert_label.setText("\n".join(lines))
         self.alert.setVisible(bool(lines))
 
+    def _edits(self) -> dict:
+        """지금 왼쪽 바의 입력칸 ``{키: QLineEdit}`` (좌표 · 파라미터)."""
+        return {**getattr(self, "coord_edits", {}), **getattr(self, "min_edits", {})}
+
+    def _edit_done(self, key: str, value) -> None:
+        """입력칸 editingFinished — **바로 그리지 않고 한 박자 뒤에** 적용한다.
+
+        그 자리에서 다시 그리면 신호를 낸 입력칸(포커스를 옮기던 중인 칸)을 지워 프로그램이 꺼졌다
+        (좌표를 넣고 다른 칸을 누를 때, 재현 2026-11-24)."""
+        call_later(self, 0, lambda: self.set_flag(key, value))
+
     def _render_side(self, counts: dict) -> None:
         bar = self.side_scroll.verticalScrollBar()
         pos = bar.value()
+        fw = QApplication.focusWidget()
+        focus_key = next((k for k, e in self._edits().items() if e is fw), None)
         inner = QWidget()
         il = QVBoxLayout(inner)
         il.setContentsMargins(8, 12, 8, 20)
@@ -803,13 +816,24 @@ class ZoneOriginDialog(QDialog):
                 ed.setValidator(QDoubleValidator(0.0, 1e9, 2, ed))
                 v = getattr(self._flags, key)
                 ed.setText(f"{v:g}" if v else "")
-                ed.editingFinished.connect(lambda key=key, ed=ed: self.set_flag(key, _float(ed.text())))
+                ed.editingFinished.connect(lambda key=key, ed=ed: self._edit_done(key, _float(ed.text())))
                 row.addWidget(ed)
                 il.addLayout(row)
                 self.min_edits[key] = ed
         il.addStretch(1)
+        # 옛 칸은 바로 지우지 않는다 — 이 그리기가 그 칸의 신호 안에서 불릴 수 있다.  신호를 막고 숨긴 뒤 나중에 지운다.
+        old = self.side_scroll.takeWidget()
+        if old is not None:
+            for e in old.findChildren(QLineEdit):
+                e.blockSignals(True)
+            old.hide()
+            old.deleteLater()
         self.side_scroll.setWidget(inner)
         bar.setValue(pos)
+        if focus_key is not None and focus_key in self._edits():
+            ed = self._edits()[focus_key]                 # 쓰던 칸에 커서를 돌려준다(Col 다음 Row 로 바로 넘어가게)
+            ed.setFocus()
+            ed.end(False)
 
     def _render_coord(self, inner: QWidget, il: QVBoxLayout) -> None:
         """LOT 목록 아래 '좌표' — 장비 화면 번호를 넣으면 그 die 의 Defect 만.  빈칸 = 안 거름(음수도 된다).
@@ -832,7 +856,7 @@ class ZoneOriginDialog(QDialog):
             ed.setValidator(QIntValidator(-9999, 99999, ed))
             v = getattr(self._flags, key)
             ed.setText("" if v is None else str(v))
-            ed.editingFinished.connect(lambda key=key, ed=ed: self.set_flag(key, _int_or_none(ed.text())))
+            ed.editingFinished.connect(lambda key=key, ed=ed: self._edit_done(key, _int_or_none(ed.text())))
             line.addWidget(ed)
             il.addLayout(line)
             self.coord_edits[key] = ed
@@ -1145,7 +1169,8 @@ class ZoneOriginDialog(QDialog):
         try:
             if key not in self._wanted:
                 return
-            tp = image_io.get_mid_path(path) if kind == "mid" else image_io.get_thumb_path(path)
+            # 목록 썸네일은 칸(118px)만 채우면 된다 — Wafer map 툴팁용 저화질(120px · Q60) 캐시를 쓴다(현택님 2026-11-24).
+            tp = image_io.get_mid_path(path) if kind == "mid" else image_io.get_map_thumb_path(path)
             img = QImage(str(tp))
             if img.isNull():
                 return
