@@ -1075,7 +1075,7 @@ class ExcelExporter(QThread):
                 self._write_info_cell(ws, info_col, row, u.path,
                                       unmatched_note=not self._extract,
                                       note=(i18n.KO.NOTE_ONLY_VAL if on_val
-                                            else "미매칭"))
+                                            else i18n.KO.NOTE_UNMATCHED))
                 # 미매칭·추출 행의 Scan 은 **그 사진의 것**만, 그 장비의 Scan 열에 둔다
                 # (열이 없는 쪽 — KLA 등 — 은 건너뛴다).  짝 사진 칸은 비워 둔다.
                 side = "val" if on_val else "ref"
@@ -1294,7 +1294,7 @@ class ExcelExporter(QThread):
         self._prog_done = base + placed
 
     def _write_info_cell(self, ws, col: str, row: int, path, *,
-                         unmatched_note: bool, note: str = "미매칭") -> None:
+                         unmatched_note: bool, note: str = "") -> None:
         """미매칭 행의 정보 칸 — 파일명 + 계측·좌표 줄을 **보이는 글자**로.
 
         Defect 추출의 D열(정보)과 Recipe 나란히 배치의 정보 열도 같은 모양이다
@@ -1332,7 +1332,7 @@ class ExcelExporter(QThread):
             horizontal="center", vertical="center", wrap_text=True,
         )
         if unmatched_note:
-            cell_val.comment = Comment(note, "AOI")
+            cell_val.comment = Comment(note or i18n.KO.NOTE_UNMATCHED, "AOI")
 
     # ------------------------------------------------------------------
     def _write_caption(self, ws, col: str, row: int, src) -> None:

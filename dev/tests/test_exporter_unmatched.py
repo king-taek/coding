@@ -87,9 +87,9 @@ def test_export_writes_matches_and_unmatched(qapp, isolated_cache, tmp_path):
     # 매칭 행은 줄무늬 그대로 — 둘이 같아지면 구분이 사라진다.
     assert str(ws["A3"].fill.fgColor.rgb).upper() != "FFFDF1EA"
 
-    # 코멘트 ‘미매칭’ 확인
+    # 코멘트 ‘매치 없음’ 확인
     assert ws["D4"].comment is not None
-    assert "미매칭" in str(ws["D4"].comment.text)
+    assert i18n.KO.NOTE_UNMATCHED in str(ws["D4"].comment.text)
 
     # AOI-N 헤더가 row 2 에 들어갔는지 (#3).
     assert ws["C2"].value == "AOI-1"

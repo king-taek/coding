@@ -5,10 +5,10 @@
 화면은 이미 '**매치 없음**(사람이 되돌린 것) vs **매치 실패**(자동이 못 찾은 것)' 로 잘
 갈라 놓았으므로 나머지 넷을 그 둘에 흡수시켰다.
 
-예외 두 가지는 **의도**이며 여기서 못 박는다:
-  · 엑셀 표기 ``미매칭``(NOTE_UNMATCHED·SHEET_UNMATCHED) — 현장 양식 호환 확인 전까지
-    건드리지 않는다.  대신 TALLY_TOOLTIP 이 화면↔엑셀 다리를 놓는다.
-  · 엑셀 시트 이름의 ``Slot``(SLOT_MISMATCH_SHEET) — 화면은 전부 '슬롯' 이다.
+예외 하나는 **의도**이며 여기서 못 박는다:
+  · 엑셀 시트 이름의 ``Slot``(SLOT_MISMATCH_SHEET) — 화면은 전부 '슬롯' 이다
+    (`utils/excel_ref` 가 이 이름으로 시트를 건너뛰어 바꾸면 옛 결과 파일을 못 읽는다).
+엑셀 메모·시트의 ``미매칭`` 도 화면과 같은 ``매치 없음`` 으로 바꿨다(현택님 2026-11-24).
 
 낱말 규약: **매칭 = 과정/기능**(설정·중단·엔진), **매치 = 결과 한 건**(검토·확정·성공).
 """
@@ -19,8 +19,7 @@ from aoi_verification.app import i18n
 
 def _screen_strings() -> dict[str, str]:
     """사용자 노출 문자열 — 엑셀 표기 전용 키는 뺀다(위 예외)."""
-    excel_only = {"NOTE_UNMATCHED", "NOTE_UNMATCHED_BY_USER", "SHEET_UNMATCHED",
-                  "SLOT_MISMATCH_SHEET"}
+    excel_only = {"SLOT_MISMATCH_SHEET"}
     out = {}
     for name in dir(i18n.KO):
         if not name.isupper() or name in excel_only:
@@ -84,9 +83,12 @@ def test_no_bare_english_skip_on_screen() -> None:
     assert offenders == [], f"화면 문구에 'Skip' 이 있다: {offenders}"
 
 
-def test_tooltip_bridges_screen_and_excel_wording() -> None:
-    """화면('매치 없음')과 엑셀('미매칭')이 다른 유일한 자리에 다리를 놓아 둔다."""
-    assert i18n.KO.NOTE_UNMATCHED in i18n.KO.TALLY_TOOLTIP
+def test_excel_notes_use_the_screen_word() -> None:
+    """엑셀 메모·시트도 화면과 같은 '매치 없음' — 다리 문구가 필요 없어졌다."""
+    for name in ("NOTE_UNMATCHED", "NOTE_UNMATCHED_BY_USER", "NOTE_ONLY_VAL",
+                 "SHEET_UNMATCHED"):
+        assert getattr(i18n.KO, name).startswith("매치 없음"), name
+    assert "미매칭" not in i18n.KO.TALLY_TOOLTIP
 
 
 def _all_texts(value):

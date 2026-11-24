@@ -600,12 +600,10 @@ TALLY_TOOLTIP = (
     "매치 — 허용 오차 안\n"
     "허용 초과 — 짝은 찾았지만 허용 오차를 넘음\n"
     "매치 없음 — 검토에서 직접 되돌림\n"
-    "매치 실패 — 후보가 허용 오차의 3배 밖\n"
-    # 화면('매치 없음')과 엑셀('미매칭')의 낱말이 다른 유일한 자리 — 다리를 놓아 둔다.
-    "※ 매치 없음·매치 실패는 엑셀에 ‘미매칭’ 으로 적힙니다"
+    "매치 실패 — 후보가 허용 오차의 3배 밖"
 )
 BTN_FINISH_REVIEW_KEPT_FMT = "검토 완료 · 유지 {n}"   # ⏎ 제거 — Enter 단축키가 없어졌다
-# 매치 없음이 1장 이상이면 그 수도 함께 — 몇 장이 '미매칭' 으로 나가는지 누르기 전에 보인다.
+# 매치 없음이 1장 이상이면 그 수도 함께 — 몇 장이 '매치 없음' 으로 나가는지 누르기 전에 보인다.
 BTN_FINISH_REVIEW_KEPT_NONE_FMT = "검토 완료 · 유지 {n} · 매치 없음 {m}"
 CHIP_OVER = "허용 초과"
 CHIP_NO_MATCH = "매치 없음"
@@ -821,7 +819,7 @@ INFO_RESUME_BODY = (
 #   없는 영어 낱말('Skip')과 낱말 규약을 어긴 표기는 지금 고쳐 둔다.
 INFO_NO_MATCH_FOUND = "조건에 맞는 검증 후보가 없습니다. 자동으로 ‘매치 없음’ 으로 처리됩니다."
 INFO_NO_VAL_PHOTOS = "이 슬롯에 검증 사진이 없습니다. 자동으로 ‘매치 없음’ 으로 처리됩니다."
-INFO_ALREADY_MATCHED_SECTION = "이미 매칭됨 (자동 제외)"
+INFO_ALREADY_MATCHED_SECTION = "이미 매치됨 (자동 제외)"
 
 # ── 저장/엑셀 ──────────────────────────────────────────────────────────────
 # 마지막 저장 직전에 뜨는 제목 확인창(사용자 요청).  여기서는 **이름만** 정한다 —
@@ -859,10 +857,11 @@ SAVE_FAIL_LOCKED_FMT = (
 # ⚠ **엑셀 표기만 예외로 'Slot' 을 남긴다.**  화면 문구는 전부 '슬롯' 으로 통일했지만
 #   (STAT_SLOT_MISMATCH·WARN_SLOT_MISMATCH_*·SLOT_MAP_TITLE·SLOT_LABEL_FMT·
 #   LOT_COUNTS_PREFIX·WARN_NO_SLOTS·WARN_NO_IMAGES·LOAD_KLA_INFO), 시트 이름·헤더는
-#   현장 양식과 맞춰야 하므로 확인 전까지 건드리지 않는다(같은 이유로 `NOTE_UNMATCHED`
-#   의 '미매칭' 도 남는다 — 다리는 TALLY_TOOLTIP 이 놓는다).
+#   현장 양식과 맞춰야 하므로 확인 전까지 건드리지 않는다.  '미매칭' 은 화면과 같은
+#   '매치 없음' 으로 바꿨다(현택님 2026-11-24) — 시트 이름·메모는 되읽는 곳이 없다
+#   (`utils/excel_ref` 는 시트 이름 대신 머리줄로 배치를 고르고, 메모는 읽지 않는다).
 SLOT_MISMATCH_SHEET = "Slot 불일치 목록"
-SHEET_UNMATCHED = "미매칭 사진"
+SHEET_UNMATCHED = "매치 없음 사진"
 # 미매칭 행 D열 — 결함 geometry(area/width/length/contrast) 표기.  Surface.flt 에서
 # 환산해 파일명 아래 회색 글씨로 덧붙인다.  값을 못 얻을 때의 명시적 마커:
 GEOM_NOT_SUPPORTED = "측정정보 미지원 자재"   # Surface.flt 자체가 없는 자재(예: KLA)
@@ -1095,9 +1094,9 @@ SLOT_MAP_UNREAD_LINE = "\n→ 판독 실패 (수동 매핑)"
 # 좌표 매칭 — 좌표를 못 읽은 사진의 사유 표기
 COORD_MISSING = "좌표 정보가 없습니다"
 
-# 결과/검토에서 '매치 아님' 으로 되돌린 항목의 사유
-NOTE_UNMATCHED = "미매칭"
-NOTE_UNMATCHED_BY_USER = "미매칭 (사용자 검토)"
+# 결과/검토에서 '매치 없음' 으로 되돌린 항목의 사유(엑셀 메모)
+NOTE_UNMATCHED = "매치 없음"
+NOTE_UNMATCHED_BY_USER = "매치 없음 (사용자 검토)"
 
 # 호기 이름을 비워 두었을 때 채우는 기본값
 DEFAULT_REF_MACHINE = "기준호기"
@@ -1222,14 +1221,14 @@ WAFER_MAP_PICK_FOLDER_ANOTHER = "다른 폴더"
 WAFER_MAP_PICK_FOLDER_TITLE = "웨이퍼(슬롯) 폴더 또는 LOT 폴더 선택"
 WAFER_MAP_NO_FOLDER = "‘폴더 선택’ 을 누르거나 사진을 끌어다 놓으세요"
 WAFER_MAP_NO_IMAGES = "이 폴더에는 사진이 없습니다."
-WAFER_MAP_BUILD_FAILED = "Wafer Map 을 만드는 중 오류가 났습니다 — 폴더를 다시 골라 보세요(자세한 내용은 app.log)."
+WAFER_MAP_BUILD_FAILED = "Defect Map 을 만드는 중 오류가 났습니다 — 폴더를 다시 골라 보세요(자세한 내용은 app.log)."
 WAFER_MAP_NO_FRAME = "die 기하(pitch·웨이퍼 중심)를 찾지 못해 맵을 그릴 수 없습니다."
 WAFER_MAP_SLOT_LABEL = "슬롯"
 WAFER_MAP_ALL_SLOTS = "전체 (LOT 합산)"
 WAFER_MAP_SIDE_REF_FMT = "기준 · {machine}"
 WAFER_MAP_SIDE_VAL_FMT = "검증 · {machine}"
-WAFER_MAP_LEGEND_MATCHED = "매치됨"
-WAFER_MAP_LEGEND_UNMATCHED = "미매치"
+WAFER_MAP_LEGEND_MATCHED = "매치"
+WAFER_MAP_LEGEND_UNMATCHED = "매치 없음"
 WAFER_MAP_LEGEND_DEFECT = "Defect"
 WAFER_MAP_COUNT_FMT = "{n}장"
 WAFER_MAP_DEFECT_TOTAL_FMT = "Defect {n:,}개"
@@ -1238,7 +1237,7 @@ WAFER_MAP_CENTER_ASSUMED = "중심 가정(±½ die)"
 WAFER_MAP_GRID_COMPUTED = "die 격자: 계산값(장비 die 맵 없음)"
 WAFER_MAP_PITCH_ASSUMED = "die 크기 추정(사진 좌표 기준 — 폴더에 die 크기 정보 없음, 위치 근사)"
 WAFER_MAP_TIP_COLROW_FMT = "col {col} · row {row}"
-WAFER_MAP_WARN_HEAD = "⚠ 이 Wafer map 은 실제와 다르게 그려졌을 수 있습니다"
+WAFER_MAP_WARN_HEAD = "⚠ 이 Defect Map 은 실제와 다르게 그려졌을 수 있습니다"
 WAFER_MAP_WARN_OFF_DIE_FMT = "die 가 없는 칸(또는 웨이퍼 밖)에 찍힌 사진 {n}장"
 WAFER_MAP_WARN_MIXED_FRAMES = "합친 슬롯들의 die 격자가 서로 달라 다른 슬롯 점이 엉뚱한 칸에 찍힐 수 있음"
 WAFER_MAP_WARN_UNPLACED_FMT = "좌표를 읽지 못해 맵에서 빠진 사진 {n}장"
@@ -1251,12 +1250,12 @@ WAFER_MAP_WARN_SIDE_FMT = "{side} — {reasons}"
 # 칸·번호가 틀렸을 가능성이 큰 맵(번호 계산·die 없는 칸·격자 불일치) — 빨간 큰 배너 머리말
 # (사용자 지시 2026-11-13 "틀릴 확률이 매우 높음!!!!! 뭐 이런식으로").
 WAFER_MAP_DANGER_HEAD = (
-    "⚠ 틀릴 확률이 매우 높습니다!!  이 Wafer map 의 die 위치·col / row 를 그대로 믿지 말고 "
+    "⚠ 틀릴 확률이 매우 높습니다!!  이 Defect Map 의 die 위치·col / row 를 그대로 믿지 말고 "
     "반드시 장비 화면으로 확인하세요")
 WAFER_MAP_DANGER_SHORT = "⚠ 틀릴 확률이 매우 높음!! 반드시 장비 화면으로 확인"
 WAFER_MAP_SHEET_COL_WARN = "주의(칸이 틀렸을 수 있음)"
 WAFER_MAP_DISCLAIMER = (
-    "※ Wafer map 은 파일명·장비 파일로 다시 그린 참고용 그림입니다. "
+    "※ Defect Map 은 파일명·장비 파일로 다시 그린 참고용 그림입니다. "
     "die 위치와 판정은 반드시 장비 화면이나 원본 데이터로 확인하세요."
 )
 WAFER_MAP_TIP_NO_DIE = "die 인덱스 없음(절대좌표)"
@@ -1280,7 +1279,7 @@ WAFER_MAP_LOADING_THUMBS = "사진 미리보기 준비 중"
 # 보기 옵션 — die 색칠 · 노치 방향(90° 단위 회전) · 사진 1장만 보기.
 WAFER_MAP_FILL_DIES = "die 색칠"
 WAFER_MAP_FILL_DIES_TIP = "Defect 가 든 die 칸을 칠합니다"
-WAFER_MAP_UNMATCHED_FIRST = "미매치 우선"
+WAFER_MAP_UNMATCHED_FIRST = "매치 없음 우선"
 WAFER_MAP_UNMATCHED_FIRST_TIP = "섞인 칸은 매치 없음 색으로"
 WAFER_MAP_DOT_SIZE = "점 크기"
 WAFER_MAP_NOTCH_FMT = "노치: {dir}"
@@ -1316,8 +1315,8 @@ EXTRACT_SLOT_BTN_FMT = "슬롯 {n}/{total}"
 EXTRACT_SLOT_NEED_FOLDER = "먼저 이 줄의 폴더를 선택하세요."
 # 교차검증(양방향) 스위치 — 매칭 모드의 실행 옵션.  앱을 켤 때마다 꺼진 채 시작한다.
 CROSS_SWITCH = "교차검증 (양방향)"
-# 엑셀 — 검증에만 있는 사진 행의 메모.  기준 쪽 미매칭은 예전 그대로 '미매칭'.
-NOTE_ONLY_VAL = "미매칭 (검증에만 있음)"
+# 엑셀 — 검증에만 있는 사진 행의 메모.  기준 쪽은 NOTE_UNMATCHED.
+NOTE_ONLY_VAL = "매치 없음 (검증에만 있음)"
 EXTRACT_WAFER_MAP_SWITCH = "Wafer Map 시트 넣기"
 BTN_EXTRACT_START = "추출 시작"
 # 선별 화면을 추출에 쓸 때 바꿔 끼우는 문구(`SelectPage.set_extract_mode`) — 키는 매칭

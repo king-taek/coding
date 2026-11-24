@@ -231,7 +231,7 @@ def test_export_puts_val_only_photo_in_val_column(isolated_cache, tmp_path):
     ref_row = next(r for k, r in rows.items() if k.startswith("ref_only.jpg|"))
     val_row = next(r for k, r in rows.items() if k.endswith("|val_only.jpg"))
     # 사진(여기선 파일이 없어 이름 글자)이 그 장비의 열에, 정보는 반대 열에.
-    assert ws[f"D{ref_row}"].comment.text == "미매칭"
+    assert ws[f"D{ref_row}"].comment.text == ko.NOTE_UNMATCHED
     assert ws[f"C{val_row}"].comment.text == ko.NOTE_ONLY_VAL
     assert "val_only.jpg" in str(ws[f"C{val_row}"].value)
 
