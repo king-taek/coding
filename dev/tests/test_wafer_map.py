@@ -816,7 +816,10 @@ def test_dialog_drop_photos(qt, tmp_path):
         assert dlg.single_image() == folder / "a.jpeg"
         assert [p.path.stem for p in dlg.left.view.data().points] == ["a"]
 
+        # 고른 사진 맵 위에 또 놓으면 묻는다 — 여기서는 '새로 그리기'
+        dlg._ask_add_or_new = lambda n: "new"
         drop(dlg, folder / "a.jpeg", folder / "b.jpeg", folder / "a.jpeg")  # 여러 장
+        _spin_ms(qt, 30)
         _wait_build(qt, dlg)
         assert dlg.shown_images() == [folder / "a.jpeg", folder / "b.jpeg"]
         assert dlg.single_image() is None
@@ -1374,3 +1377,176 @@ def test_drag_during_wheel_zoom_starts_from_the_target(qt, tmp_path, monkeypatch
     view.mousePressEvent(press)
     assert view.zoom() == pytest.approx(wmv.ZOOM_STEP)
     view.close()
+
+
+# ---------------------------------------------------------------------------
+# 고른 사진 map 에 사진 더 넣기 — '현재 map 에 추가 / 새로 그리기' (사용자 요청 2026-11-24)
+# ---------------------------------------------------------------------------
+def _live_stems_for(ini_dir: Path, stems) -> list[str]:
+    """INI 폴더의 같은 결함을 LIVE(Conder) 파일명으로 — TestLivePlane 과 같은 꼴."""
+    out = []
+    for s in stems:
+        c = camtek_ini.resolve(ini_dir / f"{s}.jpeg")
+        out.append(f"TB500_RDL4 - Multi_FDV-RDL4_W1XYA1_{c.col}_{c.row}_{c.x}_{c.y}_Bump")
+    return out
+
+
+def _photo_sets(tmp_path):
+    """장비별 (먼저 넣을 사진, 더 넣을 사진) — Camtek INI · Conder LIVE · KLA."""
+    cam = _camtek_folder(tmp_path / "c", [("a", CX, CY), ("b", 60000.0, 120000.0),
+                                          ("c", 250000.0, 300000.0)])
+    live_stems = _live_stems_for(cam, ["a", "b", "c"])
+    live = _live_folder(tmp_path / "l", live_stems)
+    kla = _kla_folder(tmp_path / "k", [("ka", 100.0, 200.0, 3, 4),
+                                       ("kb", 900.0, 50.0, 5, 2),
+                                       ("kc", 10.0, 10.0, 4, 6)])
+    return {
+        "camtek": ([cam / "a.jpeg"], [cam / "b.jpeg", cam / "c.jpeg"]),
+        "conder": ([live / f"{live_stems[0]}.jpg"],
+                   [live / f"{s}.jpg" for s in live_stems[1:]]),
+        "kla": ([kla / "ka.jpg"], [kla / "kb.jpg", kla / "kc.jpg"]),
+    }
+
+
+@pytest.mark.parametrize("kind", ["camtek", "conder", "kla"])
+def test_add_photos_equals_dropping_all_at_once(qt, tmp_path, kind):
+    """추가 = 옛 사진 + 새 사진을 한꺼번에 놓은 것과 **점 · 번호 · 격자가 똑같다**(장비별)."""
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
+    old, new = _photo_sets(tmp_path)[kind]
+    want = wm.build_map(resolve_batch(old + new))
+    assert len(want.points) == 3 and not want.unplaced
+    dlg = WaferMapDialog()
+    asked = []
+    dlg._ask_add_or_new = lambda n: asked.append(n) or "add"
+    notices = []
+    dlg._notice = notices.append
+    try:
+        dlg._on_paths([str(p) for p in old])
+        _wait_build(qt, dlg)
+        assert not asked                            # 빈 화면 → 묻지 않는다
+        dlg._on_paths([str(p) for p in new])
+        _spin_ms(qt, 30)
+        _wait_build(qt, dlg)
+        assert asked == [2]
+        got = dlg.left.view.data()
+        assert got.points == want.points            # MapPoint 는 frozen — 값 비교
+        assert got.frame == want.frame
+        assert dlg.shown_images() == old + new
+        assert not notices                          # 먼저 넣은 사진은 그대로
+    finally:
+        dlg.deleteLater()
+
+
+def test_new_drawing_and_escape_and_folder_map(qt, tmp_path):
+    """새로 그리기 = 새 사진만 · Esc(None) = 그대로 · 폴더 맵 위에는 묻지 않고 새로 그림."""
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
+    folder = _camtek_folder(tmp_path, [("a", CX, CY), ("b", 60000.0, 120000.0)])
+    a, b = folder / "a.jpeg", folder / "b.jpeg"
+    dlg = WaferMapDialog()
+    answer = ["new"]
+    asked = []
+    dlg._ask_add_or_new = lambda n: asked.append(n) or answer[0]
+    try:
+        dlg._on_paths([str(a)])
+        _wait_build(qt, dlg)
+        dlg._on_paths([str(b)])
+        _spin_ms(qt, 30)
+        _wait_build(qt, dlg)
+        assert [p.path for p in dlg.left.view.data().points] == [b]
+        answer[0] = None
+        dlg._on_paths([str(a)])
+        _spin_ms(qt, 30)
+        _wait_build(qt, dlg)
+        assert [p.path for p in dlg.left.view.data().points] == [b]
+        assert dlg.shown_images() == [b]
+        assert asked == [1, 1]
+        dlg.show_folder(folder)                     # 폴더 맵
+        _wait_build(qt, dlg)
+        dlg._on_paths([str(a)])
+        _wait_build(qt, dlg)
+        assert asked == [1, 1]                      # 폴더 맵 위 → 묻지 않음
+        assert [p.path for p in dlg.left.view.data().points] == [a]
+    finally:
+        dlg.deleteLater()
+
+
+def test_add_tells_when_earlier_photos_moved(qt, tmp_path):
+    """함께 넣은 폴더 때문에 좌표 프레임이 바뀌면(die pitch 검산 실패 폴더 → 전부 절대좌표)
+    먼저 넣은 사진의 col / row 가 사라진다 — 조용히 넘기지 않고 알린다."""
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
+    good = _camtek_folder(tmp_path / "g", [("a", CX, CY)])
+    bad = _camtek_folder(tmp_path / "b", [("z", 60000.0, 120000.0)])
+    ini = bad / "ColorImageGrabingInfo.ini"         # Col 이 좌표와 안 맞는 폴더
+    ini.write_text(ini.read_text(encoding="utf-8").replace(
+        f"Col={math.floor(60000.0 / PX)}", "Col=99"), encoding="utf-8")
+    assert resolve_batch([bad / "z.jpeg"])[bad / "z.jpeg"].source == "camtek_abs"
+    dlg = WaferMapDialog()
+    dlg._ask_add_or_new = lambda n: "add"
+    notices = []
+    dlg._notice = notices.append
+    try:
+        dlg._on_paths([str(good / "a.jpeg")])
+        _wait_build(qt, dlg)
+        assert dlg.left.view.data().points[0].col is not None
+        dlg._on_paths([str(bad / "z.jpeg")])
+        _spin_ms(qt, 30)
+        _wait_build(qt, dlg)
+        assert notices == [i18n.KO.WAFER_MAP_MOVED_FMT.format(n=1)]
+    finally:
+        dlg.deleteLater()
+
+
+def test_moved_points_counts_number_position_and_missing():
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import moved_points
+    pa, pb, pc = Path("a.jpg"), Path("b.jpg"), Path("c.jpg")
+    data = wm.MapData(None, (wm.MapPoint(pa, 10.0, 20.0, 1, 2, None),
+                             wm.MapPoint(pb, 10.5, 20.0, 3, 4, None)), ())
+    assert moved_points({pa: (1, 2, 10.0, 20.0), pb: (3, 4, 10.0, 20.0)}, data) == 0
+    assert moved_points({pa: (1, 3, 10.0, 20.0)}, data) == 1          # 번호
+    assert moved_points({pb: (3, 4, 12.0, 20.0)}, data) == 1          # 위치 1 µm 넘음
+    assert moved_points({pc: (0, 0, 0.0, 0.0)}, data) == 1            # 맵에서 빠짐
+
+
+def test_kla_and_camtek_on_one_map_is_a_red_warning(tmp_path):
+    """KLA 와 Camtek 은 노치 방향이 다를 수 있다 — pitch 가 같아도 섞이면 빨간 경고."""
+    cam = _camtek_folder(tmp_path, [("a", CX, CY)])
+    kla = _kla_folder(tmp_path, [("ka", 100.0, 200.0, 3, 4)])
+    mixed = wm.build_map(resolve_batch([cam / "a.jpeg", kla / "ka.jpg"]))
+    assert len(mixed.points) == 2
+    assert mixed.mixed_kinds and not mixed.mixed_frames      # pitch 는 같다
+    assert (wm.WARN_MIXED_KINDS, 2) in wm.map_warnings(mixed)
+    assert wm.is_high_risk(mixed)
+    assert i18n_text() in wm.warning_reasons(mixed)
+    for alone in ([cam / "a.jpeg"], [kla / "ka.jpg"]):
+        data = wm.build_map(resolve_batch(alone))
+        assert not data.mixed_kinds
+        assert wm.WARN_MIXED_KINDS not in dict(wm.map_warnings(data))
+
+
+def i18n_text() -> str:
+    from aoi_verification.app import i18n
+    return i18n.KO.WAFER_MAP_WARN_MIXED_KINDS
+
+
+def test_add_or_new_sheet_ignores_enter(qt):
+    """두 선택지는 대등한 타일 · 기본값 없음 — Enter 로 눌리지 않고 Esc 는 None."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from aoi_verification.app.ui.widgets.neon_button import NeonButton
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
+    sheet = WaferMapDialog.add_or_new_sheet(2)
+    try:
+        sheet.show()
+        for target in [sheet, *sheet.findChildren(NeonButton)]:   # 타일에 포커스가 가도
+            target.setFocus()
+            QTest.keyClick(target, Qt.Key.Key_Return)
+            QTest.keyClick(target, Qt.Key.Key_Enter)
+        assert sheet.picked() is None and sheet.isVisible()
+        tiles = sheet.findChildren(NeonButton)
+        assert len(tiles) == 2
+        assert {t.text() for t in tiles} == {"현재 map 에 추가", "새로 그리기"}
+        QTest.keyClick(sheet, Qt.Key.Key_Escape)
+        assert sheet.picked() is None and not sheet.isVisible()
+    finally:
+        sheet.deleteLater()
