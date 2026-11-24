@@ -1764,6 +1764,13 @@ QLineEdit[role="axisField"]:focus {
     border: $focus_w solid $focus;
     padding: 0px 7px;
 }
+/* 어느 Zone에서 왔니? 펼친 LOT 아래 웨이퍼 줄들 — 왼쪽 가는 선으로 그 LOT 에 딸린 것임을 보인다. */
+QFrame[role="zoLotWafers"] {
+    background: transparent;
+    border: none;
+    border-left: 1px solid $line;
+    margin-left: 14px;
+}
 /* 어느 Zone에서 왔니? 왼쪽 바 하한 칸 — 고르기 줄(30px)에 맞춘 낮은 입력칸. */
 QLineEdit[role="zoParam"] {
     background-color: $elev;

@@ -165,8 +165,10 @@ class _FacetRow(QFrame):
     """고르기 칸 한 줄 — 표시 · 이름 · 수.  줄 전체가 누르는 자리(Overkill 튜닝 왼쪽 열과 같은 모양)."""
 
     clicked = pyqtSignal()
+    disc_clicked = pyqtSignal()
 
-    def __init__(self, name: str, count: int, on: bool, note: str = "", parent=None) -> None:
+    def __init__(self, name: str, count: int, on: bool, note: str = "", parent=None,
+                 disc: Optional[bool] = None) -> None:
         super().__init__(parent)
         self.setProperty("role", "ovRow")
         self.setProperty("selected", "true" if on else "false")
@@ -190,28 +192,19 @@ class _FacetRow(QFrame):
         self.num = QLabel(f"{count:,}", self)
         self.num.setProperty("role", "ovRowCount")
         lay.addWidget(self.num)
+        self.disc = None
+        if disc is not None:                          # LOT 줄 — 맨 끝 ▾/▸ 로 웨이퍼 목록을 펴고 접는다
+            lay.setContentsMargins(8, 4, 0, 4)
+            self.disc = QPushButton("▾" if disc else "▸", self)
+            self.disc.setProperty("role", "ovRowDisc")
+            self.disc.setFixedSize(22, 24)
+            self.disc.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.disc.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.disc.setToolTip(_KO.ZO_LOT_TOGGLE_TIP)
+            self.disc.clicked.connect(self.disc_clicked.emit)
+            lay.addWidget(self.disc)
         if count == 0 and not on:
             self.setProperty("excluded", "true")      # 눌러도 0 개 — 옅게
-
-    def mousePressEvent(self, e):   # noqa: N802
-        if e.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
-        super().mousePressEvent(e)
-
-
-class _Disclosure(QLabel):
-    """LOT 줄 앞 ▸ / ▾ — 누르면 그 LOT 의 웨이퍼 목록을 펴고 접는다."""
-
-    clicked = pyqtSignal()
-
-    def __init__(self, opened: bool, parent=None) -> None:
-        super().__init__("▾" if opened else "▸", parent)
-        self.opened = opened
-        self.setProperty("role", "muted")
-        self.setFixedWidth(20)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(_KO.ZO_LOT_TOGGLE_TIP)
 
     def mousePressEvent(self, e):   # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton:
@@ -757,7 +750,6 @@ class ZoneOriginDialog(QDialog):
         il.setContentsMargins(8, 12, 8, 20)
         il.setSpacing(1)
         self.facet_rows: dict = {}
-        self.lot_discs: dict = {}
         if not self._roots:
             hint = QLabel(_KO.ZO_EMPTY, inner)
             hint.setProperty("role", "muted")
@@ -776,13 +768,13 @@ class ZoneOriginDialog(QDialog):
                 vals = self._order.get(k, [])
                 top = max([counts[k].get(v, 0) for v in vals] or [1]) or 1
                 for v in vals:
+                    if k == "lot":
+                        self._render_lot(inner, il, v, counts)
+                        continue
                     n, on = counts[k].get(v, 0), v in self._sel[k]
                     row = _FacetRow(self.facet_label(k, v), n, on, "", inner)
                     row.clicked.connect(lambda k=k, v=v: self.toggle(k, v))
                     self.facet_rows[(k, v)] = row
-                    if k == "lot":
-                        self._render_lot(inner, il, v, row, counts)
-                        continue
                     il.addWidget(row)
                     if k == "first_name":
                         cb = _CountBar(n / top, on, inner)
@@ -791,7 +783,9 @@ class ZoneOriginDialog(QDialog):
                         wrap.setContentsMargins(30, 0, 8, 2)
                         wrap.addWidget(cb)
                         il.addLayout(wrap)
-            self.param_btn = NeonButton(_KO.ZO_PARAM_CLOSE if self._params_open else _KO.ZO_PARAM_OPEN,
+            applied = sum(1 for key, _t in PARAMS if getattr(self._flags, key))
+            text = _KO.ZO_PARAM_CLOSE if self._params_open else _KO.ZO_PARAM_OPEN
+            self.param_btn = NeonButton(text + (f"  ·  {applied}" if applied and not self._params_open else ""),
                                         role="textAction", parent=inner)
             self.param_btn.clicked.connect(self.toggle_params)
             il.addSpacing(8)
@@ -826,25 +820,25 @@ class ZoneOriginDialog(QDialog):
         head.setContentsMargins(8, 0, 0, 4)
         il.addWidget(head)
         line = QHBoxLayout()
-        line.setContentsMargins(8, 1, 8, 1)
+        line.setContentsMargins(8, 1, 8, 4)
         line.setSpacing(6)
         self.coord_edits: dict = {}
-        for key, text in (("col", _KO.ZO_COORD_COL), ("row", _KO.ZO_COORD_ROW)):
+        for i, (key, text) in enumerate((("col", _KO.ZO_COORD_COL), ("row", _KO.ZO_COORD_ROW))):
+            if i:
+                line.addSpacing(8)
             lab = QLabel(text, inner)
             lab.setProperty("role", "ovRowName")
             line.addWidget(lab)
             ed = QLineEdit(inner)
             ed.setProperty("role", "zoParam")
-            ed.setFixedWidth(64)
+            ed.setMinimumWidth(40)
             ed.setAlignment(Qt.AlignmentFlag.AlignRight)
             ed.setValidator(QIntValidator(-9999, 99999, ed))
             v = getattr(self._flags, key)
             ed.setText("" if v is None else str(v))
             ed.editingFinished.connect(lambda key=key, ed=ed: self.set_flag(key, _int_or_none(ed.text())))
-            line.addWidget(ed)
-            line.addSpacing(6)
+            line.addWidget(ed, 1)
             self.coord_edits[key] = ed
-        line.addStretch(1)
         il.addLayout(line)
         self.coord_warn = None
         if self._flags.col is not None or self._flags.row is not None:
@@ -857,32 +851,32 @@ class ZoneOriginDialog(QDialog):
                 self.coord_warn.setContentsMargins(8, 2, 8, 0)
                 il.addWidget(self.coord_warn)
 
-    def _render_lot(self, inner: QWidget, il: QVBoxLayout, lot: str, row: "_FacetRow", counts: dict) -> None:
-        """LOT 한 줄(▸ 로 펴기) + 펼치면 그 LOT 웨이퍼 줄들(들여 씀)."""
-        line = QHBoxLayout()
-        line.setContentsMargins(0, 0, 0, 0)
-        line.setSpacing(0)
+    def _render_lot(self, inner: QWidget, il: QVBoxLayout, lot: str, counts: dict) -> None:
+        """LOT 한 줄(이름 · 웨이퍼 수 · 끝의 ▾/▸) + 펼치면 그 LOT 웨이퍼 줄들(왼쪽 가는 선 안에 들여 씀)."""
+        wafers = [wn for wn in self._order.get("wafer", [])
+                  if (w := self.wafer_of(wn)) is not None and w.lot == lot]
         opened = self.lot_open(lot)
-        disc = _Disclosure(opened, inner)
-        disc.clicked.connect(lambda lot=lot: self.toggle_lot(lot))
-        line.addWidget(disc)
-        line.addWidget(row, 1)
-        il.addLayout(line)
-        self.lot_discs[lot] = disc
+        row = _FacetRow(_KO.ZO_LOT_FMT.format(lot=lot, n=len(wafers)), counts["lot"].get(lot, 0),
+                        lot in self._sel["lot"], "", inner, disc=opened)
+        row.clicked.connect(lambda lot=lot: self.toggle("lot", lot))
+        row.disc_clicked.connect(lambda lot=lot: self.toggle_lot(lot))
+        il.addWidget(row)
+        self.facet_rows[("lot", lot)] = row
         if not opened:
             return
-        for wn in self._order.get("wafer", []):
+        box = QFrame(inner)
+        box.setProperty("role", "zoLotWafers")
+        bl = QVBoxLayout(box)
+        bl.setContentsMargins(6, 0, 0, 2)
+        bl.setSpacing(1)
+        for wn in wafers:
             w = self.wafer_of(wn)
-            if w is None or w.lot != lot:
-                continue
             n, on = counts["wafer"].get(wn, 0), wn in self._sel["wafer"]
-            wr = _FacetRow(self.wafer_label(wn), n, on, _KO.ZO_FACET_CAP if w.cap else "", inner)
+            wr = _FacetRow(self.wafer_label(wn), n, on, _KO.ZO_FACET_CAP if w.cap else "", box)
             wr.clicked.connect(lambda wn=wn: self.toggle("wafer", wn))
-            wrap = QHBoxLayout()
-            wrap.setContentsMargins(22, 0, 0, 0)
-            wrap.addWidget(wr)
-            il.addLayout(wrap)
+            bl.addWidget(wr)
             self.facet_rows[("wafer", wn)] = wr
+        il.addWidget(box)
 
     def _render_sel(self) -> None:
         _clear(self._sel_lay)
@@ -1066,7 +1060,7 @@ class ZoneOriginDialog(QDialog):
         rows = [(_KO.ZO_ROW_LOT, it.lot or "—"), (_KO.ZO_ROW_WAFER, (w.wafer_id if w else "") or "—"),
                 (_KO.ZO_ROW_SLOT, (w.slot if w else "") or "—"), (_KO.ZO_ROW_COLROW, _colrow(it))]
         if w is not None and w.number_warn and it.col is not None:
-            rows.append(("", _KO.ZO_ROW_NUMBER_WARN))
+            rows.append(("", _KO.ZO_ROW_NUMBER_WARN, "warn"))
         rows += [None, (_KO.ZO_ROW_RECIPE, it.recipe),
                 (_KO.ZO_ROW_ZONE, it.zone), None, (_KO.ZO_ROW_CLASS, _class_name(it.first_name)),
                 (_KO.ZO_ROW_CUR, _class_name(it.cur_name)),
@@ -1088,8 +1082,11 @@ class ZoneOriginDialog(QDialog):
                 k.setProperty("role", "muted")
                 v = QLabel(row[1], self.kv_host)
                 v.setWordWrap(True)
-                if row[0] in ("Area", "Width", "Length", "Contrast", "Height"):
+                if row[0] in ("Area", "Width", "Length", "Contrast", "Height", _KO.ZO_ROW_COLROW):
                     v.setProperty("role", "mono")
+                elif len(row) > 2:                              # 번호 경고 — 주황 작은 글씨
+                    v.setProperty("role", "ovRowNote")
+                    v.setProperty("warn", "true")
                 self.kv.addWidget(k, r, 0, Qt.AlignmentFlag.AlignTop)
                 self.kv.addWidget(v, r, 1)
             r += 1
