@@ -1351,21 +1351,19 @@ EXTRACT_NONE_CHOSEN_BODY = (
     "설정 화면으로 돌아갈까요? (아니오 = 선별 화면에 남기)"
 )
 EXTRACT_SUMMARY_TITLE = "Defect 추출"
-EXTRACT_SUMMARY_FMT = "슬롯 {wafers}개에서 defect {n}건을 엑셀로 저장합니다."
+EXTRACT_SUMMARY_FMT = "슬롯 {wafers}개 · Defect {n}건"
 # 저장 방식 — Recipe 로 나눌지(사용자 결정: 시트 분리 / 열 나란히 둘 다, 요약 창에서 고른다).
+# 줄마다 그림이 뜻을 말한다 — 설명문 없음(현택님 2026-11-24, K2 B안).
 EXTRACT_SAVE_SINGLE = "한 시트로 저장"
 EXTRACT_SAVE_SHEETS = "Recipe별 시트로 저장"
 EXTRACT_SAVE_COLUMNS = "Recipe별 열로 저장"
-EXTRACT_SUMMARY_LAYOUT_HINT = (
-    "Recipe별 시트: Recipe 마다 시트를 나눕니다.\n"
-    "Recipe별 열: 한 시트에 Recipe 마다 사진·정보 열을 옆으로 나란히 둡니다.")
 # Recipe 이름(Surface.flt 의 recipe 코드 → RecipesInfo.ini 이름).  못 읽으면 아래로.
 EXTRACT_RECIPE_NONE = "Recipe 없음"
 EXTRACT_RECIPE_CODE_FMT = "Recipe {code}"
 # 저장 첫 단계 — 엑셀에 넣을 사진을 미리 준비한다(로딩 때 만든 것이 있으면 즉시 끝난다).
 EXPORT_PREPARE_IMAGES = "엑셀에 넣을 사진 준비 중…"
-EXTRACT_SUMMARY_BACK = "선별로 돌아가기"
-EXTRACT_SUMMARY_CANCEL = "설정으로 돌아가기"      # 선별을 건너뛴 경우(모든 사진 자동)
+# 저장 방식 창 왼쪽 아래 — 선별에서 왔으면 선별로, 아니면 설정으로(K2 B안: 한 낱말).
+EXTRACT_SUMMARY_BACK = "돌아가기"
 # 저장 파일 이름 — 결과 엑셀 제목 규칙에 '추출' 을 붙인 것(사용자 결정).
 EXTRACT_FILE_TITLE_FMT = "{machine} {tag} Defect 추출.xlsx"
 EXTRACT_FILE_TITLE_FALLBACK_FMT = "AOI {machine} Defect 추출.xlsx"

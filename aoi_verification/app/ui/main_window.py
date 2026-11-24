@@ -2573,26 +2573,21 @@ class MainWindow(MultiValFlow, QMainWindow):
         from ..workers import exporter as ex
 
         from_select = self._stack.currentWidget() is self._select_page
-        # 저장 방식(Recipe 나누기)을 여기서 고른다(사용자 결정) — 마지막 선택이 기본.
+        # 저장 방식(Recipe 나누기)을 여기서 고른다(사용자 결정) — 방식마다 그림 한 줄,
+        # 강조 없이 대등하게(현택님 2026-11-24, K2 B안).
         layouts = [(ex.RECIPE_LAYOUT_SINGLE, i18n.KO.EXTRACT_SAVE_SINGLE),
                    (ex.RECIPE_LAYOUT_SHEETS, i18n.KO.EXTRACT_SAVE_SHEETS),
                    (ex.RECIPE_LAYOUT_COLUMNS, i18n.KO.EXTRACT_SAVE_COLUMNS)]
-        last = getattr(_prefs.load(), "extract_recipe_layout", ex.RECIPE_LAYOUT_SINGLE)
-        if last not in dict(layouts):
-            last = ex.RECIPE_LAYOUT_SINGLE
-        choice = sheets.choose(
-            self, i18n.KO.EXTRACT_SUMMARY_TITLE,
-            i18n.KO.EXTRACT_SUMMARY_FMT.format(wafers=len(result.slot_images),
-                                               n=len(result.unmatched_refs))
-            + "\n\n" + i18n.KO.EXTRACT_SUMMARY_LAYOUT_HINT,
-            [(key, label, "primary" if key == last else "ghost")
-             for key, label in layouts]
-            + [("back", i18n.KO.EXTRACT_SUMMARY_BACK if from_select
-                else i18n.KO.EXTRACT_SUMMARY_CANCEL, "ghost")],
-            default=last)
+        from .widgets import extract_save_dialog
+        dlg = extract_save_dialog.ExtractSaveDialog(
+            layouts, len(result.slot_images), len(result.unmatched_refs), parent=self)
+        try:
+            sheets.run(dlg)
+            choice = dlg.choice
+        finally:
+            dlg.deleteLater()
         dst = None
         if choice in dict(layouts) and self._working_xlsx is not None:
-            _prefs.patch(extract_recipe_layout=choice)
             from .widgets.save_name_dialog import SaveNameDialog
             dlg = SaveNameDialog(self._working_xlsx.name, self._working_xlsx.parent,
                                  parent=self, fields=self._title_fields_now)
