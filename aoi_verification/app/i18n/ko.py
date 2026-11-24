@@ -684,7 +684,7 @@ LOAD_EXPORT = "엑셀로 저장 중"
 WARN_SAME_PATH_TITLE = "경로 확인"
 WARN_SAME_PATH_BODY = (
     "기준 장비와 검증 장비의 경로가 동일합니다.\n"
-    "정말로 같은 폴더를 비교하시겠습니까?"
+    "정말로 같은 폴더를 비교할까요?"
 )
 WARN_PATH_NOT_EXIST = "선택한 경로가 존재하지 않습니다:\n{path}"
 # 안내 시트 제목 — 앱 이름 대신 무슨 일인지 짧게(현택님 2026-11-24).
@@ -716,7 +716,7 @@ SLOT_MAP_PAIRS_LABEL = "묶은 쌍"
 # ※ SLOT_MAP_OPEN('매핑 다이얼로그 열기')은 제거했다 — 전 저장소 참조 0건.
 #   확인창은 SLOT_MAP_ASK 문장 + 표준 예/아니오 버튼을 쓴다(U-23).
 # 확인창 본문용 완결 문장 — 라벨에 " ?" 를 붙여 만들던 비문을 대체한다.
-SLOT_MAP_ASK = "슬롯을 직접 짝지어 주시겠습니까?"
+SLOT_MAP_ASK = "슬롯을 직접 짝지을까요?"
 
 # ── 일부 슬롯만 진행 (Setup) ───────────────────────────────────────────────
 SLOT_SELECT_TITLE = "슬롯 선택"
@@ -843,7 +843,7 @@ SAVE_FILENAME_FMT = "AOI검증결과_{ref}_vs_{val}_{ts}.xlsx"
 SAVE_SUCCESS_TITLE = "저장 완료"
 SAVE_FAIL_TITLE = "저장 실패"
 SAVE_SUCCESS_FMT = "엑셀 저장 완료:\n{path}"
-SAVE_FAIL_FMT = "엑셀 저장 실패:\n{error}"
+SAVE_FAIL_FMT = "저장 실패 · {error}"
 # ★ 가장 흔한 실패는 결과 파일이 엑셀에서 열려 있는 경우다.  OS 원문만 보여 주면
 #   무엇을 해야 할지 알 수 없으므로 **다음 행동을 먼저** 말한다.
 SAVE_FAIL_LOCKED_FMT = (
@@ -1208,7 +1208,7 @@ THRESH_PREVIEW_RICH = "RichSurface 읽는 중"
 THRESH_EXPORT_TITLE = "Overkill 튜닝 결과"
 THRESH_EXPORT_SAVE_TITLE = "HTML 저장"
 THRESH_EXPORT_FILTER = "HTML (*.html)"
-THRESH_EXPORT_FAILED = "저장하지 못했습니다: {e}"
+THRESH_EXPORT_FAILED = "저장 실패 · {e}"
 THRESH_EXPORT_ALL = "전체"
 THRESH_EXPORT_CHANGES = "바꾼 기준"
 THRESH_EXPORT_ITEM = "항목"
@@ -1443,7 +1443,7 @@ GL_SAVE_PNG_SHORT = "PNG 저장"
 GL_SAVE_XLSX_TITLE = "GL 분석 엑셀 저장"
 GL_SAVE_PNG_TITLE = "색 칠한 PNG 저장"
 GL_SAVED_FMT = "저장했어요: {name}"
-GL_SAVE_FAILED_FMT = "저장하지 못했어요: {why}"
+GL_SAVE_FAILED_FMT = "저장 실패 · {why}"
 GL_NO_IMAGE = "먼저 사진을 열어 주세요."
 GL_OPEN_FAILED_FMT = "사진을 열지 못했어요: {why}"
 GL_COMPARE = "두 사진 비교"
@@ -1534,7 +1534,7 @@ GL_HIST_HOVER_FMT = "GL {gl:,} · {items}"
 GL_HIST_HOVER_ONE_FMT = "{n:,}개 ({pct:.2f}%)"
 GL_HIST_HOVER_ITEM_FMT = "{name} {n:,}개 ({pct:.2f}%)"
 GL_PNG_ROIS = "ROI 선·이름도 그리기"
-GL_PNG_WRITE_FAILED = "PNG 를 쓰지 못했습니다"
+GL_PNG_WRITE_FAILED = "PNG 파일을 쓸 수 없음"
 GL_INFO_PHOTO = "사진"
 GL_INFO_ANALYZED = "분석한 사진"
 GL_INFO_SIZE = "크기"
