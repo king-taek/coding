@@ -497,7 +497,7 @@ class ExcelExporter(QThread):
         name = name.strip().strip("'").strip() or "결과"   # 앞뒤 ' 는 시트명으로 못 쓴다
         if name.casefold() == SHEET_FULL_NAME.casefold():   # 2번째 시트와 충돌 방지(대소문자 무관)
             name = name + " "
-        return name[:31]
+        return _fit_sheet_title(name, (self._result.ref_machine, self._result.val_machine))
 
     def _build_summary_sheet(self, wb, rows_input: list, *, index: int = 0) -> None:
         """요약 시트 — A~D 열만, 전체 데이터."""
@@ -1652,6 +1652,42 @@ def _replace_result(tmp: Path, dst: Path) -> None:
         os.replace(tmp, dst)
     except PermissionError as exc:
         raise PermissionError(errno.EACCES, "Permission denied", str(dst)) from exc
+
+
+_SHEET_MAX = 31                                    # 엑셀 시트 이름 길이 상한
+_RE_SHEET_DATE = re.compile(r"\d{6,}")            # 날짜 · 시각 토큰(20261124 · 153012)
+
+
+def _fit_sheet_title(name: str, machines=()) -> str:
+    """긴 이름을 31자에 맞춘다 — **토큰 경계에서만** 자르고, 호기 · 날짜 토큰은 남긴다(SM-E2d).
+
+    예전엔 앞 31자를 그대로 잘라 ``…검증(AOI-2`` 처럼 호기 번호가 반쯤 잘렸다.
+    토큰 = 공백 · ``_`` 로 나뉜 조각.  호기(``machines`` 의 이름이 들어 있는 토큰)와 날짜 ·
+    시각(숫자 6자리 이상)이 아닌 토큰을 **앞에서부터** 하나씩 빼서 호기 · 날짜가 앞으로
+    오게 한다.  그래도 길면 남은 토큰도 앞에서부터 빼고, 토큰 하나가 31자를 넘을 때만 자른다.
+    파일 이름은 바꾸지 않는다 — 시트 이름만이다."""
+    if len(name) <= _SHEET_MAX:
+        return name
+    keys = [m.strip().casefold() for m in machines if m and m.strip()]
+    parts = re.split(r"([\s_]+)", name)             # [토큰, 구분자, 토큰, …]
+    toks = parts[0::2]
+    seps = parts[1::2] + [""]
+
+    def is_key(t: str) -> bool:
+        return bool(_RE_SHEET_DATE.search(t)) or any(k in t.casefold() for k in keys)
+
+    def joined(idx) -> str:
+        idx = list(idx)
+        return "".join(toks[i] + (seps[i] if i != idx[-1] else "") for i in idx).strip(" _'")
+
+    alive = [i for i, t in enumerate(toks) if t]
+    for keep_keys in (True, False):
+        while len(alive) > 1 and len(joined(alive)) > _SHEET_MAX:
+            drop = next((i for i in alive if not (keep_keys and is_key(toks[i]))), None)
+            if drop is None:
+                break
+            alive.remove(drop)
+    return joined(alive)[:_SHEET_MAX].rstrip(" _'")
 
 
 def _safe_sheet_title(name: str, taken: set) -> str:
