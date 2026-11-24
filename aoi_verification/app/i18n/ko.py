@@ -1395,6 +1395,7 @@ WAFER_MAP_TIP_COLROW_FMT = "col {col} · row {row}"
 WAFER_MAP_WARN_HEAD = "⚠ 이 Wafer map 은 실제와 다르게 그려졌을 수 있습니다"
 WAFER_MAP_WARN_OFF_DIE_FMT = "die 가 없는 칸(또는 웨이퍼 밖)에 찍힌 사진 {n}장"
 WAFER_MAP_WARN_MIXED_FRAMES = "합친 슬롯들의 die 격자가 서로 달라 다른 슬롯 점이 엉뚱한 칸에 찍힐 수 있음"
+WAFER_MAP_WARN_MIXED_KINDS = "KLA · Camtek 사진이 섞임 — 노치 방향이 달라 위치가 틀릴 수 있음"
 WAFER_MAP_WARN_UNPLACED_FMT = "좌표를 읽지 못해 맵에서 빠진 사진 {n}장"
 WAFER_MAP_WARN_NUMBER_GUESS_FMT = "col / row 를 장비 번호표 없이 계산한 사진 {n}장 — 장비 화면으로 확인"
 WAFER_MAP_WARN_NOTCH_UP_FMT = "노치가 위쪽인 맵으로 칸을 정한 사진 {n}장 — 아래쪽 맵과 같다고 보고 읽음, 장비 화면으로 확인"
@@ -1453,6 +1454,11 @@ WAFER_MAP_FULLSCREEN_TIP = (
     "맵만 남기고 주변 표시(설명·버튼·제목·범례)를 감춘 뒤 앱 창도 전체화면으로 "
     "바꿉니다. ESC 를 누르면 원래대로 돌아옵니다.")
 WAFER_MAP_NO_COORD = "이 사진을 맵에 찍지 못했습니다 — 좌표 또는 die 기하를 읽지 못했습니다."
+# 고른 사진 map 이 떠 있을 때 사진을 더 넣으면 묻는다(사용자 요청 2026-11-24).
+WAFER_MAP_MORE_TITLE_FMT = "사진 {n}장 더"
+WAFER_MAP_MORE_ADD = "현재 map 에 추가"
+WAFER_MAP_MORE_NEW = "새로 그리기"
+WAFER_MAP_MOVED_FMT = "먼저 넣은 사진 {n}장의 위치가 바뀌었습니다."
 
 # ── 왼쪽 메뉴 — [매칭](기본 화면)·메뉴 접기(사용자 요청 2026-10-30) ──
 MATCH_NAV_BUTTON = "매칭"

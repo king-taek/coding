@@ -41,6 +41,9 @@ ENTRIES = [
         "others": [
             ("어느 Zone에서 왔니?", "Area · Width · Length · Contrast 하한을 [파라미터 열기] 안에 접어 두었습니다"),
             ("사진 정보", "흑백 Scan 사진(….t.N.jpeg)만 넣어도 그 안의 Defect 를 찾아 잘라 보이고, 컬러 사진과 같은 정보를 보입니다 — 여럿이면 ◀ ▶ 로 넘깁니다"),
+            ("Defect Map", "고른 사진 map 에 사진을 더 끌어 놓으면 ‘현재 map 에 추가 · 새로 그리기’ 를 고릅니다"),
+            ("Defect Map", "KLA · Camtek 사진이 한 map 에 섞이면 빨간 경고가 뜹니다"),
+            ("Defect Map", "흑백 Scan 사진을 넣으면 그 안에 든 Defect 들을 찍습니다"),
         ],
     },
     {
