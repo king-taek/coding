@@ -47,7 +47,8 @@ from typing import Optional
 
 from ..coords.ini_text import read_ini_text
 
-__all__ = ["TitleParts", "parse_title_parts", "read_title_parts", "read_active_slot"]
+__all__ = ["TitleParts", "parse_title_parts", "read_title_parts", "read_active_slot",
+           "WaferIds", "read_wafer_ids"]
 
 _INI_NAME = "WaferInfo.ini"
 # `ActiveSlot=6` — 웨이퍼가 꽂혀 있던 **카세트 슬롯 번호**.  결과 엑셀 slot# 칸에
@@ -195,3 +196,51 @@ def read_active_slot(folder: Path) -> Optional[str]:
         return m.group(1) if m else None
     except Exception:
         return None
+
+
+# ``WaferInfo.ini`` 의 LOT · 웨이퍼 ID (관측: dev/좌표 확인 GX57527979 — ``GlobalLotId=FLU-1122N`` ·
+# ``UseWaferID=GX57527979``).  LOT 은 ``GlobalLotId``, 비었으면 ``UseLot``.
+_LOT_KEYS = ("GlobalLotId", "UseLot")
+_WAFER_KEY = "UseWaferID"
+
+
+def _ini_value(text: str, key: str) -> str:
+    m = re.search(rf"(?im)^\s*{key}\s*=[ \t]*(.*?)\s*$", text)
+    return m.group(1) if m else ""
+
+
+@dataclass(frozen=True)
+class WaferIds:
+    """사진 폴더의 ``(LOT, 웨이퍼 ID, 카세트 슬롯)`` — 못 읽은 칸은 빈 문자열."""
+    lot: str = ""
+    wafer_id: str = ""
+    slot: str = ""
+
+
+def read_wafer_ids(folder: Path) -> WaferIds:
+    """Defect 정보 조회의 LOT · Wafer ID · Slot# — **장비 파일에서만** 읽는다.
+
+    Camtek ``WaferInfo.ini`` 를 먼저 보고, 빈 칸은 KLA 정보파일 헤더(``LotID`` · ``WaferID`` · ``Slot``)로
+    채운다.  폴더 이름으로 짐작하지 않는다 — 사진만 복사한 폴더(Conder)는 빈 칸이다(현택님 결정
+    2026-11-24: 못 읽으면 줄은 두고 '—').  :func:`read_active_slot` 처럼 부모 폴더는 보지 않는다.
+    전 구간 fail-safe."""
+    from ..coords import kla_info          # 무거운 import 순환을 피해 여기서
+
+    folder = Path(folder)
+    lot = wafer_id = ""
+    try:
+        text = read_ini_text(folder / _INI_NAME) or ""
+        lot = next((v for v in (_ini_value(text, k) for k in _LOT_KEYS) if v), "")
+        wafer_id = _ini_value(text, _WAFER_KEY)
+    except Exception:
+        pass
+    slot = read_active_slot(folder) or ""
+    if not (lot and wafer_id and slot):
+        try:
+            k_wid, k_slot = kla_info.read_header_ids(folder)
+            wafer_id = wafer_id or (k_wid or "")
+            slot = slot or (k_slot or "")
+            lot = lot or (kla_info.read_lot_id(folder) or "")
+        except Exception:
+            pass
+    return WaferIds(lot, wafer_id, slot)

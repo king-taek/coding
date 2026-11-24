@@ -18,6 +18,21 @@
 
 ENTRIES = [
     {
+        "id": "2026-11-24-overkill-report-live",
+        "date": "2026-11-24",
+        "headline": "Overkill 튜닝 보고서를\n눌러 볼 수 있습니다",
+        "summary": "Defect Map · 사진 · 사진 정보 · 고른 목록 · 웨이퍼별 표가 들어가고, 변경 전 · 후를 바꿔 봅니다.\n"
+                   "내보낼 때 사진 크기 · 견본 · Scan 사진 · Defect Map 을 고릅니다.",
+        "others": [
+            ("Overkill 튜닝", "펼친 사진에서 바로 [Defect] · [Overkill] 로 가릅니다 — Z 로 되돌립니다"),
+            ("Overkill 튜닝", "[Classify 가져오기] — 사람이 바꾼 분류를 꼭 잡기 · Overkill 로 한 번에 넣습니다"),
+            ("Overkill 튜닝", "[선택 목록] — 고른 것을 CSV 로 저장하고 다시 열어 그대로 고릅니다"),
+            ("Defect 정보 조회", "LOT · Wafer ID · 슬롯 줄이 붙고, 묶음마다 상자로 나눴습니다"),
+            ("Defect 정보 조회", "사진 여러 장이나 폴더를 넣으면 아래 띠에서 ◀ ▶ 로 넘겨 봅니다"),
+            ("Defect 정보 조회", "[GL 보기] 이름을 [GL 히스토그램] 으로 바꿨습니다"),
+        ],
+    },
+    {
         "id": "2026-11-24-zone-origin-simple",
         "date": "2026-11-24",
         "headline": "어느 Zone에서 왔니? 화면을\n간단히 했습니다",
