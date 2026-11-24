@@ -121,7 +121,8 @@ def test_button_row_mode_still_works(styled_qapp):
                           default="install")
     try:
         assert not dlg.findChildren(QGridLayout)
-        assert dlg._buttons["install"].isDefault()
+        # 강조는 남고 Enter 기본 버튼은 없다(Enter 는 아무것도 누르지 않는다).
+        assert not dlg._buttons["install"].isDefault()
         assert dlg._buttons["install"].property("role") == "primary"
     finally:
         dlg.deleteLater()

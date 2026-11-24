@@ -23,11 +23,13 @@ def _sheet(buttons, default):
     return sheets._MessageSheet(None, "제목", "본문", buttons, default, "question")
 
 
-def test_negative_default_removes_the_filled_emphasis(styled_qapp):
+def test_negative_default_paints_the_safe_answer(styled_qapp):
+    """기본값이 '아니오' 면 [아니오] 가 채운 파란 버튼, [예] 는 흐림(P1 B안 그림).
+
+    둘 다 흐리면 어느 쪽이 안전한지 알 수 없었다(현택님 2026-11-24)."""
     s = _sheet(_SB.Yes | _SB.No, _SB.No)
     roles = {sb: b.property("role") for sb, b in s._buttons.items()}
-    assert "primary" not in roles.values(), \
-        f"기본값이 '아니오' 인데 채운 강조 버튼이 남아 있다: {roles}"
+    assert roles == {_SB.Yes: "ghost", _SB.No: "primary"}, roles
     s.deleteLater()
 
 
@@ -41,6 +43,7 @@ def test_cancel_default_also_demotes_ok(styled_qapp):
     """규칙을 Yes 에만 걸면 [확인]/[취소] 조합에서 같은 모순이 되살아난다."""
     s = _sheet(_SB.Ok | _SB.Cancel, _SB.Cancel)
     assert s._buttons[_SB.Ok].property("role") != "primary"
+    assert s._buttons[_SB.Cancel].property("role") == "primary"
     s.deleteLater()
 
 

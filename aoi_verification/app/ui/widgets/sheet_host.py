@@ -42,6 +42,7 @@ from ..teardown import tolerate_teardown
 from ... import i18n
 from .. import motion, theme
 from .neon_button import NeonButton
+from . import popup_layout
 
 # 시트가 창 안에서 차지할 최대 비율 — 뷰어는 거의 꽉, 메시지는 내용만큼.
 _MARGIN_PX = 24
@@ -718,7 +719,10 @@ _BUTTON_SPEC = {
     _SB.No: ("MSG_BTN_NO", "ghost"),
     _SB.Close: ("MSG_BTN_CLOSE", "ghost"),
 }
-_BUTTON_ORDER = (_SB.No, _SB.Cancel, _SB.Close, _SB.Ok, _SB.Yes)
+# ★ Windows 순서 — 확인·예가 먼저, 아니오·취소·닫기가 맨 오른쪽(현택님 2026-11-24, P1·P2 B안).
+#   대화상자(저장 이름 등)는 반대로 [취소][확인] 이다 — `popup_layout` 주석 참조.
+_BUTTON_ORDER = (_SB.Ok, _SB.Yes, _SB.No, _SB.Close, _SB.Cancel)
+_NEGATIVE = (_SB.No, _SB.Cancel, _SB.Close)
 
 
 class _MessageSheet(QDialog):
@@ -749,10 +753,6 @@ class _MessageSheet(QDialog):
         body.setMaximumWidth(_MSG_MAX_W)
         v.addWidget(body, 1)
 
-        bar = QHBoxLayout()
-        bar.setContentsMargins(0, 0, 0, 0)
-        bar.setSpacing(8)
-        bar.addStretch(1)
         self._buttons: dict = {}
         for sb in _BUTTON_ORDER:
             if not (buttons & sb):
@@ -761,9 +761,12 @@ class _MessageSheet(QDialog):
             text_ = (labels or {}).get(sb) or getattr(i18n.KO, key)
             btn = NeonButton(text_, role=role, parent=self)
             btn.clicked.connect(lambda _c=False, s=sb: self._answer_with(s))
-            bar.addWidget(btn)
             self._buttons[sb] = btn
-        v.addLayout(bar)
+        made = list(self._buttons.items())
+        v.addLayout(popup_layout.sheet_row(
+            QHBoxLayout(),
+            primaries=[b for sb, b in made if sb not in _NEGATIVE],
+            cancels=[b for sb, b in made if sb in _NEGATIVE]))
         # ★ 고르는 시트(예/아니오 등 버튼 둘 이상)는 **Enter 가 아무것도 누르지 않는다**
         #   (현택님 2026-11-24 "Enter 안 눌리도록").  무심코 친 Enter 가 질문을 읽기도
         #   전에 답해 버린다.  강조색(기본값)은 그대로 두고 키만 뺀다 — 고르는 것은
@@ -773,14 +776,13 @@ class _MessageSheet(QDialog):
             for btn in self._buttons.values():
                 btn.setAutoDefault(False)
 
-        # ★ 기본값이 **부정 버튼**(아니오·취소·닫기)인 경고에서는 강조 버튼을 없앤다.
-        #   예전엔 [예] 가 언제나 채운 파란 버튼이라, "정말 같은 폴더를 비교할까요?"
-        #   처럼 기본이 '아니오' 인 경고에서도 시선은 [예] 로 가는데 Enter 는 [아니오]
-        #   를 눌렀다 — 시각 강조와 안전 기본값이 정반대를 가리켰다.
-        if default in (_SB.No, _SB.Cancel, _SB.Close):
-            for btn in self._buttons.values():
-                if btn.property("role") == "primary":
-                    btn.setRole("ghost")
+        # ★ 기본값이 **부정 버튼**(아니오·취소·닫기)인 경고에서는 **그 안전한 쪽**을
+        #   채운 파란 버튼으로 그린다(현택님 2026-11-24, P1 B안 그림).  예전엔 [예] 가
+        #   늘 파랬다가(시선과 안전 기본값이 반대), 그다음엔 둘 다 흐려 어느 쪽이
+        #   안전한지 알 수 없었다.
+        if default in _NEGATIVE and default in self._buttons:
+            for sb, btn in self._buttons.items():
+                btn.setRole("primary" if sb == default else "ghost")
 
         if default in self._buttons and not self._enter_off:
             self._buttons[default].setDefault(True)
@@ -903,44 +905,55 @@ class _ChoiceSheet(QDialog):
         if self._tiles:
             v.addLayout(self._build_tiles(options))
         else:
-            v.addLayout(self._build_button_row(options, default))
+            v.addLayout(self._build_button_row(options))
+        # ★ Enter 는 아무것도 누르지 않는다 — 메시지 시트와 같은 규칙(현택님 2026-11-24
+        #   "Enter 안 눌리도록").  QDialog 는 버튼의 autoDefault 로 Enter 를 **맨 앞
+        #   버튼**(타일 모드에선 첫 타일 '기준')에 보냈다.  고르는 것은 클릭이나 Tab 으로
+        #   간 버튼의 Space 다.
+        for btn in self._buttons.values():
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
         self.setMaximumWidth(_MSG_MAX_W + 48)
 
-    def _build_button_row(self, options, default):
+    def _build_button_row(self, options):
         """오른쪽 정렬 버튼 줄 — 하나가 주 액션인 질문(설치할까요? 등).
+
+        순서는 메시지 시트와 같은 Windows 순서다 — 주 액션이 먼저, 닫기·돌아가기
+        (`popup_layout.CANCEL_KEYS`·``None``)가 맨 오른쪽.  강조는 선택지의 role 로만
+        한다 — Enter 는 누르지 않는다(생성자 참조).
 
         ★ 버튼들이 시트 폭(`_MSG_MAX_W`)에 한 줄로 안 들어가면 **두 열로 접는다.**
         한 줄에 억지로 넣으면 시트가 최대 폭에 막혀 버튼이 글자보다 좁아지고 글자가
         잘렸다(사용자 신고: Defect 추출 저장 방식 버튼 4개)."""
-        buttons = []
+        primaries, others, cancels = [], [], []
         for key, label, role in options:
             btn = NeonButton(label, role=role, parent=self)
             btn.clicked.connect(lambda _c=False, k=key: self._pick(k))
-            buttons.append(btn)
             self._buttons[key] = btn
+            if key is None or key in popup_layout.CANCEL_KEYS:
+                cancels.append(btn)
+            elif role == "primary":
+                primaries.append(btn)
+            else:
+                others.append(btn)
+        buttons = [*primaries, *others, *cancels]
         spacing = 8
         need = (sum(b.sizeHint().width() for b in buttons)
                 + spacing * max(0, len(buttons) - 1))
         if need <= _MSG_MAX_W:
-            bar = QHBoxLayout()
-            bar.setContentsMargins(0, 0, 0, 0)
-            bar.setSpacing(spacing)
-            bar.addStretch(1)
-            for btn in buttons:
-                bar.addWidget(btn)
+            bar = popup_layout.sheet_row(QHBoxLayout(), primaries=primaries,
+                                         others=others, cancels=cancels)
         else:
             bar = QGridLayout()
             bar.setContentsMargins(0, 0, 0, 0)
             bar.setSpacing(spacing)
             for i, btn in enumerate(buttons):
+                btn.setFixedHeight(theme.PROFILE.control_h_lg)
                 btn.setSizePolicy(QSizePolicy.Policy.Expanding,
                                   QSizePolicy.Policy.Fixed)
                 bar.addWidget(btn, i // 2, i % 2)
             bar.setColumnStretch(0, 1)
             bar.setColumnStretch(1, 1)
-        if default in self._buttons:
-            self._buttons[default].setDefault(True)
-            self._buttons[default].setFocus()
         return bar
 
     def _build_tiles(self, options):
@@ -980,6 +993,9 @@ class _ChoiceSheet(QDialog):
         return self._picked
 
     def keyPressEvent(self, event):  # noqa: N802
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            event.accept()                   # Enter 는 아무것도 누르지 않는다
+            return
         if event.key() == Qt.Key.Key_Escape:
             self.reject()                    # picked 는 None 으로 남는다
             return
@@ -990,7 +1006,8 @@ def choose(parent, title: str, text: str, options, *, default=None,
            heading: str = "", tiles: bool = False):
     """선택지 3~4개 질문 — 고른 ``key``(없으면 ``None``)를 돌려준다.
 
-    호스트가 없으면 네이티브 ``QMessageBox`` + ``addButton`` 으로 폴백한다."""
+    호스트가 없으면 네이티브 ``QMessageBox`` + ``addButton`` 으로 폴백한다.
+    ``default`` 는 그 폴백에서만 기본 버튼이 된다 — 시트는 Enter 를 받지 않는다."""
     host = host_for(parent)
     if host is None:
         box = QMessageBox(parent)
