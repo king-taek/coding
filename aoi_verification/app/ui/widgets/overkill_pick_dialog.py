@@ -109,9 +109,10 @@ class _Tile(QFrame):
 
 
 class _BigPhoto(QLabel):
-    """가운데 큰 사진 — 비율 유지로 자리를 채운다.  우클릭은 신호로만 알린다."""
+    """가운데 큰 사진 — 비율 유지로 자리를 채운다.  누르면 크게(``clicked``), 우클릭은 신호로만 알린다."""
 
     context_requested = pyqtSignal(QPoint)
+    clicked = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -132,10 +133,17 @@ class _BigPhoto(QLabel):
             self._pm = None
             self.clear()
             self.setText(placeholder)
+            self.setCursor(Qt.CursorShape.ArrowCursor)
             return
         self._pm = pm
         self.setText("")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._rescale()
+
+    def mousePressEvent(self, e):  # noqa: N802
+        if e.button() == Qt.MouseButton.LeftButton and self._pm is not None:
+            self.clicked.emit()
+        super().mousePressEvent(e)
 
     def _rescale(self) -> None:
         if self._pm is not None:
@@ -336,6 +344,7 @@ class OverkillPickDialog(QDialog):
         cv.setSpacing(8)
         self.big = _BigPhoto(center)
         self.big.context_requested.connect(self._on_big_menu)
+        self.big.clicked.connect(self._enlarge_current)
         cv.addWidget(self.big, 1)
         self.caption = QLabel(center)
         self.caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -742,6 +751,11 @@ class OverkillPickDialog(QDialog):
 
     def _on_tile_menu(self, d, gpos: QPoint) -> None:
         self._view_menu(d, gpos)
+
+    def _enlarge_current(self) -> None:
+        d = self._cur_item()
+        if d is not None:
+            self._enlarge(d)
 
     def _on_big_menu(self, gpos: QPoint) -> None:
         d = self._cur_item()

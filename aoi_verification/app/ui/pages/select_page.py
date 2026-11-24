@@ -539,7 +539,8 @@ class SelectPage(ProgressRowMixin, QWidget):
 
         # 이미지 (스크롤 영역) -----------------------------------------
         self.center_img = ScalableImage(center_card)
-        self.center_img.installEventFilter(self)   # 사진이 그려졌는지 = 입력 잠금 해제
+        self.center_img.installEventFilter(self)   # 사진이 그려졌는지 = 입력 잠금 해제 · 누르면 크게
+        self.center_img.setCursor(Qt.CursorShape.PointingHandCursor)
         self.center_img.set_center_crop(int(self.crop_group.current_key() or "100") / 100)
         self._img_scroll = QScrollArea(center_card)
         self._img_scroll.setWidgetResizable(False)
@@ -1070,7 +1071,17 @@ class SelectPage(ProgressRowMixin, QWidget):
     def eventFilter(self, obj, event):                  # noqa: N802
         if obj is self.center_img and event.type() == QEvent.Type.Paint:
             self._mark_shown()
+        elif (obj is self.center_img and event.type() == QEvent.Type.MouseButtonPress
+              and event.button() == Qt.MouseButton.LeftButton and self._current is not None):
+            self._open_center_large()       # 사진을 누르면 크게(현택님) — 결정은 버튼·방향키만
+            return True
         return super().eventFilter(obj, event)
+
+    def _open_center_large(self) -> None:
+        from ..widgets.zoom_window import FullscreenViewer
+        viewer = FullscreenViewer(self._current.path, self)
+        sheets.run(viewer, full_bleed=True)
+        viewer.deleteLater()
 
     def _decide_input(self, action: str) -> None:
         """사용자 입력(→/←·검증/제외 버튼)에서 오는 결정 — 사진이 보인 뒤에만 받는다."""

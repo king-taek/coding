@@ -238,9 +238,13 @@ class _LazyThumb(QLabel):
         self.setPixmap(ph)
         # 우클릭 컨텍스트 메뉴 (크게보기). 차순위 타일 내부 썸네일은 상위
         # _RunnerUpTile 이 좌우 비교 뷰어를 직접 열도록 비활성화한다 (#4).
+        # 왼쪽 클릭도 같은 '크게 보기'(현택님: 사진 클릭하면 크게) — 차순위 타일 안의
+        # 썸네일(메뉴 끔)은 클릭이 '교체' 라 건드리지 않는다.
+        self._click_to_view = bool(enable_context_menu)
         if enable_context_menu:
             self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             self.customContextMenuRequested.connect(self._on_context_menu)
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def paintEvent(self, event):  # noqa: N802
         super().paintEvent(event)
@@ -279,10 +283,20 @@ class _LazyThumb(QLabel):
         act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
         chosen = menu.exec(self.mapToGlobal(pos))
         if chosen is act:
-            if self._on_view is not None:
-                self._on_view()
-            else:
-                _open_fullscreen(self._path, self.window())
+            self._view_large()
+
+    def _view_large(self) -> None:
+        if self._on_view is not None:
+            self._on_view()
+        else:
+            _open_fullscreen(self._path, self.window())
+
+    def mousePressEvent(self, event):  # noqa: N802
+        if self._click_to_view and event.button() == Qt.MouseButton.LeftButton:
+            self._view_large()
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
 
 class _PairCrossOut(QWidget):

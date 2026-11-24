@@ -229,6 +229,14 @@ class _Pic(QLabel):
         self.setStyleSheet(f"background: #000; color: {theme.MUTE};")
         self.setWordWrap(True)
 
+    def setPixmap(self, pm) -> None:    # noqa: N802 — 사진이 있으면 손가락(누르면 크게)
+        super().setPixmap(pm)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def setText(self, text: str) -> None:   # noqa: N802 — 자리 글('없음'·'…')에는 손가락을 주지 않는다
+        super().setText(text)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
     def mousePressEvent(self, e):   # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
