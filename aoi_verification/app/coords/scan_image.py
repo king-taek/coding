@@ -286,7 +286,7 @@ def resolve_xy(folder, xy, side_um: float = CROP_SIDE_UM) -> ScanMatch:
 
 
 def resolve_xy_many(folder, xys, side_um: float = CROP_SIDE_UM) -> list:
-    """:func:`resolve_xy` 를 한 폴더의 결함 여러에 — 목록·폴더 mtime stat 과 픽셀 크기 조회를 **한 번만** 한다.
+    """:func:`resolve_xy` 를 한 폴더의 결함 여럿에 — 목록·폴더 mtime stat 과 픽셀 크기 조회를 **한 번만** 한다.
     결과는 ``xys`` 와 같은 순서·같은 값(하나씩 부른 것과 같다).  NAS 에서는 결함마다 stat 2번이 왕복이라
     120개만 해도 1초 넘게 걸렸다(측정)."""
     folder = Path(folder)
