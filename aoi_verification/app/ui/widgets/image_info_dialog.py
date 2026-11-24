@@ -31,6 +31,12 @@ Surface.flt)이다.  사진만 따로 복사한 폴더에서는 LIVE 형식 파�
 그림으로 바꾼다.  Scan 이 없으면 칸 자체를 만들지 않는다
 (사용자 결정).  사진을 바꿀 때마다 세대 번호를 올려, 늦게 도착한 이전 사진의 결과가
 새 사진 아래에 붙지 않게 한다.  계산은 엑셀과 같은 :mod:`coords.scan_image` 다.
+
+**흑백 Scan 사진(``X.Y.t.N.jpeg``)만 넣으면** 거꾸로 간다(사용자 요청 2026-11-24) — 그 사진 안에 찍힌
+Defect 를 :func:`coords.scan_image.defects_in` 으로 찾아, 미리보기에는 Scan 전체에 Defect 자리를
+네모로, 아래 칸에는 고른 Defect 의 300 µm Crop 을, 표에는 그 Defect 의 Color 사진과 **같은 정보**
+(:func:`coords.single_info.describe_in_scan`)를 보인다.  여럿이면 ◀ ▶ 로 넘긴다.  이때는 Color→Scan
+로더를 돌리지 않는다(Scan 파일명의 두 수치는 절대좌표가 아니다).
 """
 
 from __future__ import annotations
@@ -38,8 +44,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QSize, QThread, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFontMetrics, QImage, QKeySequence, QPixmap, QShortcut
+from PyQt6.QtCore import QObject, QRectF, QSize, QThread, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import (QColor, QFontMetrics, QImage, QKeySequence, QPainter, QPen,
+                         QPixmap, QShortcut)
 from PyQt6.QtWidgets import (QApplication, QDialog, QFileDialog, QFrame,
                              QGridLayout, QHBoxLayout, QLabel, QScrollArea,
                              QSizePolicy, QVBoxLayout, QWidget)
@@ -152,16 +159,17 @@ class _InfoLoader(QThread):
     class _Signals(QObject):
         done = pyqtSignal(int, object)                   # (세대, 정보 덩이 목록)
 
-    def __init__(self, path: Path, gen: int) -> None:
+    def __init__(self, path: Path, gen: int, fn=None) -> None:
         super().__init__()                  # 부모 없음(위 주석)
         self._path, self._gen = path, gen
+        self._fn = fn or _describe
         self.signals = self._Signals()
 
     def run(self) -> None:      # type: ignore[override]
         try:
-            groups = _describe(self._path)
+            groups = self._fn(self._path)
         except Exception:                   # 빈 표로라도 이어가야 덮개가 걷힌다
-            groups = []
+            groups = _ScanSheet(self._path) if self._fn is _describe_scan else []
         self.signals.done.emit(self._gen, groups)
 
 
@@ -173,6 +181,49 @@ def _describe(path: Path) -> list:
     except Exception:
         pass
     return groups
+
+
+class _ScanSheet:
+    """흑백 Scan 사진 한 장의 결과 — 워커가 만들고 메인 스레드가 그린다(QPixmap 없음)."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.status = scan_image.UNREADABLE
+        self.hits: tuple = ()
+        self.groups: list = []          # Defect 마다 정보 덩이 목록
+        self.crops: list = []           # Defect 마다 Crop QImage
+        self.full: QImage | None = None
+        self._full_pix: QPixmap | None = None     # 메인 스레드에서 한 번만 만든다(넘길 때마다 바꾸지 않게)
+        self.file_group = None
+        self.gl_ok = False
+
+    def full_pix(self) -> QPixmap:
+        if self._full_pix is None:
+            self._full_pix = QPixmap.fromImage(self.full)
+        return self._full_pix
+
+
+def _describe_scan(path: Path) -> _ScanSheet:
+    """Scan 사진 → 안에 든 Defect · 정보 · Crop.  NAS 를 읽으므로 워커에서 부른다.  예외를 내지 않는다."""
+    sheet = _ScanSheet(path)
+    sheet.file_group = single_info.scan_file_group(path)
+    try:
+        sheet.gl_ok = gl_loader.is_color(path) is False
+    except Exception:
+        sheet.gl_ok = False
+    m = scan_image.defects_in(path)
+    sheet.status = m.status
+    if not m.ok:
+        return sheet
+    im = scan_image.load_image(path)
+    if im is None:
+        sheet.status = scan_image.UNREADABLE
+        return sheet
+    sheet.full = pil_to_qimage(im)
+    sheet.hits = m.hits
+    sheet.groups = [single_info.describe_in_scan(path, h.path) for h in m.hits]
+    sheet.crops = [pil_to_qimage(scan_image.cut(im, h.box)) for h in m.hits]
+    return sheet
 
 
 def _async_info() -> bool:
@@ -251,6 +302,8 @@ class ImageInfoDialog(QDialog):
         self._scan_dots.setInterval(_SCAN_DOTS_MS)
         self._scan_dots.timeout.connect(self._tick_scan_dots)
         self._scan_dot_i = 0
+        self._sheet: _ScanSheet | None = None     # 흑백 Scan 사진을 넣었을 때만
+        self._hit_i = 0
         self._loading = LoadingOverlay(self)
         self._build()
         if image_path:
@@ -320,6 +373,25 @@ class ImageInfoDialog(QDialog):
         # 프레임이 사진을 **딱 감싸도록** 위쪽 정렬로 두고, 크기는 픽스맵에 맞춘다.
         lay.addWidget(self.preview, alignment=Qt.AlignmentFlag.AlignTop
                       | Qt.AlignmentFlag.AlignHCenter)
+        # 흑백 Scan 사진 안 Defect 가 여럿일 때만 — ◀ Defect i / n ▶
+        self.step_bar = QWidget(host)
+        step = QHBoxLayout(self.step_bar)
+        step.setContentsMargins(0, 0, 0, 0)
+        self.prev_btn = NeonButton(i18n.KO.SCAN_DEFECT_PREV, role="ghost")
+        self.next_btn = NeonButton(i18n.KO.SCAN_DEFECT_NEXT, role="ghost")
+        self.step_label = QLabel("", self.step_bar)
+        self.step_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.step_label.setProperty("role", "mono")
+        for b, d in ((self.prev_btn, -1), (self.next_btn, 1)):
+            b.setMinimumHeight(theme.PROFILE.control_h_lg)
+            b.setMinimumWidth(64)
+            b.setAutoDefault(False)
+            b.clicked.connect(lambda _=False, d=d: self._step_hit(d))
+        step.addWidget(self.prev_btn)
+        step.addWidget(self.step_label, stretch=1)
+        step.addWidget(self.next_btn)
+        lay.addWidget(self.step_bar)
+        self.step_bar.setVisible(False)
         # Scan image — Scan 이 있다고 판정될 때만 보인다.
         self.scan_title = QLabel(i18n.KO.SCAN_IMAGE_TITLE, host)
         self.scan_title.setProperty("role", "mutedCaption")
@@ -482,12 +554,15 @@ class ImageInfoDialog(QDialog):
         self.gl_btn.setEnabled(False)     # GL 로 볼 수 있는지는 `_ScanLoader` 가 알려 준다
         self._info_gen += 1
         self._scan_gen += 1               # 이전 사진의 Scan 결과가 늦게 와도 버린다
+        self._sheet = None
+        self._clear_scan()
+        fn = _describe_scan if scan_image.is_scan_name(self._path.name) else _describe
         if not _async_info():
-            self._on_info_done(self._info_gen, _describe(self._path))
+            self._on_info_done(self._info_gen, fn(self._path))
             return
         self._loading.show_overlay(i18n.KO.IMAGE_INFO_LOADING)
         self._loading.set_progress(0, 0, i18n.KO.IMAGE_INFO_LOADING)   # busy — 0 에 멈추지 않는다
-        ld = _InfoLoader(self._path, self._info_gen)
+        ld = _InfoLoader(self._path, self._info_gen, fn)
         ld.signals.done.connect(self._on_info_done)
         _LIVE_SCAN_LOADS.add(ld)
         ld.finished.connect(lambda: _LIVE_SCAN_LOADS.discard(ld))
@@ -496,11 +571,70 @@ class ImageInfoDialog(QDialog):
     def _on_info_done(self, gen: int, groups) -> None:
         if gen != self._info_gen:
             return
-        self._groups = groups
         self.pick_btn.setText(i18n.KO.IMAGE_INFO_PICK_ANOTHER)
         self._loading.hide_overlay()    # 정보는 다 왔다 — Scan 은 자기 칸에서 기다린다
+        if isinstance(groups, _ScanSheet):
+            self._sheet = groups
+            self.gl_btn.setEnabled(groups.gl_ok)
+            self._show_hit(0)
+            return
+        self._groups = groups
         self._start_scan()
         self._render()
+
+    # ------------------------------------------------------------------
+    # 흑백 Scan 사진 — 안에 든 Defect 고르기
+    # ------------------------------------------------------------------
+    def _show_hit(self, i: int) -> None:
+        """Defect ``i`` 를 고른다 — 표·Crop·미리보기 네모가 함께 바뀐다(파일을 다시 읽지 않는다)."""
+        sheet = self._sheet
+        n = len(sheet.hits)
+        self._hit_i = i % n if n else 0
+        self._scan_dots.stop()
+        self.scan_title.setText(i18n.KO.SCAN_DEFECT_TITLE_FMT.format(um=scan_image.CROP_SIDE_UM))
+        self.step_bar.setVisible(n > 1)
+        if n:
+            hit = sheet.hits[self._hit_i]
+            self._groups = sheet.groups[self._hit_i]
+            self._scan_crop, self._scan_full = sheet.crops[self._hit_i], sheet.full
+            self._scan_box, self._scan_name = tuple(hit.box), str(sheet.path)
+            self.step_label.setText(i18n.KO.SCAN_DEFECT_STEP_FMT.format(i=self._hit_i + 1, n=n))
+            self._set_scan_visible(True)
+        else:
+            self._groups = [sheet.file_group] if sheet.file_group else []
+            self._scan_crop = self._scan_box = None
+            self._scan_full = None
+            self._set_scan_visible(False)
+        self._render()
+
+    def _step_hit(self, d: int) -> None:
+        if self._sheet is not None and self._sheet.hits:
+            self._show_hit(self._hit_i + d)
+
+    def _scan_preview_pix(self, max_w: int, max_h: int) -> QPixmap:
+        """Scan 전체 + Defect 자리 네모(고른 것은 굵은 노랑) — 원본 픽셀 좌표를 축척만 바꿔 그린다."""
+        full = self._sheet.full
+        if full is None:
+            return _io.load_thumb_qpixmap(self._path, max_w, kind="mid")
+        pix = self._sheet.full_pix().scaled(
+            max_w, max(1, max_h), Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation)
+        k = pix.width() / full.width()
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        order = [j for j in range(len(self._sheet.hits)) if j != self._hit_i] + \
+            ([self._hit_i] if self._sheet.hits else [])
+        for j in order:
+            left, top, cw, ch = self._sheet.hits[j].box
+            r = QRectF(left * k, top * k, max(4.0, cw * k), max(4.0, ch * k))
+            sel = j == self._hit_i
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor("black"), 4 if sel else 2))
+            p.drawRect(r)
+            p.setPen(QPen(QColor(theme.VIEWER_BOX if sel else theme.VIEWER_ACCENT), 2 if sel else 1))
+            p.drawRect(r)
+        p.end()
+        return pix
 
     # ------------------------------------------------------------------
     # Scan image
@@ -509,13 +643,19 @@ class ImageInfoDialog(QDialog):
         self.scan_title.setVisible(on)
         self.scan_view.setVisible(on)
 
-    def _start_scan(self) -> None:
-        """이전 사진의 Scan 을 즉시 치우고 새 사진의 판정을 워커에 맡긴다."""
-        self._scan_gen += 1
+    def _clear_scan(self) -> None:
+        """이전 사진의 Scan 칸 · Defect 넘기기를 치운다."""
         self._scan_crop = self._scan_full = self._scan_box = None
         self._scan_name = ""
         self._scan_dots.stop()
         self._set_scan_visible(False)
+        self.step_bar.setVisible(False)
+        self.scan_title.setText(i18n.KO.SCAN_IMAGE_TITLE)
+
+    def _start_scan(self) -> None:
+        """이전 사진의 Scan 을 즉시 치우고 새 사진의 판정을 워커에 맡긴다."""
+        self._scan_gen += 1
+        self._clear_scan()
         ld = _ScanLoader(self._path, self._scan_gen)
         ld.signals.found.connect(self._on_scan_found)
         ld.signals.gl.connect(self._on_gl_known)
@@ -601,6 +741,9 @@ class ImageInfoDialog(QDialog):
         """사진(Color) 미리보기를 누르면 기존 전체화면 뷰어로 크게 본다(Scan 칸과 같은 뷰어)."""
         if self._path is None:
             return
+        if self._sheet is not None and self._scan_full is not None:
+            self._open_full_scan()           # 흑백 Scan 사진 — 고른 Defect 범위를 덧그려 연다
+            return
         from .zoom_window import FullscreenViewer
         sheets.run(FullscreenViewer(self._path, self), full_bleed=True)
 
@@ -634,7 +777,9 @@ class ImageInfoDialog(QDialog):
             return
         self.preview.setCursor(Qt.CursorShape.PointingHandCursor)
         self.preview.setToolTip(i18n.KO.IMAGE_INFO_OPEN_TIP)
-        pix = _io.load_thumb_qpixmap(self._path, box, kind="mid")
+        scan_mode = self._sheet is not None
+        pix = (self._scan_preview_pix(box, box) if scan_mode
+               else _io.load_thumb_qpixmap(self._path, box, kind="mid"))
         # Scan 이 있으면 세로를 둘이 나눠 쓴다 — Color 가 높이를 다 먹으면 Scan 이 120px 대로
         # 쪼그라든다(흑백이 작다는 지적).  Color 를 줄여 Scan 이 Color 와 비슷한 크기가 되게 한다.
         if not self.scan_view.isHidden() and pix.height() > 0:
@@ -646,7 +791,8 @@ class ImageInfoDialog(QDialog):
                 color_h = min(pix.height(), int(room * 0.5))
                 if color_h < pix.height():
                     w = max(1, int(pix.width() * color_h / pix.height()))
-                    pix = _io.load_thumb_qpixmap(self._path, w, kind="mid")
+                    pix = (self._scan_preview_pix(w, color_h) if scan_mode
+                           else _io.load_thumb_qpixmap(self._path, w, kind="mid"))
         self.preview.setPixmap(pix)
         # 프레임이 사진을 딱 감싸도록 라벨을 픽스맵 크기로 — 레터박스 여백 제거.
         self.preview.setFixedSize(pix.size())
@@ -675,7 +821,12 @@ class ImageInfoDialog(QDialog):
                 col.addWidget(self._group_block(host, group, label_w))
             # ★ 계측을 하나도 못 읽었으면 복구 안내를 띄운다.  '파일' 덩이는 경로만
             #   있으면 항상 생기므로, 덩이 개수로 판정하면 이 안내가 영원히 안 뜬다.
-            if not single_info.has_measurements(self._groups):
+            if self._sheet is not None and not self._sheet.hits:
+                text = (i18n.KO.SCAN_DEFECT_NONE if self._sheet.status == scan_image.OK
+                        else i18n.KO.SCAN_DEFECT_FAIL.get(self._sheet.status,
+                                                          i18n.KO.SCAN_DEFECT_FAIL_OTHER))
+                col.addWidget(self._notice(host, text))
+            elif not single_info.has_measurements(self._groups):
                 col.addWidget(self._notice(host, i18n.KO.IMAGE_INFO_EMPTY))
         col.addStretch(1)
 
