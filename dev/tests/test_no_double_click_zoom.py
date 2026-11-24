@@ -106,7 +106,10 @@ def test_slot_mapping_double_click_is_kept():
 
 # ── 사용자에게 더블클릭을 안내하지 않는다 ───────────────────────────────────
 def test_no_user_facing_text_tells_you_to_double_click_for_zoom():
+    # 매치 없음 검토의 사용법 문단은 지웠다(현택님 2026-11-24 — 설명 문장 금지).
+    # 남은 문구도 없는 제스처를 가르치지 않는다.
     from aoi_verification.app import i18n
-    hint = i18n.KO.UNMATCHED_REVIEW_HINT
-    assert "더블클릭" not in hint, f"안내 문구가 없는 제스처를 가르친다: {hint}"
-    assert "우클릭" in hint
+    texts = {k: v for k, v in vars(i18n.KO).items()
+             if k.startswith("UNMATCHED_") and isinstance(v, str)}
+    bad = {k: v for k, v in texts.items() if "더블클릭" in v}
+    assert not bad, f"안내 문구가 없는 제스처를 가르친다: {bad}"

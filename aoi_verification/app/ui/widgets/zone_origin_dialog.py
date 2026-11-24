@@ -1511,7 +1511,7 @@ class ZoneOriginDialog(QDialog):
 
     def _offer_open(self) -> None:
         path = self._saved
-        choice = sheets.choose(self, _KO.ZO_BTN_EXCEL, _KO.SAVE_SUCCESS_FMT.format(path=path),
+        choice = sheets.choose(self, _KO.SAVE_SUCCESS_TITLE, _KO.SAVE_SUCCESS_FMT.format(path=path),
                                [("open_file", _KO.BTN_OPEN_SAVED_FILE, "primary"),
                                 ("open_dir", _KO.BTN_OPEN_SAVED_FOLDER, "ghost"),
                                 ("close", _KO.MSG_BTN_CLOSE, "ghost")], default="open_file")
@@ -1521,7 +1521,7 @@ class ZoneOriginDialog(QDialog):
     def _on_excel_failed(self, msg: str) -> None:
         if not self._overlay_on:
             self._loading.hide_overlay()
-        sheets.info(self, _KO.ZO_BTN_EXCEL, _KO.SAVE_FAIL_FMT.format(error=msg))
+        sheets.info(self, _KO.SAVE_FAIL_TITLE, _KO.SAVE_FAIL_FMT.format(error=msg))
 
     # ------------------------------------------------------------------ 끌어다 놓기
     def hideEvent(self, event):         # noqa: N802

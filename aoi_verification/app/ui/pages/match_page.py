@@ -1064,7 +1064,7 @@ class MatchPage(ProgressRowMixin, QWidget):
             # 자동 모드는 매 ref 마다 모달이 뜨는 ‘모달 폭격’ 을 피하려고
             # 모달 없이 조용히 ‘매칭 없음’ 처리 (Bug #4).  수동 모드만 안내.
             if not self._auto_mode:
-                sheets.info(self, i18n.KO.APP_TITLE,
+                sheets.info(self, i18n.KO.STAT_NO_MATCH,
                                         i18n.KO.INFO_NO_VAL_PHOTOS)
             self._confirm_no_match(user=False)
             return
@@ -1192,7 +1192,7 @@ class MatchPage(ProgressRowMixin, QWidget):
                 call_later(self, 0, lambda: self._confirm_no_match(user=False))
             else:
                 self._loading.hide_overlay()
-                sheets.info(self, i18n.KO.APP_TITLE,
+                sheets.info(self, i18n.KO.STAT_NO_MATCH,
                                         i18n.KO.INFO_NO_MATCH_FOUND)
                 self._confirm_no_match(user=False)  # ‘잠시 보류’ 제거 (#3)
             return

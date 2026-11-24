@@ -1389,7 +1389,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._stage = ""
         self._loading.hide_overlay()
         _LOG.warning("폴더 스캔 실패: %s", message)
-        sheets.warn(self, i18n.KO.APP_TITLE,
+        sheets.warn(self, i18n.KO.SCAN_FAIL_TITLE,
                     self._leg_message(
                         i18n.KO.WARN_SCAN_FAILED_FMT.format(detail=message)))
         if self._multi() and self._leg_idx > 0:
@@ -1458,7 +1458,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         common = sr.common_slot_names
         if not common:
             self._loading.hide_overlay()
-            sheets.warn(self, i18n.KO.APP_TITLE,
+            sheets.warn(self, i18n.KO.NO_SLOTS_TITLE,
                         self._leg_message(i18n.KO.WARN_NO_SLOTS))
             if self._multi() and self._leg_idx > 0:
                 self._multi_after_match_empty()      # 이 장비만 빼고 이어 간다
@@ -1753,7 +1753,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         for slot in sorted(slots, key=lambda s: s.name):
             queue.extend(slot.ref_images)
         if not queue:
-            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
+            sheets.warn(self, i18n.KO.NO_IMAGES_TITLE, i18n.KO.WARN_NO_IMAGES)
             return
         pool = self._build_val_pool_by_slot()
         self._calibrate_then(queue, pool, auto_mode=True)
@@ -2035,7 +2035,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         #   검토 화면으로 갔다가, 돌아와서 아래 `_show_page(self._match_page)` 가
         #   그걸 덮어써 **텅 빈 Stage 2** 에 사용자를 세워 둔다.
         if not queue:
-            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
+            sheets.warn(self, i18n.KO.NO_IMAGES_TITLE, i18n.KO.WARN_NO_IMAGES)
             return
 
         # 매칭 대상 풀 = 같은 Slot 의 검증(val) 쪽 모든 사진
@@ -2156,7 +2156,11 @@ class MainWindow(MultiValFlow, QMainWindow):
         if self._input is None or self._scan is None or self._calib_next is None:
             return
         ref_dir, val_dir, auto_args = self._notch_guess
-        self._ask_notch(ref_dir, val_dir, res, auto_args)
+        if not self._ask_notch(ref_dir, val_dir, res, auto_args):
+            # [취소]·Esc·✕ — 매칭을 시작하지 않고 설정 화면으로(매칭 [중지] 와 같은 정리).
+            self._calib_next = None
+            self._on_match_cancelled()
+            return
         self._after_notch()
 
     @staticmethod
@@ -2168,8 +2172,11 @@ class MainWindow(MultiValFlow, QMainWindow):
         return not (notch.is_none(ref_dir) and res is not None
                     and res.direction is not None and notch.is_none(res.direction))
 
-    def _ask_notch(self, ref_dir: str, val_dir: str, res, auto_args=None) -> None:
-        """감지 결과로 `_notch_dirs`(매칭 전용)를 정한다 — 둘 다 아래가 아니면 창으로 확인받는다."""
+    def _ask_notch(self, ref_dir: str, val_dir: str, res, auto_args=None) -> bool:
+        """감지 결과로 `_notch_dirs`(매칭 전용)를 정한다 — 둘 다 아래가 아니면 창으로 확인받는다.
+
+        창에서 [취소]·Esc·✕ 면 False — 부르는 쪽이 매칭 시작을 접는다(예전엔 닫기 = 확인이었다)."""
+        from PyQt6.QtWidgets import QDialog
         from ..coords import notch
         from .widgets.notch_dialog import NotchDialog
         self._notch_dirs = ()
@@ -2177,7 +2184,9 @@ class MainWindow(MultiValFlow, QMainWindow):
             dlg = NotchDialog(self._input.ref_machine, self._input.val_machine,
                               ref_dir, val_dir, parent=self,
                               auto_args=auto_args, auto_result=res)
-            sheets.run(dlg)
+            if sheets.run(dlg) != QDialog.DialogCode.Accepted:
+                _LOG.info("Notch 방향 창 취소 — 매칭을 시작하지 않음")
+                return False
             dirs = dlg.dirs
         else:
             dirs = (notch.DEFAULT, notch.DEFAULT)
@@ -2186,6 +2195,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         if any(not notch.is_none(d) for _r, d in pairs):
             self._notch_dirs = pairs
             _LOG.info(i18n.KO.NOTCH_LOG_FMT.format(dirs=", ".join(f"{r}={d}" for r, d in pairs)))
+        return True
 
     def _on_calib_progress(self, done: int, total: int) -> None:
         self._loading.set_progress(done, total, i18n.KO.COORD_CAL_LOADING)
@@ -2476,7 +2486,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         if not sr.slots:
             self._loading.hide_overlay()
             wakelock.release()
-            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.EXTRACT_NONE_FOUND)
+            sheets.warn(self, i18n.KO.EXTRACT_SUMMARY_TITLE, i18n.KO.EXTRACT_NONE_FOUND)
             return
         # KLA 여부는 **묻지 않는다**(사용자 지적: "KLA인지 확인하는거 왜뜨냐").  매칭은
         # 짝이 안 맞을 때만 묻지만 예전 추출은 Camtek 폴더에도 매번 물었다.  호기가 K-n
@@ -2585,8 +2595,7 @@ class MainWindow(MultiValFlow, QMainWindow):
             _prefs.patch(extract_recipe_layout=choice)
             from .widgets.save_name_dialog import SaveNameDialog
             dlg = SaveNameDialog(self._working_xlsx.name, self._working_xlsx.parent,
-                                 parent=self, body=i18n.KO.EXTRACT_SAVE_NAME_BODY,
-                                 fields=self._title_fields_now)
+                                 parent=self, fields=self._title_fields_now)
             if sheets.run(dlg) and dlg.chosen is not None:
                 dst = self._working_xlsx.with_name(dlg.chosen)
         if dst is None:
@@ -2634,7 +2643,7 @@ class MainWindow(MultiValFlow, QMainWindow):
 
         path = self._extract_saved
         choice = sheets.choose(
-            self, i18n.KO.APP_TITLE, i18n.KO.SAVE_SUCCESS_FMT.format(path=path),
+            self, i18n.KO.SAVE_SUCCESS_TITLE, i18n.KO.SAVE_SUCCESS_FMT.format(path=path),
             [("open_file", i18n.KO.BTN_OPEN_SAVED_FILE, "primary"),
              ("open_dir", i18n.KO.BTN_OPEN_SAVED_FOLDER, "ghost"),
              ("close", i18n.KO.MSG_BTN_CLOSE, "ghost")],
@@ -2652,7 +2661,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         body = (i18n.KO.SAVE_FAIL_LOCKED_FMT.format(error=msg) if locked
                 else i18n.KO.SAVE_FAIL_FMT.format(error=msg))
         choice = sheets.choose(
-            self, i18n.KO.APP_TITLE, body,
+            self, i18n.KO.SAVE_FAIL_TITLE, body,
             [("retry", i18n.KO.BTN_RETRY_SAVE, "primary"),
              ("close", i18n.KO.MSG_BTN_CLOSE, "ghost")],
             default="retry")

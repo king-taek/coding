@@ -43,7 +43,7 @@ from PyQt6.QtGui import QColor, QCursor, QIcon, QPixmap
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                               QHBoxLayout, QLabel, QListWidget,
                               QListWidgetItem, QMenu, QMessageBox,
-                              QScrollArea, QToolButton, QVBoxLayout, QWidget)
+                              QScrollArea, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from .. import motion, theme
@@ -487,16 +487,6 @@ class UnmatchedReviewDialog(QDialog):
         self.progress_label = QLabel("", self)
         self.progress_label.setProperty("role", "slotHead")
         head.addWidget(self.progress_label)
-        # 사용법 4줄은 기본 접힘 — 셋업 카드와 같은 '?'(helpToggle) 패턴이다.
-        # 반복 검토하는 사용자에게 매번 세로 ~70px 를 내주면 본문(기준 사진·후보
-        # 그리드)이 그만큼 아래로 밀린다.
-        self._help_btn = QToolButton(self)
-        self._help_btn.setText("?")
-        self._help_btn.setObjectName("helpToggle")
-        self._help_btn.setCheckable(True)
-        self._help_btn.setToolTip(i18n.KO.HELP_TOGGLE_TOOLTIP)
-        self._help_btn.toggled.connect(self._on_help_toggled)
-        head.addWidget(self._help_btn)
         # 확정 결과를 알리는 자리 — 모달 대신 여기서 잠깐 뜬다.
         # ★ **늘어나는 여백보다 앞**에 둔다.  여백 뒤(버튼 바로 앞)에 두면 문구가
         #   붙는 순간 그 폭만큼 오른쪽 버튼 넷이 통째로 왼쪽으로 밀린다 — 150px 예약으로
@@ -520,17 +510,9 @@ class UnmatchedReviewDialog(QDialog):
         self.btn_confirm = NeonButton(i18n.KO.BTN_UNMATCHED_CONFIRM, role="primary")
         self.btn_confirm.clicked.connect(self._on_confirm)
         head.addWidget(self.btn_confirm)
-        self.btn_close = NeonButton(i18n.KO.BTN_UNMATCHED_CLOSE, role="ghost")
-        self.btn_close.clicked.connect(self.accept)
-        head.addWidget(self.btn_close)
+        # [검토 종료] 는 두지 않는다 — 나가기는 제목줄 [닫기]·Esc 가 하고, 둘 다
+        # `reject` 를 거쳐 미확정 선택을 묻는다(현택님 2026-11-24).
         root.addLayout(head)
-
-        self._hint = QLabel(i18n.KO.UNMATCHED_REVIEW_HINT, self)
-        self._hint.setWordWrap(True)
-        self._hint.setProperty("role", "muted")
-        self._hint.setContentsMargins(4, 4, 4, 4)   # 옛 인라인 padding:4px 와 동일
-        self._hint.setVisible(False)          # 기본 접힘 — '?' 로 편다
-        root.addWidget(self._hint)
 
         # 좌표로 매칭한 세션에서만 — 후보 순서의 기준이 좌표가 아님을 밝힌다 (U-18).
         # ★ 이건 접지 않는다.  '사용법' 이 아니라 점수의 뜻을 바로잡는 고지라서,
@@ -1218,10 +1200,6 @@ class UnmatchedReviewDialog(QDialog):
         self._pending.clear()
         return n
 
-    def _on_help_toggled(self, on: bool) -> None:
-        """'?' — 사용법 문단을 제자리에서 펼치고 접는다(스냅, 애니 없음)."""
-        self._hint.setVisible(bool(on))
-
     def _show_toast(self, text: str) -> None:
         """확정 결과를 헤더에서 잠깐 알린다(자리는 예약돼 있어 레이아웃 불변).
 
@@ -1267,7 +1245,7 @@ class UnmatchedReviewDialog(QDialog):
             return
         self._close_prompted = True
         r = sheets.ask(
-            self, i18n.KO.APP_TITLE, i18n.KO.UNMATCHED_CONFIRM_ON_CLOSE,
+            self, i18n.KO.UNMATCHED_SHEET_TITLE, i18n.KO.UNMATCHED_CONFIRM_ON_CLOSE,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
@@ -1278,6 +1256,13 @@ class UnmatchedReviewDialog(QDialog):
         self._maybe_prompt_pending()
         self._detach_scoring()      # [닫기] 로 나가는 경로도 ✕ 와 똑같이 끊는다.
         super().accept()
+
+    def reject(self) -> None:  # noqa: D401
+        # Esc·제목줄 [닫기] 도 같은 질문을 거친다 — 묻지 않고 나가면 고른 후보가
+        # 말없이 버려진다(현택님 2026-11-24).
+        self._maybe_prompt_pending()
+        self._detach_scoring()
+        super().reject()
 
     def closeEvent(self, event):  # noqa: N802
         self._maybe_prompt_pending()
@@ -1335,5 +1320,5 @@ class UnmatchedReviewDialog(QDialog):
     @staticmethod
     def show_empty_message(parent) -> None:
         sheets.info(
-            parent, i18n.KO.APP_TITLE, i18n.KO.UNMATCHED_REVIEW_EMPTY,
+            parent, i18n.KO.UNMATCHED_SHEET_TITLE, i18n.KO.UNMATCHED_REVIEW_EMPTY,
         )

@@ -368,7 +368,7 @@ class ResultPage(QWidget):
             return
         if self._val_pool is None:
             sheets.info(
-                self, i18n.KO.APP_TITLE, i18n.KO.UNMATCHED_REVIEW_EMPTY,
+                self, i18n.KO.UNMATCHED_SHEET_TITLE, i18n.KO.UNMATCHED_REVIEW_EMPTY,
             )
             return
         # 이미 결과에 들어간 모든 경로 — 중복 매칭 방지용. cross 모드에서
@@ -413,7 +413,7 @@ class ResultPage(QWidget):
         self.result_edited.emit(list(self._result.matches),
                                 list(self._result.unmatched_refs))
         sheets.info(
-            self, i18n.KO.APP_TITLE,
+            self, i18n.KO.UNMATCHED_SHEET_TITLE,
             i18n.KO.UNMATCHED_REVIEW_DONE_FMT.format(n=len(dlg.new_matches)),
         )
         # 요약 다시 그리기 (매칭 수 / 미매칭 수 갱신).
@@ -671,7 +671,7 @@ class ResultPage(QWidget):
         if path is None:
             return
         choice = sheets.choose(
-            self, i18n.KO.APP_TITLE,
+            self, i18n.KO.SAVE_SUCCESS_TITLE,
             i18n.KO.SAVE_SUCCESS_FMT.format(path=path),
             [("open_file", i18n.KO.BTN_OPEN_SAVED_FILE, "primary"),
              ("open_dir", i18n.KO.BTN_OPEN_SAVED_FOLDER, "ghost"),
@@ -698,7 +698,7 @@ class ResultPage(QWidget):
         body = (i18n.KO.SAVE_FAIL_LOCKED_FMT.format(error=msg) if locked
                 else i18n.KO.SAVE_FAIL_FMT.format(error=msg))
         choice = sheets.choose(
-            self, i18n.KO.APP_TITLE, body,
+            self, i18n.KO.SAVE_FAIL_TITLE, body,
             [("retry", i18n.KO.BTN_RETRY_SAVE, "primary"),
              ("close", i18n.KO.MSG_BTN_CLOSE, "ghost")],
             default="retry",

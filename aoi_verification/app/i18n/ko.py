@@ -240,11 +240,8 @@ SKIPPED_DIALOG_EMPTY = "매치 없음 사진이 없습니다."
 BTN_REVIEW_UNMATCHED = "매치 없음 사진 검토"
 UNMATCHED_REVIEW_TITLE = "매치 없음 사진 검토 — {n}장"
 UNMATCHED_REVIEW_PROGRESS_FMT = "{idx} / {total} — {slot}"
-UNMATCHED_REVIEW_HINT = (
-    "매치 없음인 기준 사진을 하나씩 검토합니다. 같은 슬롯의 검증 장비 후보를"
-    " 보여줍니다. 맞는 사진을 클릭해 선택(파란 테두리)한 뒤"
-    " [매치 확정] 을 누르세요. 후보를 우클릭하면 크게 비교할 수 있습니다."
-)
+# 이 창에서 뜨는 안내·질문 시트의 제목(앱 이름 대신, 현택님 2026-11-24).
+UNMATCHED_SHEET_TITLE = BTN_REVIEW_UNMATCHED
 # 좌표로 매칭한 세션에서 이 화면만 유사도로 줄을 세운다는 사실을 알린다 (U-18).
 #   좌표 모드로 검증했는데 후보 순서가 좌표와 무관해 보여 혼란을 준 지점이다.
 UNMATCHED_REVIEW_COORD_NOTE = (
@@ -254,15 +251,12 @@ UNMATCHED_REVIEW_COORD_NOTE = (
 UNMATCHED_REVIEW_NO_CANDIDATES = "이 슬롯에는 검증 장비 후보가 없습니다."
 UNMATCHED_REVIEW_DONE_FMT = "{n} 건의 신규 매칭을 확정했습니다."
 UNMATCHED_REVIEW_EMPTY = "검토할 매치 실패 사진이 없습니다."
-UNMATCHED_CONFIRM_ON_CLOSE = (
-    "선택(파란 테두리)했지만 아직 확정하지 않은 후보가 있습니다.\n"
-    "선택한 대로 매칭하시겠습니까?"
-)
-BTN_UNMATCHED_CONFIRM = "매치 확정"
+UNMATCHED_CONFIRM_ON_CLOSE = "선택한 대로 매치할까요?"
+# 버튼 이름은 크게 보기(BTN_EXPAND_*·BTN_CONFIRM_AS_MATCH)와 같게 둔다 — 같은 동작이다.
+BTN_UNMATCHED_CONFIRM = "이 후보로 매치"
 BTN_UNMATCHED_SELECT_THIS = "이 후보로 선택"
-BTN_UNMATCHED_NEXT = "다음 사진"
-BTN_UNMATCHED_PREV = "← 이전"
-BTN_UNMATCHED_CLOSE = "검토 종료"
+BTN_UNMATCHED_NEXT = "다음 ▶"
+BTN_UNMATCHED_PREV = "◀ 이전"
 
 # ‘매칭 취소’ 결합 (#14) — 실패 검토가 `MissEntry.note` 에서 이 표시를 보고 해당
 # 항목을 목록 뒤로 모은다(`unmatched_review_dialog._is_cancelled`).
@@ -711,8 +705,6 @@ VIEWER_SCAN_TIP = "이 Defect 자리의 Scan 사진(300 µm Crop)을 보여 줍�
 # ※ 검토 화면의 키보드 상호작용(↑↓ 줄 이동 · R 매치 없음 · Enter 검토 완료)과 키캡 힌트
 #   줄, '확인 필요만' 필터는 제거했다.  '매치 없음'은 행마다 있는 ✕ 토글, '검토 완료'는
 #   상단 버튼이 한다.  Enter 가 검토 전체를 끝내던 것은 특히 위험했다.
-# 카드 제목 옆 '?' 도움말 토글 (하드코딩 금지 — 사용자 노출 문자열은 여기 모은다)
-HELP_TOGGLE_TOOLTIP = "설명 보기/숨기기"
 
 # ※ 배치안 스위처(LAYOUT_*)와 C안 요약(SETUP_DETAIL_*·SUMMARY_*) 문구는 제거했다 —
 #   사용자가 '순서형' 배치를 확정하면서 비교용 스위처와 미선택 2안이 함께 사라졌다.
@@ -747,6 +739,11 @@ WARN_SAME_PATH_BODY = (
     "정말로 같은 폴더를 비교하시겠습니까?"
 )
 WARN_PATH_NOT_EXIST = "선택한 경로가 존재하지 않습니다:\n{path}"
+# 안내 시트 제목 — 앱 이름 대신 무슨 일인지 짧게(현택님 2026-11-24).
+PATH_MISSING_TITLE = "경로 없음"
+SCAN_FAIL_TITLE = "스캔 실패"
+NO_IMAGES_TITLE = "사진 없음"
+NO_SLOTS_TITLE = "슬롯 없음"
 WARN_NO_SLOTS = "두 폴더에 공통된 슬롯이 존재하지 않습니다."
 # 폴더 스캔이 실패했을 때 (U-05) — 예전엔 로딩만 켜진 채 앱이 잠긴 것처럼 보였다.
 WARN_SCAN_FAILED_FMT = (
@@ -901,17 +898,8 @@ INFO_ALREADY_MATCHED_SECTION = "이미 매칭됨 (자동 제외)"
 # 파일은 이 창에서 이름을 확정한 뒤에야 만들어진다(검증 시작 때 미리 만들지 않는다:
 # 저장까지 안 간 세션마다 빈 xlsx 가 남았다).
 SAVE_NAME_TITLE = "저장할 파일 이름"
-SAVE_NAME_BODY = (
-    "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
-    "규칙: 장비 자재_Layer_S/M 검증(기준 장비 기준)"
-)
-SAVE_NAME_CROSS_BODY = (
-    "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
-    "규칙: 기준 장비 vs 검증 장비 자재_Layer_S/M 교차검증"
-)
 SAVE_NAME_FOLDER_FMT = "저장 폴더: {path}"
 # 이름 아래 칸들 — 추천값이 들어 있고, 고친 뒤 버튼을 누르면 위 이름을 다시 만든다(사용자 요청 2026-10-30).
-SAVE_NAME_FIELDS_HINT = "아래 값을 고친 뒤 ‘제목 자동 생성’을 누르면 위 이름이 바뀝니다. 비워 둔 값은 제목에서 빠집니다."
 SAVE_NAME_AUTO = "제목 자동 생성"
 SAVE_NAME_FIELD_VAL = "검증 장비"
 SAVE_NAME_FIELD_REF = "기준 장비"
@@ -925,6 +913,9 @@ SAVE_NAME_EMPTY = "이름을 비워 둘 수 없습니다."
 SAVE_NAME_BAD_CHARS = "파일 이름에 쓸 수 없는 문자가 있습니다:  \\ / : * ? \" < > |"
 SAVE_DIALOG_TITLE = "결과 엑셀 저장 위치 선택"
 SAVE_FILENAME_FMT = "AOI검증결과_{ref}_vs_{val}_{ts}.xlsx"
+# 저장 결과 시트 제목 — 앱 이름 대신(현택님 2026-11-24).
+SAVE_SUCCESS_TITLE = "저장 완료"
+SAVE_FAIL_TITLE = "저장 실패"
 SAVE_SUCCESS_FMT = "엑셀 저장 완료:\n{path}"
 SAVE_FAIL_FMT = "엑셀 저장 실패:\n{error}"
 # ★ 가장 흔한 실패는 결과 파일이 엑셀에서 열려 있는 경우다.  OS 원문만 보여 주면
@@ -1464,9 +1455,6 @@ EXTRACT_LOAD_JOURNEY_STEPS = ("폴더 스캔", "썸네일", "선별 준비")
 EXTRACT_BLOCKED_HINT = "LOT 또는 wafer 폴더를 먼저 지정하세요."
 EXTRACT_AUTOMATION_USER_SELECT = "추출할 사진을 직접 고릅니다"
 EXTRACT_AUTOMATION_AUTO_ALL = "모든 사진 자동 — 선별 없이 전부 추출"
-EXTRACT_SAVE_NAME_BODY = (
-    "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
-    "규칙: 호기 자재_Layer_S/M Defect 추출")
 EXTRACT_NONE_FOUND = "추출할 사진을 찾지 못했습니다.\n폴더를 다시 확인하세요."
 EXTRACT_NONE_CHOSEN_TITLE = "고른 사진이 없습니다"
 EXTRACT_NONE_CHOSEN_BODY = (
@@ -1541,6 +1529,7 @@ NOTCH_REF = "기준"
 NOTCH_VAL = "검증"
 NOTCH_DIRS = {"up": "위", "left": "왼쪽", "right": "오른쪽", "down": "아래"}
 NOTCH_OK = "확인"
+NOTCH_CANCEL = BTN_CANCEL
 NOTCH_AUTO = "자동 감지"
 NOTCH_CHECKING = "Notch 방향 확인 중…"
 NOTCH_AUTO_BUSY = "검증 폴더를 네 방향으로 돌려 맞춰 보는 중…"

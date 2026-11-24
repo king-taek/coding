@@ -223,6 +223,8 @@ class SheetHost(QWidget):
             top = self._stack[-1]["root"]
             owner = self._owner_widget(obj)
             if owner is not None and self._is_within(owner, top):
+                if etype == QEvent.Type.KeyPress and self._cycle_focus(top, event):
+                    return True
                 return super().eventFilter(obj, event)      # 맨 위 시트의 것
             if etype == QEvent.Type.Shortcut:
                 # ★ 창 **자신**의 단축키는 통과시킨다 — F11 전체화면이 그것이고, 시트가
@@ -233,6 +235,9 @@ class SheetHost(QWidget):
                     return super().eventFilter(obj, event)
                 return True          # 소유를 못 풀면 막는다 — 새는 쪽이 더 나쁘다
             if owner is not None:
+                if etype == QEvent.Type.KeyPress:
+                    # 포커스가 이미 뒤에 가 있으면(마우스로 눌렀다 등) Tab 이 시트로 데려온다.
+                    self._cycle_focus(top, event)
                 return True
         return super().eventFilter(obj, event)
 
@@ -263,6 +268,49 @@ class SheetHost(QWidget):
         else:
             app.removeEventFilter(self)
         self._app_filter_on = on
+
+    @classmethod
+    def _cycle_focus(cls, top: QWidget, event) -> bool:
+        """Tab/Shift+Tab 을 맨 위 시트 **안에서만** 돌린다 — 처리했으면 True.
+
+        ★ 키는 위에서 막지만 Tab 은 막기 **전에** 포커스를 옮긴다: Qt 는 창 전체의 포커스
+        사슬을 따라가므로 시트의 마지막 버튼에서 Tab 을 누르면 뒤의 왼쪽 레일로 넘어갔고,
+        그다음 키는 전부 버려져 키보드가 먹통이 됐다(실측: 크게 보기 → Tab 두 번).
+        시트 안에 받을 위젯이 없으면 손대지 않는다(Qt 기본 동작)."""
+        mods = event.modifiers() & ~(Qt.KeyboardModifier.ShiftModifier
+                                     | Qt.KeyboardModifier.KeypadModifier)
+        key = event.key()
+        if key not in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab) or mods:
+            return False
+        back = (key == Qt.Key.Key_Backtab
+                or bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier))
+        chain = cls._tab_chain(top)
+        if not chain:
+            return False
+        cur = QApplication.focusWidget()
+        if cur in chain:
+            i = chain.index(cur)
+            nxt = chain[(i - 1) % len(chain)] if back else chain[(i + 1) % len(chain)]
+        else:
+            nxt = chain[-1] if back else chain[0]
+        nxt.setFocus(Qt.FocusReason.BacktabFocusReason if back
+                     else Qt.FocusReason.TabFocusReason)
+        return True
+
+    @classmethod
+    def _tab_chain(cls, top: QWidget) -> list:
+        """``top`` 안에서 Tab 으로 갈 수 있는 위젯 — 창의 포커스 사슬 순서 그대로."""
+        out: list = []
+        node = top.nextInFocusChain()
+        guard = 0
+        while node is not None and node is not top and guard < 2000:
+            guard += 1
+            if (cls._is_within(node, top) and node.isVisible() and node.isEnabled()
+                    and node.focusPolicy() & Qt.FocusPolicy.TabFocus
+                    and node.focusProxy() is None):
+                out.append(node)
+            node = node.nextInFocusChain()
+        return out
 
     @staticmethod
     def _is_within(w: QWidget, top: QWidget) -> bool:
@@ -314,22 +362,31 @@ class SheetHost(QWidget):
             chrome = bool(widget.windowTitle())
         # 발원점은 **호스트를 띄우기 전에** 본다 — 띄운 뒤엔 커서 아래가 스크림이다.
         origin = self._origin_of(widget)
+        # 시트가 미리 고른 포커스 자식 — 아래 부모 바꾸기가 지우므로 **먼저** 잡아 둔다.
+        wanted = widget.focusWidget()
         prev_parent = widget.parentWidget()
         prev_flags = widget.windowFlags()
         frame: Optional[_SheetFrame] = None
         if chrome:
             frame = _SheetFrame(self, widget.windowTitle())
             frame.set_content(widget)
-            frame.close_requested.connect(widget.close)
+            # 다이얼로그의 ✕ 는 OS 창처럼 `reject` 로 간다 — `close()` 는 아래 필터가
+            # 가로채 다이얼로그의 `reject` 를 건너뛰었다(미확정 선택을 묻는 창이 묻지
+            # 않고 닫혔다).  Esc 와 같은 길이다.
+            frame.close_requested.connect(
+                widget.reject if isinstance(widget, QDialog) else widget.close)
             root: QWidget = frame
         else:
             widget.setParent(self)
             widget.setWindowFlags(Qt.WindowType.Widget)
             root = widget
         loop = QEventLoop()
+        # 닫힌 뒤 포커스를 **연 자리**로 돌려준다 — 안 하면 Qt 가 사슬 맨 앞(왼쪽 레일)에
+        # 포커스를 줘서 화살표가 레일을 돌았다.
         entry = {"widget": widget, "root": root, "frame": frame, "loop": loop,
                  "prev_parent": prev_parent, "prev_flags": prev_flags,
-                 "full_bleed": full_bleed}
+                 "full_bleed": full_bleed,
+                 "prev_focus": QApplication.focusWidget()}
         self._stack.append(entry)
 
         finished_conn = None
@@ -353,7 +410,7 @@ class SheetHost(QWidget):
         root.raise_()
         widget.show()
         self._place(root, full_bleed)
-        widget.setFocus(Qt.FocusReason.PopupFocusReason)
+        self._focus_into(widget, wanted)
         self._enter(root, origin)
         try:
             loop.exec()                      # ★ exec() 과 같은 동기 의미
@@ -554,10 +611,37 @@ class SheetHost(QWidget):
                 self._fade_out_ghost(ghost, then_hide_host=False)
             top = self._stack[-1]["root"]
             top.raise_()
-            self._stack[-1]["widget"].setFocus(Qt.FocusReason.PopupFocusReason)
+        self._restore_focus(entry)
         loop = entry["loop"]
         if loop.isRunning():
             loop.quit()
+
+    @staticmethod
+    def _focus_into(widget: QWidget, target: Optional[QWidget]) -> None:
+        """시트를 열 때 포커스 — 시트가 미리 고른 자식(이름 입력칸 등)이 있으면 그것.
+
+        ★ 예전엔 시트 자신에 포커스를 줬다.  그러면 생성자에서 ``setFocus`` 해 둔
+        입력칸이 포커스를 잃어, 이름이 파랗게 선택돼 보이는데 타이핑은 들어가지 않았다
+        (저장 이름 창 — 한 번 더 클릭해야 했다)."""
+        if (target is None or target is widget
+                or not SheetHost._is_within(target, widget)
+                or not target.isVisible() or not target.isEnabled()):
+            target = widget
+        target.setFocus(Qt.FocusReason.PopupFocusReason)
+
+    def _restore_focus(self, entry: dict) -> None:
+        """닫힌 시트를 열기 전 포커스로 돌아간다(없거나 사라졌으면 맨 위 시트)."""
+        prev = entry.get("prev_focus")
+        top = self._stack[-1]["root"] if self._stack else None
+        try:
+            ok = (prev is not None and prev.isVisible() and prev.isEnabled()
+                  and (top is None or self._is_within(prev, top)))
+        except RuntimeError:
+            ok = False                       # 연 위젯이 그사이 파괴됐다
+        if ok:
+            prev.setFocus(Qt.FocusReason.PopupFocusReason)
+        elif self._stack:
+            self._stack[-1]["widget"].setFocus(Qt.FocusReason.PopupFocusReason)
 
     def close_all(self) -> None:
         """열린 시트를 모두 닫는다(창이 닫힐 때 루프가 남지 않게)."""
@@ -680,6 +764,14 @@ class _MessageSheet(QDialog):
             bar.addWidget(btn)
             self._buttons[sb] = btn
         v.addLayout(bar)
+        # ★ 고르는 시트(예/아니오 등 버튼 둘 이상)는 **Enter 가 아무것도 누르지 않는다**
+        #   (현택님 2026-11-24 "Enter 안 눌리도록").  무심코 친 Enter 가 질문을 읽기도
+        #   전에 답해 버린다.  강조색(기본값)은 그대로 두고 키만 뺀다 — 고르는 것은
+        #   클릭이나 Tab 으로 간 버튼의 Space 다.  버튼 하나뿐인 안내는 예전 그대로.
+        self._enter_off = len(self._buttons) > 1
+        if self._enter_off:
+            for btn in self._buttons.values():
+                btn.setAutoDefault(False)
 
         # ★ 기본값이 **부정 버튼**(아니오·취소·닫기)인 경고에서는 강조 버튼을 없앤다.
         #   예전엔 [예] 가 언제나 채운 파란 버튼이라, "정말 같은 폴더를 비교할까요?"
@@ -690,11 +782,9 @@ class _MessageSheet(QDialog):
                 if btn.property("role") == "primary":
                     btn.setRole("ghost")
 
-        if default in self._buttons:
+        if default in self._buttons and not self._enter_off:
             self._buttons[default].setDefault(True)
             self._buttons[default].setFocus()
-        elif self._buttons:
-            next(iter(self._buttons.values())).setFocus()
         self.setMaximumWidth(_MSG_MAX_W + 48)
 
     def _answer_with(self, sb) -> None:
@@ -706,6 +796,9 @@ class _MessageSheet(QDialog):
 
     def keyPressEvent(self, event):  # noqa: N802
         """Esc = 취소/아니오/닫기(있으면), 없으면 그대로 닫는다 — QMessageBox 와 같게."""
+        if self._enter_off and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            event.accept()
+            return
         if event.key() == Qt.Key.Key_Escape:
             for sb in (_SB.Cancel, _SB.No, _SB.Close, _SB.Ok):
                 if sb in self._buttons:

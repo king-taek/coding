@@ -787,7 +787,7 @@ class SetupPage(QWidget):
                 continue
             root = Path(text)
             if not root.is_dir():
-                sheets.warn(self, i18n.KO.APP_TITLE,
+                sheets.warn(self, i18n.KO.PATH_MISSING_TITLE,
                             i18n.KO.WARN_PATH_NOT_EXIST.format(path=root))
                 return None
             if root.resolve() in seen:
@@ -2454,11 +2454,11 @@ class SetupPage(QWidget):
         val_machine = self.val_machine_edit.text().strip()
 
         if not ref_root.exists() or not ref_root.is_dir():
-            sheets.warn(self, i18n.KO.APP_TITLE,
+            sheets.warn(self, i18n.KO.PATH_MISSING_TITLE,
                                 i18n.KO.WARN_PATH_NOT_EXIST.format(path=ref_root))
             return
         if not val_root.exists() or not val_root.is_dir():
-            sheets.warn(self, i18n.KO.APP_TITLE,
+            sheets.warn(self, i18n.KO.PATH_MISSING_TITLE,
                                 i18n.KO.WARN_PATH_NOT_EXIST.format(path=val_root))
             return
         if not ref_machine:
@@ -2541,7 +2541,7 @@ class SetupPage(QWidget):
         roots = [Path(t) for t, _sel in rows]
         for r in roots:
             if not r.is_dir():
-                sheets.warn(self, i18n.KO.APP_TITLE,
+                sheets.warn(self, i18n.KO.PATH_MISSING_TITLE,
                             i18n.KO.WARN_PATH_NOT_EXIST.format(path=r))
                 return None
         if not roots:

@@ -105,8 +105,7 @@ class SaveNameDialog(QDialog):
     """추천 이름을 보여주고 고치게 한다.  :attr:`chosen` 이 결과(취소면 ``None``)."""
 
     def __init__(self, suggested: str, folder: Path, parent=None,
-                 *, body: str | None = None,
-                 fields: dict[str, str] | None = None) -> None:
+                 *, fields: dict[str, str] | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(i18n.KO.SAVE_NAME_TITLE)
         self._chosen: str | None = None
@@ -114,32 +113,22 @@ class SaveNameDialog(QDialog):
         self._fields: dict[str, QLineEdit] = {}
         # 칸이 아닌 제목 종류 표시(``cross``) — 칸 입력과 함께 이름 재생성에 넘긴다.
         self._kind = {k: v for k, v in (fields or {}).items() if k == "cross"}
-        if body is None:
-            body = (i18n.KO.SAVE_NAME_CROSS_BODY if self._kind.get("cross")
-                    else i18n.KO.SAVE_NAME_BODY)
-        self._build(suggested, self._folder, body, fields)
+        self._build(suggested, self._folder, fields)
 
     @property
     def chosen(self) -> str | None:
         return self._chosen
 
     # ------------------------------------------------------------------
-    def _build(self, suggested: str, folder: Path, body_text: str,
+    def _build(self, suggested: str, folder: Path,
                fields: dict[str, str] | None) -> None:
         root = QVBoxLayout(self)
         m = theme.PROFILE.page_margin // 2
         root.setContentsMargins(m, m, m, m)
         root.setSpacing(10)
 
-        head = QLabel(i18n.KO.SAVE_NAME_TITLE, self)
-        head.setProperty("role", "title")
-        root.addWidget(head)
-
-        body = QLabel(body_text, self)
-        body.setProperty("role", "muted")
-        body.setWordWrap(True)
-        root.addWidget(body)
-
+        # 제목은 시트 제목줄에 있다 — 본문에 또 크게 쓰지 않고, 설명 문장도 두지 않는다
+        # (현택님 2026-11-24).  남는 글은 저장 폴더 한 줄뿐이다.
         self.edit = QLineEdit(suggested, self)
         self.edit.setMinimumWidth(420)
         self.edit.textChanged.connect(self._revalidate)
@@ -171,11 +160,8 @@ class SaveNameDialog(QDialog):
                                alignment=Qt.AlignmentFlag.AlignVCenter)
                 form.addWidget(ed, r, 1)
             root.addLayout(form)
-            hint = QLabel(i18n.KO.SAVE_NAME_FIELDS_HINT, self)
-            hint.setProperty("role", "muted")
-            hint.setWordWrap(True)
             auto_row = QHBoxLayout()
-            auto_row.addWidget(hint, 1)
+            auto_row.addStretch(1)
             self.btn_auto = NeonButton(i18n.KO.SAVE_NAME_AUTO, role="ghost")
             self.btn_auto.clicked.connect(self._on_auto)
             auto_row.addWidget(self.btn_auto)
