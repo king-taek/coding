@@ -1,9 +1,8 @@
 """팝업 버튼 순서·Enter·Esc (현택님 2026-11-24 결정).
 
-- 메시지 시트(ask · info · choose): Windows 순서 [확인][취소] — 확인이 먼저, 취소·닫기가
-  맨 오른쪽(P1·P2 B안).
-- 대화상자(저장 이름 · Notch · 슬롯 선택 · 다중 선택 · 슬롯 짝): 오른쪽 아래 [취소][확인]
-  (P3–P6 A안).  두 순서가 반대인 것은 일부러 고른 것이다.
+- 모든 팝업(메시지 시트 ask · info · choose 와 대화상자 저장 이름 · Notch · 슬롯 선택 ·
+  다중 선택 · 슬롯 짝): 오른쪽 아래 [취소][확인] — 확인이 맨 오른쪽
+  (P3–P6 A안, 2026-11-25 Q1 B안으로 메시지 시트도 같게).
 - 버튼 높이 44.  버튼이 둘 이상인 시트는 Enter 가 아무것도 누르지 않고, Esc = 아니오/취소.
 """
 from __future__ import annotations
@@ -40,14 +39,14 @@ def _left_to_right(buttons):
     return sorted(buttons, key=lambda b: b.mapTo(b.window(), b.rect().topLeft()).x())
 
 
-# ── 메시지 시트: Windows 순서 ────────────────────────────────────────────────
+# ── 메시지 시트: [취소][확인] ────────────────────────────────────────────────
 @pytest.mark.parametrize("buttons,default,want", [
-    (_SB.Yes | _SB.No, _SB.No, [_SB.Yes, _SB.No]),
-    (_SB.Yes | _SB.No, _SB.Yes, [_SB.Yes, _SB.No]),
-    (_SB.Ok | _SB.Cancel, _SB.Cancel, [_SB.Ok, _SB.Cancel]),
-    (_SB.Yes | _SB.No | _SB.Cancel, _SB.Cancel, [_SB.Yes, _SB.No, _SB.Cancel]),
+    (_SB.Yes | _SB.No, _SB.No, [_SB.No, _SB.Yes]),
+    (_SB.Yes | _SB.No, _SB.Yes, [_SB.No, _SB.Yes]),
+    (_SB.Ok | _SB.Cancel, _SB.Cancel, [_SB.Cancel, _SB.Ok]),
+    (_SB.Yes | _SB.No | _SB.Cancel, _SB.Cancel, [_SB.Cancel, _SB.No, _SB.Yes]),
 ])
-def test_message_sheet_puts_confirm_first(styled_qapp, buttons, default, want):
+def test_message_sheet_puts_confirm_last(styled_qapp, buttons, default, want):
     s = _shown(styled_qapp, sh._MessageSheet(None, "t", "b", buttons, default, "question"))
     try:
         order = _left_to_right(s._buttons.values())
@@ -59,8 +58,8 @@ def test_message_sheet_puts_confirm_first(styled_qapp, buttons, default, want):
         s.deleteLater()
 
 
-def test_save_done_choice_is_open_file_first_close_last(styled_qapp):
-    """저장 완료(P2): [파일 열기][폴더 열기][닫기] — 파일 열기만 파랑."""
+def test_save_done_choice_is_close_first_open_file_last(styled_qapp):
+    """저장 완료: [닫기][폴더 열기][파일 열기] — 파일 열기만 파랑."""
     K = i18n.KO
     d = _shown(styled_qapp, sh._ChoiceSheet(
         K.SAVE_SUCCESS_TITLE, "C:/x.xlsx",
@@ -70,22 +69,22 @@ def test_save_done_choice_is_open_file_first_close_last(styled_qapp):
     try:
         keys = {b: k for k, b in d._buttons.items()}
         assert [keys[b] for b in _left_to_right(d._buttons.values())] == \
-            ["open_file", "open_dir", "close"]
+            ["close", "open_dir", "open_file"]
         assert all(b.height() == _H for b in d._buttons.values())
     finally:
         d.hide()
         d.deleteLater()
 
 
-def test_choice_cancel_keys_go_right_even_if_listed_first(styled_qapp):
-    """선택지를 어떤 순서로 넘기든 주 액션이 먼저, '다음에'·None 이 맨 오른쪽."""
+def test_choice_cancel_keys_go_left_even_if_listed_last(styled_qapp):
+    """선택지를 어떤 순서로 넘기든 '다음에'·None 이 먼저, 주 액션이 맨 오른쪽."""
     d = _shown(styled_qapp, sh._ChoiceSheet(
         "t", "b", [("never", "안 함", "danger"), ("later", "다음에", "ghost"),
                    ("install", "설치", "primary")]))
     try:
         keys = {b: k for k, b in d._buttons.items()}
         assert [keys[b] for b in _left_to_right(d._buttons.values())] == \
-            ["install", "never", "later"]
+            ["later", "never", "install"]
     finally:
         d.hide()
         d.deleteLater()

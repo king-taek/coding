@@ -806,7 +806,8 @@ class _MessageSheet(QDialog):
         v.addLayout(popup_layout.sheet_row(
             QHBoxLayout(),
             primaries=[b for sb, b in made if sb not in _NEGATIVE],
-            cancels=[b for sb, b in made if sb in _NEGATIVE]))
+            # [취소][아니오][예] — 가장 물러나는 답이 맨 왼쪽.
+            cancels=[b for sb, b in reversed(made) if sb in _NEGATIVE]))
         # ★ 고르는 시트(예/아니오 등 버튼 둘 이상)는 **Enter 가 아무것도 누르지 않는다**
         #   (현택님 2026-11-24 "Enter 안 눌리도록").  무심코 친 Enter 가 질문을 읽기도
         #   전에 답해 버린다.  강조색(기본값)은 그대로 두고 키만 뺀다 — 고르는 것은
@@ -958,8 +959,8 @@ class _ChoiceSheet(QDialog):
     def _build_button_row(self, options):
         """오른쪽 정렬 버튼 줄 — 하나가 주 액션인 질문(설치할까요? 등).
 
-        순서는 메시지 시트와 같은 Windows 순서다 — 주 액션이 먼저, 닫기·돌아가기
-        (`popup_layout.CANCEL_KEYS`·``None``)가 맨 오른쪽.  강조는 선택지의 role 로만
+        순서는 다른 팝업과 같다 — 닫기·돌아가기(`popup_layout.CANCEL_KEYS`·``None``)가
+        먼저, 주 액션이 맨 오른쪽.  강조는 선택지의 role 로만
         한다 — Enter 는 누르지 않는다(생성자 참조).
 
         ★ 버튼들이 시트 폭(`_MSG_MAX_W`)에 한 줄로 안 들어가면 **두 열로 접는다.**
@@ -976,7 +977,7 @@ class _ChoiceSheet(QDialog):
                 primaries.append(btn)
             else:
                 others.append(btn)
-        buttons = [*primaries, *others, *cancels]
+        buttons = [*cancels, *others, *primaries]
         spacing = 8
         need = (sum(b.sizeHint().width() for b in buttons)
                 + spacing * max(0, len(buttons) - 1))
