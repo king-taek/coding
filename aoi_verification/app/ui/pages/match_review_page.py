@@ -1346,9 +1346,7 @@ class MatchReviewPage(QWidget):
         self._current_row = None
 
         if not self._matches:
-            empty = QLabel(i18n.KO.REVIEW_EMPTY_HINT_CROSS_A
-                           if self._cross and not self._reverse
-                           else i18n.KO.REVIEW_EMPTY_HINT)
+            empty = QLabel(i18n.KO.REVIEW_EMPTY_HINT)
             empty.setProperty("role", "mutedPad")
             self._list_layout.addWidget(empty)
         elif self._lanes:

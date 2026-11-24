@@ -342,15 +342,6 @@ class MatchPage(ProgressRowMixin, QWidget):
         bar.addStretch(1)
         cl.addLayout(bar)
 
-        # 자동 모드에서 우측 후보 패널을 떼면 이 카드가 폭 전체를 쓴다 — 결과를
-        # 어디서 보는지 한 줄로 알려 준다(빈 칸에 용도를 말하는 emptyHint 규칙의
-        # 연장이다).  수동 폴백에서는 감춘다.
-        self._auto_note = QLabel(i18n.KO.MATCH_AUTO_RESULT_NOTE, center)
-        self._auto_note.setProperty("role", "muted")
-        self._auto_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._auto_note.setVisible(False)
-        cl.addWidget(self._auto_note)
-
         center.setMinimumWidth(360)
         self._h_splitter.addWidget(center)
 
@@ -1258,12 +1249,11 @@ class MatchPage(ProgressRowMixin, QWidget):
                 w.deleteLater()
 
     def _set_candidate_pane_visible(self, on: bool) -> None:
-        """우측 후보 패널 표시/숨김 + 중앙 카드의 안내 한 줄을 반대로 토글.
+        """우측 후보 패널 표시/숨김.
 
         스플리터는 숨은 자식을 자리로 치지 않으므로 남은 pane 이 폭을 전부 쓴다
         (저장된 분할 비율은 그대로 남아 있다가 패널이 돌아오면 다시 적용된다)."""
         self._right_panel.setVisible(bool(on))
-        self._auto_note.setVisible(not on)
 
     def _populate_right(self, candidates: list[Candidate]) -> None:
         # 수동 폴백이 실제로 돌았다 — 자동 모드에서 떼어 뒀던 패널을 되살린다.

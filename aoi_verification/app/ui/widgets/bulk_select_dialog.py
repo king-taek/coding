@@ -262,12 +262,6 @@ class BulkSelectDialog(QDialog):
         # ★ 제목을 본문에 그리지 않는다 — `setWindowTitle` 을 sheet_host 가 시트
         #   상단 chrome 에 이미 그리므로, 여기 또 그리면 같은 문장이 상하로 두 번
         #   보인다(image_info_dialog 가 같은 이유로 내부 표제를 안 그린다).
-        hint = QLabel(i18n.KO.BULK_SELECT_HINT, self)
-        hint.setProperty("role", "subtitle")
-        hint.setWordWrap(True)
-        hint.setStyleSheet(f"color: {theme.MUTE};")
-        root.addWidget(hint)
-
         # 상단 바: 선택 요약 + 사진 크기 슬라이더 -----------------------
         top = QHBoxLayout()
         top.setSpacing(10)

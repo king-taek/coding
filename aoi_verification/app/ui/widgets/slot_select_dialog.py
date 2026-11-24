@@ -239,7 +239,7 @@ class SlotSelectDialog(QDialog):
         같은 창으로 고를 때 쓴다."""
         super().__init__(parent)
         self.setWindowTitle(title or i18n.KO.SLOT_SELECT_TITLE)
-        self._hint_text = hint or i18n.KO.SLOT_SELECT_HINT
+        self._hint_text = hint or ""
         self._search_text = search_placeholder or i18n.KO.SLOT_SELECT_SEARCH_PLACEHOLDER
         self._is_slots = title is None          # 슬롯이 아니면 '모든 슬롯' 문구를 쓰지 않는다
         self._slot_names = sorted(set(slot_names))
@@ -360,10 +360,11 @@ class SlotSelectDialog(QDialog):
         self._head.setProperty("role", "title")
         root.addWidget(self._head)
 
-        hint = QLabel(self._hint_text, self)
-        hint.setProperty("role", "muted")
-        hint.setWordWrap(True)
-        root.addWidget(hint)
+        if self._hint_text:              # 기본은 안내 없음(설명문 금지) — 엑셀 시트 고르기만 준다
+            hint = QLabel(self._hint_text, self)
+            hint.setProperty("role", "muted")
+            hint.setWordWrap(True)
+            root.addWidget(hint)
 
         # ── 검색 — 이름을 아는 사용자에게 가장 빠른 길.  열자마자 여기 포커스가 간다.
         self._search = QLineEdit(self)

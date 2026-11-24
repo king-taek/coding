@@ -307,11 +307,13 @@ def test_first_direction_is_labelled_only_in_cross_runs(styled_qapp):
             w.deleteLater()
 
 
-def test_cross_first_review_empty_hint_points_to_second_pass():
-    """1차 검토의 다음은 결과가 아니라 2차 선별이다 — 빈 목록 안내가 그걸 말한다."""
+def test_review_empty_hint_names_no_destination():
+    """빈 목록 안내는 '다음 화면' 을 말하지 않는다 — 그래서 교차검증 1차(다음 = 2차
+    선별)에서도 틀린 곳을 가리킬 수 없다(설명문 금지로 한 문구만 남김)."""
     from aoi_verification.app.i18n import ko
-    assert "2차 선별" in ko.REVIEW_EMPTY_HINT_CROSS_A
-    assert "결과" not in ko.REVIEW_EMPTY_HINT_CROSS_A
+    assert not hasattr(ko, "REVIEW_EMPTY_HINT_CROSS_A")
+    for word in ("결과", "2차 선별", "["):
+        assert word not in ko.REVIEW_EMPTY_HINT
 
 
 def test_rail_shrinks_links_so_last_cross_step_never_hits_criteria(styled_qapp):

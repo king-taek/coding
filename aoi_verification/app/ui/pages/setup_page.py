@@ -453,7 +453,6 @@ class SetupPage(QWidget):
         담으면 부족하다 — **판정 수치까지** 담아야 오조작이 눈에 걸린다."""
         card = NeonCard(role="card", parent=self)
         card.setProperty("bare", True)       # 박스 없이 글자만(구형일 땐 색으로 말한다)
-        card.setToolTip(i18n.KO.MODE_BADGE_TOOLTIP)
         # ★ 배지는 '항상 보이는 요약' 이지 카드 콘텐츠가 아니다 — 일반 카드 패딩(20)
         #   에 캡션/값 2단으로 두면 실높이가 ~90px 로 26px 제목의 3배가 돼, 첫 줄의
         #   시각 중심이 배지 쪽으로 쏠리고 폴드 위 공간(장비 카드)을 먹는다.
@@ -1121,8 +1120,6 @@ class SetupPage(QWidget):
             current="all", role="segment",
             min_tile_w=self._SEGMENT_MIN_W, fixed_cols=2, parent=card,
         )
-        self.scope_group.set_option_tooltip("subset",
-                                            i18n.KO.SLOT_SELECT_BTN_TOOLTIP)
         self.scope_group.selection_changed.connect(self._on_scope_changed)
         # 진행 범위 줄 — 추출 모드에서는 LOT 줄마다 [슬롯 선택] 이 대신한다(숨김).
         self._scope_row = self._labeled_segment_row(card, i18n.KO.SCOPE_TITLE,
@@ -1133,7 +1130,6 @@ class SetupPage(QWidget):
         # 추출 모드에서만 보인다(`set_extract_mode`).  마지막 선택을 기억한다.
         self._map_switch = SwitchRow(
             i18n.KO.EXTRACT_WAFER_MAP_SWITCH,
-            description=i18n.KO.EXTRACT_WAFER_MAP_SWITCH_DESC,
             checked=bool(getattr(_prefs_now, "extract_wafer_map", True)),
             compact=True, parent=card)
         self._map_switch.toggled.connect(
@@ -1463,7 +1459,6 @@ class SetupPage(QWidget):
         col.addSpacing(6)
         # 기본 화면(매칭 설정)으로 돌아오는 버튼 — 아이콘은 프로그램 아이콘(사용자 요청).
         self.match_btn = NeonButton(i18n.KO.MATCH_NAV_BUTTON, role="ghost")
-        self.match_btn.setToolTip(i18n.KO.MATCH_NAV_TOOLTIP)
         self.match_btn.clicked.connect(lambda: self.show_page("match"))
         # 사진 한 장의 결함 정보를 바로 보는 도구.
         self.image_info_btn = NeonButton(i18n.KO.IMAGE_INFO_BUTTON, role="ghost")
@@ -1473,13 +1468,11 @@ class SetupPage(QWidget):
         self.wafer_map_btn.clicked.connect(self._open_wafer_map)
         # Defect 추출 — 같은 화면을 한쪽 폴더만 받는 모드로 바꾼다([매칭] 으로 되돌아간다).
         self.extract_btn = NeonButton(i18n.KO.EXTRACT_BUTTON, role="ghost")
-        self.extract_btn.setToolTip(i18n.KO.EXTRACT_BUTTON_TOOLTIP)
         self.extract_btn.clicked.connect(lambda: self.show_page("extract"))
         # 사진 한 장의 GL(밝기) 분포를 히스토그램으로 보는 도구.
         # 준비 전(`config.GL_HISTOGRAM_READY`)에는 아이콘은 그대로 두고 'Coming soon' 으로 막는다.
         if config.GL_HISTOGRAM_READY:
             self.gl_btn = NeonButton(i18n.KO.GL_BUTTON, role="ghost")
-            self.gl_btn.setToolTip(i18n.KO.GL_BUTTON_TOOLTIP)
             self.gl_btn.clicked.connect(self._open_gl_viewer)
         else:
             self.gl_btn = NeonButton(i18n.KO.GL_COMING_SOON, role="ghost")

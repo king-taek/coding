@@ -325,8 +325,6 @@ class ImageInfoDialog(QDialog):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(theme.PROFILE.section_gap // 2)
 
-        root.addLayout(self._build_head())
-
         body = QHBoxLayout()
         body.setSpacing(theme.PROFILE.card_pad)
         body.addWidget(self._build_preview())
@@ -346,20 +344,6 @@ class ImageInfoDialog(QDialog):
         # 열자마자 주요 동작에 포커스 — 시트 호스트는 다이얼로그 자신에 포커스를
         # 주므로, 그대로 두면 첫 Tab 이 허비된다.
         QTimer.singleShot(0, self.pick_btn.setFocus)
-
-    def _build_head(self) -> QVBoxLayout:
-        """부제 한 줄 — 시트가 무엇인지 말한다.
-
-        ★ 표제는 여기서 그리지 않는다.  `windowTitle` 이 있으면 `sheet_host` 가
-          제목 막대를 씌우므로(chrome), 안에 또 그리면 같은 제목이 두 번 뜬다.
-        """
-        head = QVBoxLayout()
-        head.setSpacing(2)
-        sub = QLabel(i18n.KO.IMAGE_INFO_SUBTITLE, self)
-        sub.setProperty("role", "subtitle")
-        sub.setWordWrap(True)
-        head.addWidget(sub)
-        return head
 
     def _build_preview(self) -> QWidget:
         host = QWidget(self)
@@ -440,7 +424,6 @@ class ImageInfoDialog(QDialog):
         # (`_ScanLoader` 가 판정한다).
         self.gl_btn = NeonButton(i18n.KO.IMAGE_INFO_GL, role="ghost")
         self.gl_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
-        self.gl_btn.setToolTip(i18n.KO.GL_BUTTON_TOOLTIP)
         self.gl_btn.setEnabled(False)
         self.gl_btn.clicked.connect(self._on_open_gl)
         bar.addWidget(self.gl_btn)

@@ -253,11 +253,6 @@ class WaferMapDialog(QDialog):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(theme.PROFILE.section_gap // 2)
 
-        self.sub = QLabel(i18n.KO.WAFER_MAP_SUBTITLE, self)
-        self.sub.setProperty("role", "subtitle")
-        self.sub.setWordWrap(True)
-        root.addWidget(self.sub)
-
         # ★ 상단줄을 **위젯으로 싼다** — 전체화면에서 줄 하나를 통째로 감추려면
         #   레이아웃이 아니라 위젯이어야 한다(QHBoxLayout 에는 setVisible 이 없다).
         self._top_host = QWidget(self)
@@ -364,7 +359,6 @@ class WaferMapDialog(QDialog):
         self.dot_slider.setRange(DOT_R_MIN, DOT_R_MAX)
         self.dot_slider.setValue(int(DOT_R))
         self.dot_slider.setFixedWidth(120)
-        self.dot_slider.setToolTip(i18n.KO.WAFER_MAP_DOT_SIZE_TIP)
         self.dot_slider.valueChanged.connect(self._on_dot_size)
         top.addWidget(self.dot_slider)
         self.notch_btn = NeonButton("", role="ghost")
@@ -426,7 +420,6 @@ class WaferMapDialog(QDialog):
         if on == self._fullscreen:
             return
         self._fullscreen = on
-        self.sub.setVisible(not on)
         self._top_host.setVisible(not on)
         # 경고 배너는 전체화면에서도 남긴다 — 맵만 크게 볼 때가 칸을 세는 때다.
         self.disclaimer.setVisible(not on and self.left.isVisibleTo(self))

@@ -208,11 +208,6 @@ class SlotMappingDialog(QDialog):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(10)
 
-        hint = QLabel(i18n.KO.SLOT_MAP_HINT, self)
-        hint.setProperty("role", "muted")
-        hint.setWordWrap(True)
-        root.addWidget(hint)
-
         lists_row = QHBoxLayout()
         lists_row.setSpacing(10)
         # 기준 측

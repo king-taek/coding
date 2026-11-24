@@ -1939,7 +1939,6 @@ class ThresholdPreviewDialog(QDialog):
         self.pick_open_btn.setVisible(self._mode == "auto")
         srow.addWidget(self.pick_open_btn)
         self.saved_btn = NeonButton(_KO.OVERKILL_SAVED_LOAD, role="textAction")   # 자동 추천 모드에서만 — 저장해 둔 선택
-        self.saved_btn.setToolTip(_KO.OVERKILL_SAVED_LOAD_TIP)
         self.saved_btn.clicked.connect(self.load_saved_picks)
         self.saved_btn.setVisible(self._mode == "auto")
         self.saved_btn.setEnabled(False)

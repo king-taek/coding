@@ -927,7 +927,6 @@ def test_fullscreen_hides_the_chrome_and_grows_the_map(qt, tmp_path):
         assert dlg.is_fullscreen()
         assert win.isFullScreen(), "앱 창이 전체화면으로 바뀌지 않았다"
         # 주변 표시가 전부 빠지고 맵만 남는다.
-        assert not dlg.sub.isVisibleTo(dlg)
         assert not dlg._top_host.isVisibleTo(dlg)
         assert not dlg.left.title.isVisibleTo(dlg)
         assert not dlg.left.legend.isVisibleTo(dlg)
@@ -943,7 +942,7 @@ def test_fullscreen_hides_the_chrome_and_grows_the_map(qt, tmp_path):
         qt.processEvents()
         assert not dlg.is_fullscreen()
         assert not win.isFullScreen(), "창이 되돌아오지 않았다"
-        assert dlg.sub.isVisibleTo(dlg) and dlg._top_host.isVisibleTo(dlg)
+        assert dlg._top_host.isVisibleTo(dlg)
         assert dlg.left.title.isVisibleTo(dlg)
         assert dlg.exit_btn.isHidden()
         # 창 크기가 돌아오는 폭은 플랫폼마다 달라 절대값은 안 본다 — 주변 표시가

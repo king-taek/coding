@@ -13,6 +13,7 @@ import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
 
+from aoi_verification.app import i18n                             # noqa: E402
 from aoi_verification.app.models.slot import ImageItem            # noqa: E402
 from aoi_verification.app.ui.pages.select_page import SelectPage   # noqa: E402
 
@@ -128,17 +129,14 @@ def test_single_decision_does_not_rebuild_the_whole_slot(styled_qapp, tmp_path):
     page.deleteLater()
 
 
-def test_empty_target_panel_explains_itself(styled_qapp, tmp_path):
-    """우측 '검증 대상' 이 처음엔 완전한 공백이라 무엇을 담는 칸인지 알 수 없었다."""
+def test_empty_target_panel_has_no_explanation(styled_qapp, tmp_path):
+    """빈 '검증 대상' 칸의 용도 설명은 지웠다 — 제목·개수가 이미 말한다(설명문 금지)."""
     from PyQt6.QtWidgets import QLabel
     page = _page(styled_qapp, tmp_path)
     hints = [w for w in page.right_panel.findChildren(QLabel)
              if w.property("role") == "emptyHint" and w.parent() is not None]
-    assert len(hints) == 1, f"빈 상태 안내가 정확히 하나 있어야 한다 (found {len(hints)})"
-    page._decide("verify")            # 한 장 보내면 안내는 사라진다
-    hints = [w for w in page.right_panel.findChildren(QLabel)
-             if w.property("role") == "emptyHint" and w.parent() is not None]
     assert hints == []
+    assert not hasattr(i18n.KO, "PANEL_RIGHT_EMPTY")
     page.deleteLater()
 
 
