@@ -10,6 +10,8 @@
   (사용자 요청 2026-11-24).  추가는 옛 목록 + 새 목록을 **한꺼번에 놓은 것과 똑같이**
   다시 계산한다(옛 사진이 앞 — 원·격자 기준 폴더가 그대로).  그 계산으로 먼저 넣은 사진의
   col / row · 위치가 바뀌면(예: 함께 넣은 폴더 때문에 좌표 프레임이 바뀜) 알린다.
+  흑백 Scan 사진(``X.Y.t.N.jpeg``)을 넣으면 **그 안에 든 Defect 들**을 찍는다 — 사진 정보
+  화면과 같은 계산(:func:`scan_image.defects_in`)이고, 점은 그 Defect 의 Color 사진 좌표다.
 * **결과 단계**(``WaferMapDialog(parent, result=...)``): 슬롯을 고르면 기준/검증 맵을
   나란히, '전체' 를 고르면 LOT 의 모든 슬롯을 한 맵에 합산한다.  점은 매치됨/미매치.
 
@@ -211,6 +213,26 @@ class _MapPanel(QWidget):
 def _chip(color: str, label: str, n: int) -> str:
     return (f"<span style='color:{color}'>●</span> {label} "
             f"{i18n.KO.WAFER_MAP_COUNT_FMT.format(n=n)}")
+
+
+def expand_scans(paths: list[Path]) -> list[Path]:
+    """흑백 Scan 사진을 **그 안에 든 Defect 의 Color 사진**들로 바꾼다(순서 유지 · 중복 한 번).
+
+    Scan 은 INI 에 좌표 항목이 없어 그대로는 맵에 못 놓는다.  :func:`scan_image.defects_in`
+    (사진 정보 화면과 같은 계산 — 값은 전부 그 폴더 파일)이 고른 Defect 의 경로를 넣으면,
+    점 좌표는 그 Defect 의 Color 사진과 **같은 생산자**(``resolve_batch``)가 정한다.
+    Defect 를 못 찾은 Scan 은 그대로 둔다 — '좌표 없음' 으로 세어 사라지지 않게.
+    디스크를 읽으므로 워커에서 부른다."""
+    from ...coords import scan_image
+    out: list[Path] = []
+    for p in paths:
+        if scan_image.is_scan_name(p.name):
+            found = scan_image.defects_in(p)
+            if found.ok and found.hits:
+                out.extend(h.path for h in found.hits)
+                continue
+        out.append(p)
+    return list(dict.fromkeys(out))
 
 
 def moved_points(before: dict, data: MapData, tol_um: float = 1.0) -> int:
@@ -834,7 +856,8 @@ class WaferMapDialog(QDialog):
 
         def job(report):
             report(i18n.KO.WAFER_MAP_LOADING_COORDS)
-            return build_map(resolve_batch(paths, _coord_progress(report))), None, None
+            placed = expand_scans(paths)
+            return build_map(resolve_batch(placed, _coord_progress(report))), None, None
 
         def done(data, _right, _extra):
             self._show_folder_map(data, i18n.KO.WAFER_MAP_NO_COORD)

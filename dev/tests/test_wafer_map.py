@@ -1550,3 +1550,58 @@ def test_add_or_new_sheet_ignores_enter(qt):
         assert sheet.picked() is None and not sheet.isVisible()
     finally:
         sheet.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# 흑백 Scan 사진을 넣으면 그 안의 Defect 를 찍는다 (사용자 요청 2026-11-25)
+# ---------------------------------------------------------------------------
+def _scan_folder(tmp_path):
+    """Camtek 폴더 + 흑백 Scan 한 장 — Scan 중심 = a 의 자리라 a 만 그 안에 든다."""
+    pytest.importorskip("PIL")
+    from PIL import Image
+    from aoi_verification.app.coords import scan_image as si
+    folder = _camtek_folder(tmp_path, [("a", CX, CY), ("b", 60000.0, 120000.0)])
+    params = folder / "Params_WaferInfo.ini"
+    params.write_text(params.read_text(encoding="utf-8")
+                      + "[General]\nRefPixelSizeX=1.0\nRefPixelSizeY=1.0\n", encoding="utf-8")
+    scan, empty = "-5.7.t.jpeg", "-9.9.t.jpeg"
+    for name in (scan, empty):
+        Image.new("L", (320, 100), 90).save(folder / name)
+    (folder / si.SCAN_LIST_NAME).write_text(
+        f"Version=1\n{scan},{CX},{CY}\n{empty},1000,1000\n", encoding="utf-8")
+    si.clear_caches()
+    return folder, folder / scan, folder / empty
+
+
+def test_scan_photo_becomes_the_defects_inside_it(tmp_path):
+    """Scan → 그 안의 Defect(a) 만.  Defect 가 없는 Scan 은 그대로 남아 '좌표 없음' 으로 센다."""
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import expand_scans
+    folder, scan, empty = _scan_folder(tmp_path)
+    a, b = folder / "a.jpeg", folder / "b.jpeg"
+    assert expand_scans([scan]) == [a]
+    assert expand_scans([b, scan, a]) == [b, a]                 # 순서 유지 · 중복 한 번
+    assert expand_scans([empty]) == [empty]
+    data = wm.build_map(resolve_batch(expand_scans([scan, empty])))
+    assert [p.path for p in data.points] == [a] and data.unplaced == (empty,)
+
+
+def test_dialog_scan_photo_lands_where_its_color_photo_does(qt, tmp_path):
+    """Scan 을 놓은 맵 = 그 안의 Color 사진을 놓은 맵(점 · 번호 · 격자 같음).  추가도 된다."""
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
+    folder, scan, _empty = _scan_folder(tmp_path)
+    a, b = folder / "a.jpeg", folder / "b.jpeg"
+    dlg = WaferMapDialog()
+    dlg._ask_add_or_new = lambda n: "add"
+    try:
+        dlg._on_paths([str(scan)])
+        _wait_build(qt, dlg)
+        want = wm.build_map(resolve_batch([a]))
+        got = dlg.left.view.data()
+        assert got.points == want.points and got.frame == want.frame
+        assert got.points[0].col is not None
+        dlg._on_paths([str(b)])
+        _spin_ms(qt, 30)
+        _wait_build(qt, dlg)
+        assert dlg.left.view.data().points == wm.build_map(resolve_batch([a, b])).points
+    finally:
+        dlg.deleteLater()
