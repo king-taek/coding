@@ -183,19 +183,18 @@ RESULT_MACHINES_FMT = "기준 장비: {ref}    검증 장비: {val}"
 # 입력한 폴더 주소 — 숫자 타일 아래, 기준·검증 한 줄씩.
 RESULT_REF_ROOT_FMT = "기준  {path}"
 RESULT_VAL_ROOT_FMT = "검증  {path}"
-RESULT_SLOT_ONLY_REF_FMT = "슬롯 불일치  ·  기준 전용: {names}"
-RESULT_SLOT_ONLY_VAL_FMT = "슬롯 불일치  ·  검증 전용: {names}"
+RESULT_SLOT_ONLY_REF_FMT = "슬롯 불일치(기준): {names}"
+RESULT_SLOT_ONLY_VAL_FMT = "슬롯 불일치(검증): {names}"
 VALUE_NONE = "없음"
-# ★ '매치 성공' 이다(‘매칭 성공’ 아님) — 형제 타일이 '매치 없음'·'매치 실패' 라
-#   같은 한 건을 세는 자리에서 낱말이 갈리면 다른 것을 세는 것처럼 읽힌다.
-#   낱말 규약: **매칭 = 과정/기능**(설정·중단·엔진), **매치 = 결과 한 건**(검토·확정·성공).
-STAT_MATCHED = "매치 성공"
-STAT_OVER_TOLERANCE = "허용 초과"
+# ★ 결과 타일은 '매치' / '매치 없음' 둘만 쓴다(현택님 2026-11-24 — '일치'·'미매칭' 안 씀).
+#   검토가 끝난 뒤에는 '허용 초과' 도 사람이 남긴 매치라 '매치' 에 들어 있다 — 따로 세지 않는다.
+#   낱말 규약: **매칭 = 과정/기능**(설정·중단·엔진), **매치 = 결과 한 건**(검토·확정).
+STAT_MATCHED = "매치"
 STAT_NO_MATCH = "매치 없음"
 STAT_SLOT_MISMATCH = "슬롯 불일치"
 # 교차검증(양방향) — '매치 없음' 을 어느 장비에만 있었는지로 나눈다.
-STAT_ONLY_REF = "기준에만 있음"
-STAT_ONLY_VAL = "검증에만 있음"
+STAT_ONLY_REF = "매치 없음(기준)"
+STAT_ONLY_VAL = "매치 없음(검증)"
 MATCH_REVIEW_TITLE = "매치 검토"
 
 # ★ 패널 제목에 괄호 부연을 넣지 않는다.  이 제목은 `role=paneTitle` QLabel 이고
@@ -631,14 +630,14 @@ BTN_RESTORE_MATCH = "되돌리기 ↩"
 BTN_FINISH_REVIEW = "검토 완료 ▶"
 RUNNERUP_TOOLTIP = "클릭하면 이 사진으로 매치를 교체합니다."
 # A2 밀집 리스트 — 상단 집계 바 / 판정 칩 / 컴팩트 토글 (#A2)
-TALLY_OK_FMT = "일치 {n}"
+TALLY_OK_FMT = "매치 {n}"
 TALLY_OVER_FMT = "허용 초과 {n}"
 TALLY_NO_MATCH_FMT = "매치 없음 {n}"
 TALLY_COORD_FAILED_FMT = "매치 실패 {n}"
 # 네 낱말이 서로 어떻게 다른지 화면에서 설명한다 (U-13) — 이름만 봐서는
 # '매치 없음' 과 '매치 실패' 가 같은 말로 읽힌다.
 TALLY_TOOLTIP = (
-    "일치 — 짝을 찾았고 허용 오차 안에 든 매치입니다.\n"
+    "매치 — 짝을 찾았고 허용 오차 안에 들었습니다.\n"
     "허용 초과 — 짝은 찾았지만 좌표 차이가 허용 오차를 넘었습니다.\n"
     # ★ 여기서 다섯째 낱말을 만들지 않는다.  예전엔 "직접 '매치 아님' 으로 되돌린" 이라
     #   적었는데 화면에 '매치 아님' 이라는 라벨은 없다(버튼은 BTN_MARK_NO_MATCH='매치
@@ -961,10 +960,10 @@ EXPORT_OPTIONS_CAPTION = "엑셀 저장 옵션"
 SAVE_TARGET_FMT = "저장 파일명: {name}"
 SAVE_TARGET_AGAIN_FMT = "다시 저장: 같은 파일에 덮어씀 · {path}"
 
-# 결과 화면 — 미매칭 사진만 원본 화질로 임베드 옵션 (기본 해제).
-EXPORT_UNMATCHED_ORIGINAL_LABEL = "미매칭 사진만 원본 화질로 넣기"
+# 결과 화면 — 매치 없음 사진만 원본 화질로 임베드 옵션 (기본 해제).
+EXPORT_UNMATCHED_ORIGINAL_LABEL = "매치 없음 사진만 원본 화질로 넣기"
 EXPORT_UNMATCHED_ORIGINAL_TOOLTIP = (
-    "체크하면 미매칭 사진만 원본 화질 그대로 임베드합니다.\n"
+    "체크하면 매치 없음 사진만 원본 화질 그대로 임베드합니다.\n"
     "매칭된 사진은 중간 화질 캐시를 그대로 써서 파일이 크게 늘지 않습니다.\n"
     "‘사진을 원본 화질로 넣기’ 를 켜면 이 옵션과 무관하게 모든 사진이 원본 화질입니다."
 )

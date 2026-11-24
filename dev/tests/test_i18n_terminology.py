@@ -53,7 +53,7 @@ def test_over_tolerance_has_one_word() -> None:
     offenders = [k for k, v in _screen_strings().items() if "허용범위" in v]
     assert offenders == [], f"'허용범위 초과' 가 남아 있다: {offenders}"
     assert "허용 초과" in i18n.KO.SCORE_DIST_OVER_FMT
-    assert i18n.KO.STAT_OVER_TOLERANCE == i18n.KO.CHIP_OVER == "허용 초과"
+    assert i18n.KO.CHIP_OVER == i18n.KO.TALLY_OVER_FMT.format(n="").strip() == "허용 초과"
 
 
 def test_one_action_has_one_button_name() -> None:

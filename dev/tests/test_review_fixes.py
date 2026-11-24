@@ -266,6 +266,62 @@ def test_stat_tiles_are_not_clipped(styled_qapp, tmp_path):
         page.deleteLater()
 
 
+def _tile_captions(page) -> list[tuple[str, str]]:
+    from PyQt6.QtWidgets import QFrame, QLabel
+    out = []
+    for f in page.findChildren(QFrame):
+        if f.property("role") != "statTile":
+            continue
+        labs = {l.property("role"): l.text() for l in f.findChildren(QLabel)}
+        out.append((labs["statCaption"], labs["statValue"]))
+    return sorted(out)
+
+
+@pytest.mark.parametrize("coord_mode", [True, False])
+def test_result_tiles_are_match_and_no_match_only(styled_qapp, tmp_path, coord_mode):
+    """결과 타일은 매치 · 매치 없음 · 슬롯 불일치 — '허용 초과' 타일은 없다(현택님 2026-11-24).
+
+    허용 오차를 넘었지만 검토에서 남긴 매치(score<0)는 **매치에 그대로 들어간다** —
+    타일을 빼면서 그 수가 어디에서도 사라지지 않게(합계 = 매치 + 매치 없음)."""
+    from aoi_verification.app import i18n
+    from aoi_verification.app.models.result import FinalResult
+    from aoi_verification.app.ui.pages.result_page import ResultPage
+
+    ms = _matches(3, tmp_path)
+    ms[2].score = -1.5                       # 허용 초과로 남긴 매치
+    res = FinalResult(mode="single", ref_machine="A", val_machine="B",
+                      matches=ms, slot_only_ref=["X1"],
+                      unmatched_refs=[MissEntry(slot="S1", side="ref",
+                                                path=tmp_path / "m.jpg")])
+    page = ResultPage()
+    page.show_result(res, coord_mode=coord_mode)
+    assert _tile_captions(page) == sorted([
+        (i18n.KO.STAT_MATCHED, "3"), (i18n.KO.STAT_NO_MATCH, "1"),
+        (i18n.KO.STAT_SLOT_MISMATCH, "1")])
+    assert i18n.KO.STAT_MATCHED == "매치"
+    assert not hasattr(i18n.KO, "STAT_OVER_TOLERANCE")
+    page.deleteLater()
+
+
+def test_cross_result_tiles_split_no_match_by_side(styled_qapp, tmp_path):
+    from aoi_verification.app import i18n
+    from aoi_verification.app.models.result import FinalResult
+    from aoi_verification.app.ui.pages.result_page import ResultPage
+
+    res = FinalResult(mode="cross", ref_machine="A", val_machine="B",
+                      matches=_matches(2, tmp_path),
+                      unmatched_refs=[
+                          MissEntry(slot="S1", side="ref", path=tmp_path / "a.jpg"),
+                          MissEntry(slot="S1", side="val", path=tmp_path / "b.jpg"),
+                          MissEntry(slot="S1", side="val", path=tmp_path / "c.jpg")])
+    page = ResultPage()
+    page.show_result(res, coord_mode=True)
+    assert _tile_captions(page) == sorted([
+        ("매치", "2"), ("매치 없음(기준)", "1"), ("매치 없음(검증)", "2"),
+        (i18n.KO.STAT_SLOT_MISMATCH, "0")])
+    page.deleteLater()
+
+
 # ---------------------------------------------------------------------------
 # 8. 실패 검토로 확정한 매치가 왕복에서 사라지던 문제 (검사관 A, U-10)
 # ---------------------------------------------------------------------------

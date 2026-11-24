@@ -433,13 +433,11 @@ class ResultPage(QWidget):
 
     # ------------------------------------------------------------------
     def _build_stat_tiles(self, result: FinalResult) -> QHBoxLayout:
-        """핵심 수치를 큰 모노 숫자 타일로.
+        """핵심 수치를 큰 모노 숫자 타일로 — 매치 · 매치 없음 · 슬롯 불일치.
 
-        '허용 초과' 는 결과 객체에 따로 없다 — 검토 화면과 **같은 분류 함수**를 써서
-        센다(두 화면이 다른 기준으로 세면 사용자가 숫자 불일치를 먼저 발견한다)."""
-        from .match_review_page import tally
-
-        _ok, n_over, _none = tally(result.matches, set(), self._coord_mode)
+        ★ '허용 초과' 타일은 없다(현택님 2026-11-24 — 검토 뒤에는 매치 / 매치 없음만).
+          그 수는 `result.matches` 중 좌표 차이가 허용 오차를 넘은 **남긴 매치**의
+          부분집합이라 이미 '매치' 에 들어 있다 — 따로 더하거나 빼지 않는다."""
         n_match = len(result.matches)
         n_miss = len(result.unmatched_refs)
         n_slot = len(result.slot_only_ref) + len(result.slot_only_val)
@@ -448,7 +446,6 @@ class ResultPage(QWidget):
         row.setSpacing(10)
         specs = [
             (n_match, i18n.KO.STAT_MATCHED, "ok"),
-            (n_over, i18n.KO.STAT_OVER_TOLERANCE, "over" if n_over else "none"),
             (n_miss, i18n.KO.STAT_NO_MATCH, "over" if n_miss else "none"),
             (n_slot, i18n.KO.STAT_SLOT_MISMATCH, "none"),
         ]
@@ -456,12 +453,10 @@ class ResultPage(QWidget):
             # 교차검증 — '매치 없음' 을 어느 장비에만 있었는지로 나눠 보인다.
             n_val = sum(1 for u in result.unmatched_refs if u.side == "val")
             n_ref = n_miss - n_val
-            specs[2:3] = [
+            specs[1:2] = [
                 (n_ref, i18n.KO.STAT_ONLY_REF, "over" if n_ref else "none"),
                 (n_val, i18n.KO.STAT_ONLY_VAL, "over" if n_val else "none"),
             ]
-        if not self._coord_mode:
-            del specs[1]              # 유사도 모드엔 '허용 오차' 개념이 없다
         for value, caption, tone in specs:
             row.addWidget(self._stat_tile(value, caption, tone))
         row.addStretch(1)
