@@ -989,3 +989,16 @@ def test_long_notes_do_not_widen_the_viewer(styled_qapp):
     # 1100px 창 − 접힌 메뉴(76px) − 여백 안에 들어가야 한다.
     assert d.minimumSizeHint().width() <= 1000, d.minimumSizeHint().width()
     d.close()
+
+
+def test_default_save_name_follows_tool_rule(dlg, tmp_path, monkeypatch):
+    """기본 저장 이름은 다른 도구와 같은 규칙 ``GL_<사진이름>_<YYYYMMDD_HHMM>`` 이고,
+    폴더도 같은 결과 폴더다(사진의 NAS 폴더가 아니라)."""
+    import re
+    from pathlib import Path
+    from aoi_verification.app.utils import paths
+    monkeypatch.setattr(paths, "results_dir", lambda: tmp_path)
+    for suffix in (".xlsx", ".png"):
+        p = Path(dlg._default_name(suffix))
+        assert p.parent == tmp_path
+        assert re.fullmatch(r"GL_x_\d{8}_\d{4}" + re.escape(suffix), p.name), p.name
