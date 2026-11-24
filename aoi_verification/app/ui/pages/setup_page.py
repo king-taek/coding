@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-import time
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -16,11 +16,10 @@ from PyQt6.QtWidgets import (QApplication, QBoxLayout, QDoubleSpinBox, QFrame,
                               QMessageBox, QScrollArea, QSizePolicy,
                               QStackedWidget, QVBoxLayout, QWidget)
 
-from ..deferred import call_later
 from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import (clean_path_text, guess_kinds, install_paste, local_paths,
                           split_paths)
-from ..folder_picker import FolderPicker
+from ..folder_picker import FolderPicker, last_dir
 from ..teardown import tolerate_teardown
 from ... import i18n
 from .. import motion
@@ -231,7 +230,9 @@ class SetupPage(QWidget):
         self._probing_for: Optional[tuple[str, str]] = None
         # [폴더 선택…] 의 OS 브라우저 — 비동기(`ui/folder_picker.py`).  어느 입력란이
         # 눌렀는지는 `_browse_target` 에 기억해 두고 `picked` 에서 채운다.
-        self._folder_picker = FolderPicker(self)
+        # 정지 로그는 이 페이지가 쓴다 — 페이지가 돌리는 워커(폴더 확인 · die 스캔)를 덧붙인다.
+        self._folder_picker = FolderPicker(self, on_stall=self._log_stall,
+                                           on_stack=self._log_stall_stack)
         self._folder_picker.picked.connect(self._on_folder_picked)
         self._folder_picker.closed.connect(self._on_folder_dialog_closed)
         self._browse_target: Optional[QLineEdit] = None
@@ -2258,18 +2259,25 @@ class SetupPage(QWidget):
         원인이다(두 경로는 ``setText`` 이후가 같다).  `ui/folder_picker.py` 가
         ``open()`` 으로 네이티브 창을 Qt 의 보조 스레드에 띄우고 결과를 시그널로 준다.
 
-        ★ 정지 **계측은 그대로** 남긴다(로그만).  이 변경이 맞다면 `app.log` 의
-        '폴더 창을 닫은 직후 UI 가 …초 멈췄다' 가 사라져야 한다 — 남으면 다음 후보를
-        그 로그가 가리킨다.  브라우저에 머문 시간은 취소해도 잰다(이전과 같다).
+        ★ 열기 · 닫힘 · 정지 · 닫힌 뒤 입력 상태 로그는 `FolderPicker` 가 남긴다
+        (`파일 창[setup_ref]` …).  정지 줄은 이 페이지의 `_log_stall` 이 쓴다.
+
+        시작 위치: 입력란에 경로가 있으면 그 **상위**(옆 LOT 이 보인다), 없으면 그 칸
+        용도로 마지막에 고른 곳, 그것도 없으면 마지막 [검증 시작] 의 폴더 상위.
         """
-        from .. import stall_watch
         self._browse_target = target
-        # ★ 창이 열려 있는 **동안**도 잰다.  비동기 창이라 UI 루프가 도니 잴 수 있고,
-        #   닫힌 뒤의 정지가 0건인데 신고가 남은 지금은 이 구간이 다음 후보다.
+        is_val = target is self.val_path_edit or any(
+            r.get("edit") is target for r in self._val_rows)
+        purpose = "setup_val" if is_val else "setup_ref"
+        text = target.text().strip()
+        start = os.path.dirname(os.path.normpath(text)) if text else ""
+        if not start and not last_dir(purpose):
+            p = _prefs.load()
+            prev = p.last_val_root if is_val else p.last_ref_root
+            start = os.path.dirname(os.path.normpath(prev)) if prev else ""
         self._folder_dialog_open = True
-        stall_watch.watch(self, self._log_stall, seconds=self._DIALOG_WATCH_S,
-                          on_stack=self._log_stall_stack)
-        self._folder_picker.open(i18n.KO.SETUP_FOLDER_LABEL)
+        self._folder_picker.purpose = purpose
+        self._folder_picker.open(i18n.KO.SETUP_FOLDER_LABEL, start)
 
     # ── 이전 결과 엑셀을 기준으로 ─────────────────────────────────────────────
     def _reset_excel_ref_btn(self) -> None:
@@ -2305,45 +2313,10 @@ class SetupPage(QWidget):
                   time.perf_counter() - t0, path)
         self._picked_at = time.perf_counter()
 
-    # 폴더 창이 열려 있는 동안의 정지 감시 상한 — 사용자가 폴더를 찾는 시간은 길 수
-    # 있다(실측 최대 99초).  닫히면 6초짜리로 다시 건다.
-    _DIALOG_WATCH_S = 600.0
-
     def _on_folder_dialog_closed(self, chosen: bool, dialog_s: float,
                                  since_nav: float) -> None:
-        from .. import stall_watch
+        # 닫힘 · 창 안 순서 · 정지 감시 · 입력 상태 로그는 `FolderPicker` 가 한다.
         self._folder_dialog_open = False
-        # 브라우저에 머문 시간에는 사용자가 폴더를 찾은 시간이 섞여 있다 — 정지시간이
-        # 아니다.  `since_nav`(마지막으로 폴더를 누른 뒤 닫히기까지)가 Windows 가 창을
-        # 닫는 데 쓴 꼬리이고, 아래 감시자가 재는 '닫힌 뒤의 정지' 와 짝지어 본다.
-        _LOG.info("폴더 선택: 파일 브라우저가 %.2f초 열려 있었다(%s) — "
-                  "마지막 폴더 클릭 뒤 닫히기까지 %s / 창 안 순서: %s",
-                  dialog_s, "고름" if chosen else "취소",
-                  "모름" if since_nav < 0 else f"{since_nav:.2f}초",
-                  self._folder_picker.timeline() or "없음")
-        stall_watch.watch(self, self._log_stall, on_stack=self._log_stall_stack)
-        self._probe_input_ready(time.perf_counter(), 0)
-
-    def _probe_input_ready(self, closed_at: float, n: int) -> None:
-        """창이 닫힌 뒤 주 창이 입력을 받을 수 있게 되기까지 — 0.25초마다 상태를 남긴다.
-
-        UI 정지 로그 없이 화면이 입력을 못 받는 구간이 있다면 여기서 보인다(모달 위젯이
-        남아 있거나, 주 창이 비활성이거나).  상태가 '정상' 이 되면 멈춘다."""
-        from PyQt6.QtWidgets import QApplication
-        win = self.window()
-        modal = QApplication.activeModalWidget()
-        active = QApplication.activeWindow()
-        ok = win.isEnabled() and modal is None and active is win
-        if ok or n >= 40:
-            _LOG.info("폴더 창 닫힌 뒤 %.2f초: 주 창 입력 %s", time.perf_counter() - closed_at,
-                      "가능" if ok else "여전히 불가(10초 감시 종료)")
-            return
-        if n == 0 or n % 4 == 0:
-            _LOG.info("폴더 창 닫힌 뒤 %.2f초: 주 창 입력 불가 — enabled=%s 모달=%s 활성창=%s",
-                      time.perf_counter() - closed_at, win.isEnabled(),
-                      type(modal).__name__ if modal else None,
-                      type(active).__name__ if active else None)
-        call_later(self, 250, lambda: self._probe_input_ready(closed_at, n + 1))
 
     def _log_stall_stack(self, stale_s: float, stack: str) -> None:
         """멈춰 있는 **도중에** 보조 스레드가 부른다 — 그 순간 UI 스레드의 호출 스택.

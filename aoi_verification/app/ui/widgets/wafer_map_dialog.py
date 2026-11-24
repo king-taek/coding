@@ -227,7 +227,7 @@ class WaferMapDialog(QDialog):
         self.setWindowTitle(i18n.KO.WAFER_MAP_TITLE)
         self._result = result
         self._folder: Optional[Path] = None
-        self._folder_picker = FolderPicker(self)
+        self._folder_picker = FolderPicker(self, purpose="wafer_map")
         self._folder_picker.picked.connect(self._on_folder_picked)
         self._images: list[Path] = []                 # 끌어놓은 사진만 볼 때
         self._lot_slots: dict[str, Path] = {}         # LOT 폴더일 때만

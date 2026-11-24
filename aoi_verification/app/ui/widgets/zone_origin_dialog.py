@@ -282,7 +282,7 @@ class ZoneOriginDialog(QDialog):
         self._scan_timer.setInterval(SCAN_WAIT_MS)
         self._scan_timer.timeout.connect(self._scan_current)
         self._pending: set = set()
-        self._picker = FolderPicker(self)
+        self._picker = FolderPicker(self, purpose="zone_origin")
         self._picker.picked.connect(lambda p: p and self.add_folders([Path(p)]))
         self._build()
         for b in self.findChildren(QPushButton):
