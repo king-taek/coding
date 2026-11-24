@@ -1289,7 +1289,7 @@ WAFER_MAP_NOTCH_TIP = "90° 회전 (보기 전용)"
 WAFER_MAP_ONE_IMAGE_FMT = "{name} · 사진 1장"
 WAFER_MAP_IMAGES_FMT = "사진 {n}장"
 WAFER_MAP_FULLSCREEN = "전체화면"
-WAFER_MAP_FULLSCREEN_EXIT = "전체화면 나가기 (ESC)"
+WAFER_MAP_FULLSCREEN_EXIT = "전체화면 나가기 (Esc)"
 WAFER_MAP_FULLSCREEN_TIP = "맵만 전체화면 · Esc 로 복귀"
 WAFER_MAP_NO_COORD = "이 사진을 맵에 찍지 못했습니다 — 좌표 또는 die 기하를 읽지 못했습니다."
 

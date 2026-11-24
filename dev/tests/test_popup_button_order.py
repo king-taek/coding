@@ -267,3 +267,17 @@ def test_dialog_puts_cancel_left_of_ok_bottom_right(styled_qapp, tmp_path, make,
     finally:
         dlg.hide()
         dlg.deleteLater()
+
+
+# ── 키 이름은 'Esc' 로 적는다(D2h A안) ─────────────────────────────────────
+def test_ui_strings_write_esc_not_ESC():
+    import re
+    bad = []
+    for name in dir(i18n.KO):
+        val = getattr(i18n.KO, name)
+        vals = val if isinstance(val, (list, tuple)) else [val]
+        for v in vals:
+            if isinstance(v, str) and re.search(r"\bESC\b", v):
+                bad.append(name)
+    assert not bad, f"'ESC' 대신 'Esc': {bad}"
+    assert "(Esc)" in i18n.KO.WAFER_MAP_FULLSCREEN_EXIT
