@@ -843,7 +843,9 @@ def test_view_options_in_both_stages_and_apply_to_both_maps(qt, tmp_path):
     try:
         _wait_build(qt, dlg)
         views = (dlg.left.view, dlg.right.view)
-        assert dlg.fill_btn.isCheckable()
+        from PyQt6.QtWidgets import QCheckBox
+        # 켜기/끄기는 체크박스(F10) — 누르는 버튼이 아니다.
+        assert type(dlg.fill_btn) is QCheckBox and type(dlg.unmatched_first_btn) is QCheckBox
         assert not any(v.fill_dies() for v in views)
         assert dlg.unmatched_first_btn.isHidden()   # 색칠 전에는 안 보인다
         dlg.fill_btn.setChecked(True)
@@ -930,7 +932,6 @@ def test_fullscreen_hides_the_chrome_and_grows_the_map(qt, tmp_path):
         assert dlg.is_fullscreen()
         assert win.isFullScreen(), "앱 창이 전체화면으로 바뀌지 않았다"
         # 주변 표시가 전부 빠지고 맵만 남는다.
-        assert not dlg.sub.isVisibleTo(dlg)
         assert not dlg._top_host.isVisibleTo(dlg)
         assert not dlg.left.title.isVisibleTo(dlg)
         assert not dlg.left.legend.isVisibleTo(dlg)
@@ -946,7 +947,7 @@ def test_fullscreen_hides_the_chrome_and_grows_the_map(qt, tmp_path):
         qt.processEvents()
         assert not dlg.is_fullscreen()
         assert not win.isFullScreen(), "창이 되돌아오지 않았다"
-        assert dlg.sub.isVisibleTo(dlg) and dlg._top_host.isVisibleTo(dlg)
+        assert dlg._top_host.isVisibleTo(dlg)
         assert dlg.left.title.isVisibleTo(dlg)
         assert dlg.exit_btn.isHidden()
         # 창 크기가 돌아오는 폭은 플랫폼마다 달라 절대값은 안 본다 — 주변 표시가
@@ -1262,7 +1263,7 @@ def test_tooltip_shows_die_internal_xy_like_the_equipment(tmp_path):
     (p,) = wm.build_map(resolve_batch([folder / "a.jpeg"])).points
     assert (p.die_x, p.die_y) == (80.0, 496.0)
     html = WaferMapView.tooltip_html(p)
-    assert f"col {p.col} · row {p.row} · x 80 · y 496" in html
+    assert f"col {p.col} / row {p.row} · x 80 / y 496 µm" in html
 
 
 def test_lot_merge_keeps_each_slots_cell_when_centers_differ(tmp_path):

@@ -1,8 +1,7 @@
 """Slot 의 모든 사진을 중간(800px) 크기로 보여주는 줌-뷰 윈도우.
 
 - 패널 종류(source) 별로 타이틀과 액션 버튼이 달라진다.
-- 단일 클릭 → 선택 토글(액션 버튼 활성화) / **우클릭 '크게 보기'** → 풀스크린 뷰어.
-  (더블클릭 확대는 제거했다 — 사진을 연달아 고를 때 오발했다.)
+- 단일 클릭 → 선택 토글(액션 버튼 활성화) / 더블클릭 · 우클릭 '크게 보기' → 풀스크린 뷰어.
 - 다중 선택 + 일괄 액션 지원.
 """
 
@@ -15,7 +14,7 @@ from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, QThread, Qt, QTimer, py
 from PyQt6.QtGui import (QColor, QImage, QPainter, QPen, QPixmap, QShortcut,
                          QKeySequence)
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
-                              QHBoxLayout, QLabel, QMenu, QScrollArea,
+                              QHBoxLayout, QLabel, QScrollArea,
                               QVBoxLayout, QWidget)
 
 from ... import i18n
@@ -24,6 +23,7 @@ from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
 from .option_group import columns_for_width
+from . import photo_menu
 from . import sheet_host as sheets
 
 _BOX_PX = 3     # Scan 범위 박스 선 두께(화면 픽셀)
@@ -45,11 +45,7 @@ class _MidTile(QFrame):
     """
 
     clicked = pyqtSignal(object)         # ImageItem
-    # ★ 확대는 **우클릭 '크게 보기'** 로만 연다.  더블클릭 확대를 없앤 이유: 사진을
-    #   빠르게 연달아 고르다 보면 두 번째 클릭이 더블클릭으로 붙어 원하지 않는 풀스크린
-    #   창이 떠 버린다(사용자 지적).  선택은 프레스마다 토글되는 잦은 동작이고 확대는
-    #   드문 동작이라, 같은 버튼의 연타에 둘을 겹쳐 두면 잦은 쪽이 드문 쪽을 오발한다.
-    view_requested = pyqtSignal(object)  # ImageItem (크게 보기)
+    view_requested = pyqtSignal(object)  # ImageItem (크게 보기 — 더블클릭 · 우클릭)
     toggled = pyqtSignal(object, bool)   # (ImageItem, on)
 
     TILE_W = 360
@@ -135,16 +131,18 @@ class _MidTile(QFrame):
             self.clicked.emit(self.item)
         super().mousePressEvent(e)
 
-    def _on_context_menu(self, pos) -> None:
-        """우클릭 '크게 보기' — 이 타일의 유일한 확대 경로.
+    def mouseDoubleClickEvent(self, e):  # noqa: N802
+        # 더블클릭 = 크게 보기(현택님 2026-11-24).  첫 누름이 이미 선택을 토글했다 — 그대로 둔다
+        # (super 를 부르면 기본 구현이 누름을 한 번 더 만들어 선택이 되돌아간다).
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.view_requested.emit(self.item)
+            e.accept()
+            return
+        super().mouseDoubleClickEvent(e)
 
-        ★ 더블클릭을 없애면서 이 메뉴를 **새로 붙였다.**  다른 타일들은 원래 더블클릭과
-        우클릭 두 경로가 있었지만 이 타일만 더블클릭 하나였다 — 그대로 지우면 확대
-        기능이 사라졌을 것이다.  제스처를 없애는 것과 기능을 없애는 것은 다르다."""
-        menu = QMenu(self)
-        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
-        chosen = menu.exec(self.mapToGlobal(pos))
-        if chosen is act:
+    def _on_context_menu(self, pos) -> None:
+        """우클릭 — 모든 사진과 같은 메뉴(``photo_menu``)."""
+        if photo_menu.ask(self, self.mapToGlobal(pos), self.item.path):
             self.view_requested.emit(self.item)
 
 

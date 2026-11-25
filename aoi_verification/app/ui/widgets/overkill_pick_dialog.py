@@ -17,12 +17,13 @@ from typing import Callable, Optional
 from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout,
-                             QLabel, QMenu, QScrollArea, QSizePolicy, QSplitter,
+                             QLabel, QScrollArea, QSizePolicy, QSplitter,
                              QVBoxLayout, QWidget)
 
 from ... import i18n
 from .. import motion, theme
 from ..deferred import call_later
+from . import photo_menu
 from .neon_button import NeonButton
 
 _OVER, _DEF = "over", "def"
@@ -48,9 +49,10 @@ def _fit(pm: QPixmap, w: int, h: int, dpr: float) -> QPixmap:
 
 
 class _Tile(QFrame):
-    """사진 한 칸 — 사진 · (현재면) 링 · (결정됐으면) 아래 막대.  클릭 = 이 사진으로 이동."""
+    """사진 한 칸 — 사진 · (현재면) 링 · (결정됐으면) 아래 막대.  클릭 = 이 사진으로 이동 · 더블클릭 = 크게."""
 
     clicked = pyqtSignal(object)
+    double_clicked = pyqtSignal(object)
     context_requested = pyqtSignal(object, QPoint)
 
     def __init__(self, d, px: int, tip: str, parent=None) -> None:
@@ -104,14 +106,23 @@ class _Tile(QFrame):
             self.clicked.emit(self.d)
         super().mousePressEvent(e)
 
+    def mouseDoubleClickEvent(self, e):  # noqa: N802
+        # 더블클릭 = 크게 보기(현택님 2026-11-24).  첫 누름이 이미 이 사진으로 옮겼다.
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.double_clicked.emit(self.d)
+            e.accept()
+            return
+        super().mouseDoubleClickEvent(e)
+
     def _on_menu(self, pos) -> None:
         self.context_requested.emit(self.d, self.mapToGlobal(pos))
 
 
 class _BigPhoto(QLabel):
-    """가운데 큰 사진 — 비율 유지로 자리를 채운다.  우클릭은 신호로만 알린다."""
+    """가운데 큰 사진 — 비율 유지로 자리를 채운다.  누르면 크게(``clicked``), 우클릭은 신호로만 알린다."""
 
     context_requested = pyqtSignal(QPoint)
+    clicked = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -132,10 +143,17 @@ class _BigPhoto(QLabel):
             self._pm = None
             self.clear()
             self.setText(placeholder)
+            self.setCursor(Qt.CursorShape.ArrowCursor)
             return
         self._pm = pm
         self.setText("")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._rescale()
+
+    def mousePressEvent(self, e):  # noqa: N802
+        if e.button() == Qt.MouseButton.LeftButton and self._pm is not None:
+            self.clicked.emit()
+        super().mousePressEvent(e)
 
     def _rescale(self) -> None:
         if self._pm is not None:
@@ -261,7 +279,7 @@ class OverkillPickDialog(QDialog):
     def __init__(self, *, zones: list, zone, items_of: Callable, key_of: Callable,
                  pixmap_of: Callable, request_pics: Callable, caption_of: Callable,
                  picked: dict, overkill: dict, preview: Callable,
-                 enlarge: Callable, parent=None) -> None:
+                 enlarge: Callable, path_of: Callable = lambda d: None, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(i18n.KO.OVERKILL_PICK_TITLE)
         self.setMinimumSize(900, 600)
@@ -269,6 +287,7 @@ class OverkillPickDialog(QDialog):
         self._items_of, self._key_of = items_of, key_of
         self._pixmap_of, self._request_pics = pixmap_of, request_pics
         self._caption_of, self._preview, self._enlarge = caption_of, preview, enlarge
+        self._path_of = path_of           # 사진 경로(우클릭 [Defect 정보 조회] · [GL 히스토그램]) — 모르면 None
         self._picked: dict = dict(picked)
         self._over: dict = dict(overkill)
         self._history: list = []          # (key, d, 이전 상태, zone_key)
@@ -336,6 +355,7 @@ class OverkillPickDialog(QDialog):
         cv.setSpacing(8)
         self.big = _BigPhoto(center)
         self.big.context_requested.connect(self._on_big_menu)
+        self.big.clicked.connect(self._enlarge_current)
         cv.addWidget(self.big, 1)
         self.caption = QLabel(center)
         self.caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -415,6 +435,7 @@ class OverkillPickDialog(QDialog):
 
     def _wire(self, t: _Tile) -> _Tile:
         t.clicked.connect(self._goto)
+        t.double_clicked.connect(self._enlarge)
         t.context_requested.connect(self._on_tile_menu)
         t.set_state(None)
         pm = self._pixmap_of(t.d, _THUMB)
@@ -735,13 +756,16 @@ class OverkillPickDialog(QDialog):
 
     # ------------------------------------------------------------ 우클릭 · 키
     def _view_menu(self, d, gpos: QPoint) -> None:
-        menu = QMenu(self)
-        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
-        if menu.exec(gpos) is act:
+        if photo_menu.ask(self, gpos, self._path_of(d)):
             self._enlarge(d)
 
     def _on_tile_menu(self, d, gpos: QPoint) -> None:
         self._view_menu(d, gpos)
+
+    def _enlarge_current(self) -> None:
+        d = self._cur_item()
+        if d is not None:
+            self._enlarge(d)
 
     def _on_big_menu(self, gpos: QPoint) -> None:
         d = self._cur_item()

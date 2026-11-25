@@ -32,7 +32,7 @@ from typing import Optional
 from PyQt6.QtCore import (QEvent, QEventLoop, QPoint, QPointF,
                           QPropertyAnimation, QRect, QSize, Qt,
                           QVariantAnimation, pyqtSignal)
-from PyQt6.QtGui import QColor, QCursor, QPainter
+from PyQt6.QtGui import QColor, QCursor, QPainter, QPen
 from PyQt6.QtWidgets import (QAbstractButton, QApplication, QDialog,
                              QGraphicsOpacityEffect, QGridLayout, QHBoxLayout,
                              QLabel, QMessageBox, QSizePolicy, QVBoxLayout,
@@ -42,6 +42,7 @@ from ..teardown import tolerate_teardown
 from ... import i18n
 from .. import motion, theme
 from .neon_button import NeonButton
+from . import popup_layout
 
 # 시트가 창 안에서 차지할 최대 비율 — 뷰어는 거의 꽉, 메시지는 내용만큼.
 _MARGIN_PX = 24
@@ -98,6 +99,34 @@ class _Scrim(QWidget):
         p.fillRect(self.rect(), QColor(r, g, b, int(a * self._fade)))
 
 
+class _CloseIcon(NeonButton):
+    """제목줄의 닫기 — '닫기' 글자 대신 ✕ 하나(현택님 2026-11-24, P7a).
+
+    ★ 글자 '✕'(U+2715)는 앱 글꼴(NanumSquare)에 **없다**(실측: 동봉 8개 파일 모두) —
+    PC 마다 다른 대체 글꼴로 그려져 모양이 달라진다.  그래서 선 두 개를 직접 그린다.
+    면·테두리·포커스 링은 QSS(``rowAction``)가 칠하고, 이름·툴팁은 '닫기' 다."""
+
+    SIZE = 30
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__("", role="rowAction", parent=parent)
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self.setAccessibleName(i18n.KO.MSG_BTN_CLOSE)
+        self.setToolTip(i18n.KO.MSG_BTN_CLOSE)
+
+    def paintEvent(self, event):  # noqa: N802
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(QPen(QColor(theme.INK if self.underMouse() else theme.INK2), 1.6,
+                      Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        c = QPointF(self.width() / 2, self.height() / 2)
+        r = 5.0
+        p.drawLine(c + QPointF(-r, -r), c + QPointF(r, r))
+        p.drawLine(c + QPointF(-r, r), c + QPointF(r, -r))
+        p.end()
+
+
 class _SheetFrame(QWidget):
     """시트 껍데기 — **제목줄(제목 + ✕)** 과 테두리.
 
@@ -123,16 +152,20 @@ class _SheetFrame(QWidget):
         lbl.setProperty("role", "sheetTitle")
         h.addWidget(lbl)
         h.addStretch(1)
-        btn = NeonButton(i18n.KO.MSG_BTN_CLOSE, role="rowAction", parent=bar)
-        btn.setToolTip(i18n.KO.MSG_BTN_CLOSE)
+        btn = _CloseIcon(bar)
         btn.clicked.connect(self.close_requested.emit)
         h.addWidget(btn)
         v.addWidget(bar)
         self._bar = bar
+        self._close_btn = btn
 
         self._body = QVBoxLayout()
         self._body.setContentsMargins(0, 0, 0, 0)
         v.addLayout(self._body, 1)
+
+    def set_close_visible(self, visible: bool) -> None:
+        """제목줄의 ✕ 만 감춘다 — 자기 [취소] 가 있는 작은 팝업(``POPUP_SMALL``)용."""
+        self._close_btn.setVisible(visible)
 
     def set_bar_visible(self, visible: bool) -> None:
         """제목줄을 감춘다/되돌린다 — '내용만 남기는' 보기(맵 전체화면)용.
@@ -173,6 +206,10 @@ class _SheetFrame(QWidget):
             max(base.height(),
                 ch.height() + bar_h + margins.top() + margins.bottom()),
         )
+
+
+#: 자기 [취소] 버튼을 가진 **작은** 대화상자가 켜 두는 클래스 속성 — 시트 제목줄 ✕ 를 뺀다.
+POPUP_SMALL_ATTR = "POPUP_SMALL"
 
 
 class SheetHost(QWidget):
@@ -223,6 +260,8 @@ class SheetHost(QWidget):
             top = self._stack[-1]["root"]
             owner = self._owner_widget(obj)
             if owner is not None and self._is_within(owner, top):
+                if etype == QEvent.Type.KeyPress and self._cycle_focus(top, event):
+                    return True
                 return super().eventFilter(obj, event)      # 맨 위 시트의 것
             if etype == QEvent.Type.Shortcut:
                 # ★ 창 **자신**의 단축키는 통과시킨다 — F11 전체화면이 그것이고, 시트가
@@ -233,6 +272,9 @@ class SheetHost(QWidget):
                     return super().eventFilter(obj, event)
                 return True          # 소유를 못 풀면 막는다 — 새는 쪽이 더 나쁘다
             if owner is not None:
+                if etype == QEvent.Type.KeyPress:
+                    # 포커스가 이미 뒤에 가 있으면(마우스로 눌렀다 등) Tab 이 시트로 데려온다.
+                    self._cycle_focus(top, event)
                 return True
         return super().eventFilter(obj, event)
 
@@ -263,6 +305,49 @@ class SheetHost(QWidget):
         else:
             app.removeEventFilter(self)
         self._app_filter_on = on
+
+    @classmethod
+    def _cycle_focus(cls, top: QWidget, event) -> bool:
+        """Tab/Shift+Tab 을 맨 위 시트 **안에서만** 돌린다 — 처리했으면 True.
+
+        ★ 키는 위에서 막지만 Tab 은 막기 **전에** 포커스를 옮긴다: Qt 는 창 전체의 포커스
+        사슬을 따라가므로 시트의 마지막 버튼에서 Tab 을 누르면 뒤의 왼쪽 레일로 넘어갔고,
+        그다음 키는 전부 버려져 키보드가 먹통이 됐다(실측: 크게 보기 → Tab 두 번).
+        시트 안에 받을 위젯이 없으면 손대지 않는다(Qt 기본 동작)."""
+        mods = event.modifiers() & ~(Qt.KeyboardModifier.ShiftModifier
+                                     | Qt.KeyboardModifier.KeypadModifier)
+        key = event.key()
+        if key not in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab) or mods:
+            return False
+        back = (key == Qt.Key.Key_Backtab
+                or bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier))
+        chain = cls._tab_chain(top)
+        if not chain:
+            return False
+        cur = QApplication.focusWidget()
+        if cur in chain:
+            i = chain.index(cur)
+            nxt = chain[(i - 1) % len(chain)] if back else chain[(i + 1) % len(chain)]
+        else:
+            nxt = chain[-1] if back else chain[0]
+        nxt.setFocus(Qt.FocusReason.BacktabFocusReason if back
+                     else Qt.FocusReason.TabFocusReason)
+        return True
+
+    @classmethod
+    def _tab_chain(cls, top: QWidget) -> list:
+        """``top`` 안에서 Tab 으로 갈 수 있는 위젯 — 창의 포커스 사슬 순서 그대로."""
+        out: list = []
+        node = top.nextInFocusChain()
+        guard = 0
+        while node is not None and node is not top and guard < 2000:
+            guard += 1
+            if (cls._is_within(node, top) and node.isVisible() and node.isEnabled()
+                    and node.focusPolicy() & Qt.FocusPolicy.TabFocus
+                    and node.focusProxy() is None):
+                out.append(node)
+            node = node.nextInFocusChain()
+        return out
 
     @staticmethod
     def _is_within(w: QWidget, top: QWidget) -> bool:
@@ -314,22 +399,35 @@ class SheetHost(QWidget):
             chrome = bool(widget.windowTitle())
         # 발원점은 **호스트를 띄우기 전에** 본다 — 띄운 뒤엔 커서 아래가 스크림이다.
         origin = self._origin_of(widget)
+        # 시트가 미리 고른 포커스 자식 — 아래 부모 바꾸기가 지우므로 **먼저** 잡아 둔다.
+        wanted = widget.focusWidget()
         prev_parent = widget.parentWidget()
         prev_flags = widget.windowFlags()
         frame: Optional[_SheetFrame] = None
         if chrome:
             frame = _SheetFrame(self, widget.windowTitle())
             frame.set_content(widget)
-            frame.close_requested.connect(widget.close)
+            # 작은 팝업은 제목줄 ✕ 를 뺀다 — 아래 [취소] 와 닫는 길이 둘이 되지 않게
+            # (현택님 2026-11-24, P3–P6 A안).  Esc 는 그대로 `reject` 다.
+            frame.set_close_visible(
+                full_bleed or not getattr(widget, POPUP_SMALL_ATTR, False))
+            # 다이얼로그의 ✕ 는 OS 창처럼 `reject` 로 간다 — `close()` 는 아래 필터가
+            # 가로채 다이얼로그의 `reject` 를 건너뛰었다(미확정 선택을 묻는 창이 묻지
+            # 않고 닫혔다).  Esc 와 같은 길이다.
+            frame.close_requested.connect(
+                widget.reject if isinstance(widget, QDialog) else widget.close)
             root: QWidget = frame
         else:
             widget.setParent(self)
             widget.setWindowFlags(Qt.WindowType.Widget)
             root = widget
         loop = QEventLoop()
+        # 닫힌 뒤 포커스를 **연 자리**로 돌려준다 — 안 하면 Qt 가 사슬 맨 앞(왼쪽 레일)에
+        # 포커스를 줘서 화살표가 레일을 돌았다.
         entry = {"widget": widget, "root": root, "frame": frame, "loop": loop,
                  "prev_parent": prev_parent, "prev_flags": prev_flags,
-                 "full_bleed": full_bleed}
+                 "full_bleed": full_bleed,
+                 "prev_focus": QApplication.focusWidget()}
         self._stack.append(entry)
 
         finished_conn = None
@@ -353,7 +451,7 @@ class SheetHost(QWidget):
         root.raise_()
         widget.show()
         self._place(root, full_bleed)
-        widget.setFocus(Qt.FocusReason.PopupFocusReason)
+        self._focus_into(widget, wanted)
         self._enter(root, origin)
         try:
             loop.exec()                      # ★ exec() 과 같은 동기 의미
@@ -554,10 +652,37 @@ class SheetHost(QWidget):
                 self._fade_out_ghost(ghost, then_hide_host=False)
             top = self._stack[-1]["root"]
             top.raise_()
-            self._stack[-1]["widget"].setFocus(Qt.FocusReason.PopupFocusReason)
+        self._restore_focus(entry)
         loop = entry["loop"]
         if loop.isRunning():
             loop.quit()
+
+    @staticmethod
+    def _focus_into(widget: QWidget, target: Optional[QWidget]) -> None:
+        """시트를 열 때 포커스 — 시트가 미리 고른 자식(이름 입력칸 등)이 있으면 그것.
+
+        ★ 예전엔 시트 자신에 포커스를 줬다.  그러면 생성자에서 ``setFocus`` 해 둔
+        입력칸이 포커스를 잃어, 이름이 파랗게 선택돼 보이는데 타이핑은 들어가지 않았다
+        (저장 이름 창 — 한 번 더 클릭해야 했다)."""
+        if (target is None or target is widget
+                or not SheetHost._is_within(target, widget)
+                or not target.isVisible() or not target.isEnabled()):
+            target = widget
+        target.setFocus(Qt.FocusReason.PopupFocusReason)
+
+    def _restore_focus(self, entry: dict) -> None:
+        """닫힌 시트를 열기 전 포커스로 돌아간다(없거나 사라졌으면 맨 위 시트)."""
+        prev = entry.get("prev_focus")
+        top = self._stack[-1]["root"] if self._stack else None
+        try:
+            ok = (prev is not None and prev.isVisible() and prev.isEnabled()
+                  and (top is None or self._is_within(prev, top)))
+        except RuntimeError:
+            ok = False                       # 연 위젯이 그사이 파괴됐다
+        if ok:
+            prev.setFocus(Qt.FocusReason.PopupFocusReason)
+        elif self._stack:
+            self._stack[-1]["widget"].setFocus(Qt.FocusReason.PopupFocusReason)
 
     def close_all(self) -> None:
         """열린 시트를 모두 닫는다(창이 닫힐 때 루프가 남지 않게)."""
@@ -634,7 +759,10 @@ _BUTTON_SPEC = {
     _SB.No: ("MSG_BTN_NO", "ghost"),
     _SB.Close: ("MSG_BTN_CLOSE", "ghost"),
 }
-_BUTTON_ORDER = (_SB.No, _SB.Cancel, _SB.Close, _SB.Ok, _SB.Yes)
+# ★ Windows 순서 — 확인·예가 먼저, 아니오·취소·닫기가 맨 오른쪽(현택님 2026-11-24, P1·P2 B안).
+#   대화상자(저장 이름 등)는 반대로 [취소][확인] 이다 — `popup_layout` 주석 참조.
+_BUTTON_ORDER = (_SB.Ok, _SB.Yes, _SB.No, _SB.Close, _SB.Cancel)
+_NEGATIVE = (_SB.No, _SB.Cancel, _SB.Close)
 
 
 class _MessageSheet(QDialog):
@@ -665,10 +793,6 @@ class _MessageSheet(QDialog):
         body.setMaximumWidth(_MSG_MAX_W)
         v.addWidget(body, 1)
 
-        bar = QHBoxLayout()
-        bar.setContentsMargins(0, 0, 0, 0)
-        bar.setSpacing(8)
-        bar.addStretch(1)
         self._buttons: dict = {}
         for sb in _BUTTON_ORDER:
             if not (buttons & sb):
@@ -677,24 +801,33 @@ class _MessageSheet(QDialog):
             text_ = (labels or {}).get(sb) or getattr(i18n.KO, key)
             btn = NeonButton(text_, role=role, parent=self)
             btn.clicked.connect(lambda _c=False, s=sb: self._answer_with(s))
-            bar.addWidget(btn)
             self._buttons[sb] = btn
-        v.addLayout(bar)
-
-        # ★ 기본값이 **부정 버튼**(아니오·취소·닫기)인 경고에서는 강조 버튼을 없앤다.
-        #   예전엔 [예] 가 언제나 채운 파란 버튼이라, "정말 같은 폴더를 비교할까요?"
-        #   처럼 기본이 '아니오' 인 경고에서도 시선은 [예] 로 가는데 Enter 는 [아니오]
-        #   를 눌렀다 — 시각 강조와 안전 기본값이 정반대를 가리켰다.
-        if default in (_SB.No, _SB.Cancel, _SB.Close):
+        made = list(self._buttons.items())
+        v.addLayout(popup_layout.sheet_row(
+            QHBoxLayout(),
+            primaries=[b for sb, b in made if sb not in _NEGATIVE],
+            # [취소][아니오][예] — 가장 물러나는 답이 맨 왼쪽.
+            cancels=[b for sb, b in reversed(made) if sb in _NEGATIVE]))
+        # ★ 고르는 시트(예/아니오 등 버튼 둘 이상)는 **Enter 가 아무것도 누르지 않는다**
+        #   (현택님 2026-11-24 "Enter 안 눌리도록").  무심코 친 Enter 가 질문을 읽기도
+        #   전에 답해 버린다.  강조색(기본값)은 그대로 두고 키만 뺀다 — 고르는 것은
+        #   클릭이나 Tab 으로 간 버튼의 Space 다.  버튼 하나뿐인 안내는 예전 그대로.
+        self._enter_off = len(self._buttons) > 1
+        if self._enter_off:
             for btn in self._buttons.values():
-                if btn.property("role") == "primary":
-                    btn.setRole("ghost")
+                btn.setAutoDefault(False)
 
-        if default in self._buttons:
+        # ★ 기본값이 **부정 버튼**(아니오·취소·닫기)인 경고에서는 **그 안전한 쪽**을
+        #   채운 파란 버튼으로 그린다(현택님 2026-11-24, P1 B안 그림).  예전엔 [예] 가
+        #   늘 파랬다가(시선과 안전 기본값이 반대), 그다음엔 둘 다 흐려 어느 쪽이
+        #   안전한지 알 수 없었다.
+        if default in _NEGATIVE and default in self._buttons:
+            for sb, btn in self._buttons.items():
+                btn.setRole("primary" if sb == default else "ghost")
+
+        if default in self._buttons and not self._enter_off:
             self._buttons[default].setDefault(True)
             self._buttons[default].setFocus()
-        elif self._buttons:
-            next(iter(self._buttons.values())).setFocus()
         self.setMaximumWidth(_MSG_MAX_W + 48)
 
     def _answer_with(self, sb) -> None:
@@ -706,6 +839,9 @@ class _MessageSheet(QDialog):
 
     def keyPressEvent(self, event):  # noqa: N802
         """Esc = 취소/아니오/닫기(있으면), 없으면 그대로 닫는다 — QMessageBox 와 같게."""
+        if self._enter_off and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            event.accept()
+            return
         if event.key() == Qt.Key.Key_Escape:
             for sb in (_SB.Cancel, _SB.No, _SB.Close, _SB.Ok):
                 if sb in self._buttons:
@@ -810,44 +946,55 @@ class _ChoiceSheet(QDialog):
         if self._tiles:
             v.addLayout(self._build_tiles(options))
         else:
-            v.addLayout(self._build_button_row(options, default))
+            v.addLayout(self._build_button_row(options))
+        # ★ Enter 는 아무것도 누르지 않는다 — 메시지 시트와 같은 규칙(현택님 2026-11-24
+        #   "Enter 안 눌리도록").  QDialog 는 버튼의 autoDefault 로 Enter 를 **맨 앞
+        #   버튼**(타일 모드에선 첫 타일 '기준')에 보냈다.  고르는 것은 클릭이나 Tab 으로
+        #   간 버튼의 Space 다.
+        for btn in self._buttons.values():
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
         self.setMaximumWidth(_MSG_MAX_W + 48)
 
-    def _build_button_row(self, options, default):
+    def _build_button_row(self, options):
         """오른쪽 정렬 버튼 줄 — 하나가 주 액션인 질문(설치할까요? 등).
+
+        순서는 다른 팝업과 같다 — 닫기·돌아가기(`popup_layout.CANCEL_KEYS`·``None``)가
+        먼저, 주 액션이 맨 오른쪽.  강조는 선택지의 role 로만
+        한다 — Enter 는 누르지 않는다(생성자 참조).
 
         ★ 버튼들이 시트 폭(`_MSG_MAX_W`)에 한 줄로 안 들어가면 **두 열로 접는다.**
         한 줄에 억지로 넣으면 시트가 최대 폭에 막혀 버튼이 글자보다 좁아지고 글자가
         잘렸다(사용자 신고: Defect 추출 저장 방식 버튼 4개)."""
-        buttons = []
+        primaries, others, cancels = [], [], []
         for key, label, role in options:
             btn = NeonButton(label, role=role, parent=self)
             btn.clicked.connect(lambda _c=False, k=key: self._pick(k))
-            buttons.append(btn)
             self._buttons[key] = btn
+            if key is None or key in popup_layout.CANCEL_KEYS:
+                cancels.append(btn)
+            elif role == "primary":
+                primaries.append(btn)
+            else:
+                others.append(btn)
+        buttons = [*cancels, *others, *primaries]
         spacing = 8
         need = (sum(b.sizeHint().width() for b in buttons)
                 + spacing * max(0, len(buttons) - 1))
         if need <= _MSG_MAX_W:
-            bar = QHBoxLayout()
-            bar.setContentsMargins(0, 0, 0, 0)
-            bar.setSpacing(spacing)
-            bar.addStretch(1)
-            for btn in buttons:
-                bar.addWidget(btn)
+            bar = popup_layout.sheet_row(QHBoxLayout(), primaries=primaries,
+                                         others=others, cancels=cancels)
         else:
             bar = QGridLayout()
             bar.setContentsMargins(0, 0, 0, 0)
             bar.setSpacing(spacing)
             for i, btn in enumerate(buttons):
+                btn.setFixedHeight(theme.PROFILE.control_h_lg)
                 btn.setSizePolicy(QSizePolicy.Policy.Expanding,
                                   QSizePolicy.Policy.Fixed)
                 bar.addWidget(btn, i // 2, i % 2)
             bar.setColumnStretch(0, 1)
             bar.setColumnStretch(1, 1)
-        if default in self._buttons:
-            self._buttons[default].setDefault(True)
-            self._buttons[default].setFocus()
         return bar
 
     def _build_tiles(self, options):
@@ -887,6 +1034,9 @@ class _ChoiceSheet(QDialog):
         return self._picked
 
     def keyPressEvent(self, event):  # noqa: N802
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            event.accept()                   # Enter 는 아무것도 누르지 않는다
+            return
         if event.key() == Qt.Key.Key_Escape:
             self.reject()                    # picked 는 None 으로 남는다
             return
@@ -897,7 +1047,8 @@ def choose(parent, title: str, text: str, options, *, default=None,
            heading: str = "", tiles: bool = False):
     """선택지 3~4개 질문 — 고른 ``key``(없으면 ``None``)를 돌려준다.
 
-    호스트가 없으면 네이티브 ``QMessageBox`` + ``addButton`` 으로 폴백한다."""
+    호스트가 없으면 네이티브 ``QMessageBox`` + ``addButton`` 으로 폴백한다.
+    ``default`` 는 그 폴백에서만 기본 버튼이 된다 — 시트는 Enter 를 받지 않는다."""
     host = host_for(parent)
     if host is None:
         box = QMessageBox(parent)

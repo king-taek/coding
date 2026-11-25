@@ -27,7 +27,9 @@ from ... import i18n
 from ...coords import calibration as cal
 from ...utils import image_io
 from .. import theme
+from . import photo_menu
 from .neon_button import NeonButton
+from . import popup_layout
 from .option_group import columns_for_width
 
 _SRC_TILE_PX = 120
@@ -79,9 +81,13 @@ class _PhotoTile(QFrame):
                  clickable: bool = True, parent=None) -> None:
         super().__init__(parent)
         self.key = key
+        self._path = path
         self._selected = False
         self._px = px
         self._name_text = path.name
+        # 더블클릭 = 크게 · 우클릭 = 모든 사진과 같은 메뉴(현택님 2026-11-24)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
         self.setObjectName("calTile")
         self.setProperty("role", "card-soft")
         if clickable:
@@ -139,6 +145,18 @@ class _PhotoTile(QFrame):
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.key)
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        # 첫 누름이 이미 골랐다 — 고른 뒤 크게 보는 것은 괜찮다(현택님 2026-11-24).
+        if event.button() == Qt.MouseButton.LeftButton:
+            event.accept()
+            photo_menu.open_large(self, self._path)
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _on_context_menu(self, pos) -> None:
+        if photo_menu.ask(self, self.mapToGlobal(pos), self._path):
+            photo_menu.open_large(self, self._path)
 
 
 class CoordCalibrationDialog(QDialog):
@@ -273,20 +291,14 @@ class CoordCalibrationDialog(QDialog):
         pl.addWidget(self._warn)
         root.addWidget(pairs_box)
 
-        bar = QHBoxLayout()
-        bar.setSpacing(8)
-        bar.addStretch(1)
         skip = NeonButton(i18n.KO.COORD_CAL_SKIP, role="ghost")
-        skip.setMinimumHeight(theme.PROFILE.control_h_lg)
         skip.clicked.connect(self.reject)
         skip.setAutoDefault(False)
         self._apply = NeonButton(i18n.KO.COORD_CAL_APPLY, role="primary")
-        self._apply.setMinimumHeight(theme.PROFILE.control_h_lg)
         self._apply.clicked.connect(self._on_apply)
         self._apply.setAutoDefault(False)
-        bar.addWidget(skip)
-        bar.addWidget(self._apply)
-        root.addLayout(bar)
+        root.addLayout(popup_layout.dialog_row(
+            QHBoxLayout(), cancels=[skip], primaries=[self._apply]))
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(1200, 860)

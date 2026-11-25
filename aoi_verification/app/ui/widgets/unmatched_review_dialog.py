@@ -42,8 +42,8 @@ from PyQt6.QtCore import QObject, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QCursor, QIcon, QPixmap
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                               QHBoxLayout, QLabel, QListWidget,
-                              QListWidgetItem, QMenu, QMessageBox,
-                              QScrollArea, QToolButton, QVBoxLayout, QWidget)
+                              QListWidgetItem, QMessageBox,
+                              QScrollArea, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from .. import motion, theme
@@ -53,6 +53,7 @@ from ...models.slot import ImageItem
 from ...utils import image_io
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
+from . import photo_menu
 from . import sheet_host as sheets
 
 # 허용 오차 폴백 — 값이 안 들어왔을 때만 쓴다.  **단일 출처는 config** 다
@@ -197,7 +198,7 @@ class _CandidateTile(QFrame):
     """후보 사진 타일.
 
     - 클릭 = 선택(파란 테두리)만, 즉시 매칭하지 않는다 (#1a).
-    - 우클릭 '크게 보기' = 좌우(기준·후보) 비교 크게보기 (#1e).
+    - 더블클릭 · 우클릭 [크게 보기] = 좌우(기준·후보) 비교 크게보기 (#1e).
     - 이미지는 사전 생성된 mid 캐시를 소스로 빠르게 로드하고(#1c), 슬라이더로
       재디코드 없이 인플레이스 재스케일한다.
     """
@@ -209,11 +210,12 @@ class _CandidateTile(QFrame):
     # 서브클래스라 ``QFrame {…}`` 는 내부 이미지/점수/캡션 라벨까지 번진다.)
     # ★ 색을 **클래스 본문에서 굽지 않는다** — 클래스 본문은 import 시점에 한 번만
     #   평가돼 그때의 팔레트가 영구히 박힌다.
-    #   배경 틴트도 옛 네온 초록 리터럴 대신 팔레트의 강조 틴트를 쓴다.
+    #   배경 틴트도 옛 네온 초록 리터럴 대신 팔레트의 강조 틴트를 쓴다 — 다중 선택 타일과
+    #   같은 옅은 틴트(E1a, 여기만 한 단계 진했다).
     @staticmethod
     def _sel_style() -> str:
         return (f"#candTile {{ border: 2px solid {theme.ACCENT}; border-radius: 8px; "
-                f"background: {theme.ACCENT_TINT}; }}")
+                f"background: {theme.ACCENT_TINT_SOFT}; }}")
 
     def __init__(self, item: ImageItem, score: float, parent=None,
                  *, size: int = _CAND_PX,
@@ -340,14 +342,30 @@ class _CandidateTile(QFrame):
             self.selected.emit(self.item)
         super().mousePressEvent(event)
 
-    # ★ 더블클릭 확대는 제거했다 — 후보를 연달아 누르다 보면 두 번째 클릭이 더블클릭으로
-    #   붙어 원하지 않는 비교 창이 떴다(사용자 지적).  확대는 우클릭 메뉴로만 연다.
-    def _on_context_menu(self, pos) -> None:
-        menu = QMenu(self)
-        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
-        chosen = menu.exec(self.mapToGlobal(pos))
-        if chosen is act:
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        # 더블클릭 = 크게 보기(현택님 2026-11-24).  첫 누름이 이미 골랐다 — 고른 뒤 크게 보는 것은 괜찮다.
+        if event.button() == Qt.MouseButton.LeftButton:
             self.view_requested.emit(self.item)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _on_context_menu(self, pos) -> None:
+        if photo_menu.ask(self, self.mapToGlobal(pos), self.item.path):
+            self.view_requested.emit(self.item)
+
+
+class _RefPhoto(QLabel):
+    """왼쪽 기준 사진 — 더블클릭 = 크게 보기(현택님 2026-11-24, 모든 사진과 같게)."""
+
+    double_clicked = pyqtSignal()
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.double_clicked.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
 
 # ---------------------------------------------------------------------------
@@ -487,16 +505,6 @@ class UnmatchedReviewDialog(QDialog):
         self.progress_label = QLabel("", self)
         self.progress_label.setProperty("role", "slotHead")
         head.addWidget(self.progress_label)
-        # 사용법 4줄은 기본 접힘 — 셋업 카드와 같은 '?'(helpToggle) 패턴이다.
-        # 반복 검토하는 사용자에게 매번 세로 ~70px 를 내주면 본문(기준 사진·후보
-        # 그리드)이 그만큼 아래로 밀린다.
-        self._help_btn = QToolButton(self)
-        self._help_btn.setText("?")
-        self._help_btn.setObjectName("helpToggle")
-        self._help_btn.setCheckable(True)
-        self._help_btn.setToolTip(i18n.KO.HELP_TOGGLE_TOOLTIP)
-        self._help_btn.toggled.connect(self._on_help_toggled)
-        head.addWidget(self._help_btn)
         # 확정 결과를 알리는 자리 — 모달 대신 여기서 잠깐 뜬다.
         # ★ **늘어나는 여백보다 앞**에 둔다.  여백 뒤(버튼 바로 앞)에 두면 문구가
         #   붙는 순간 그 폭만큼 오른쪽 버튼 넷이 통째로 왼쪽으로 밀린다 — 150px 예약으로
@@ -520,17 +528,9 @@ class UnmatchedReviewDialog(QDialog):
         self.btn_confirm = NeonButton(i18n.KO.BTN_UNMATCHED_CONFIRM, role="primary")
         self.btn_confirm.clicked.connect(self._on_confirm)
         head.addWidget(self.btn_confirm)
-        self.btn_close = NeonButton(i18n.KO.BTN_UNMATCHED_CLOSE, role="ghost")
-        self.btn_close.clicked.connect(self.accept)
-        head.addWidget(self.btn_close)
+        # [검토 종료] 는 두지 않는다 — 나가기는 제목줄 [닫기]·Esc 가 하고, 둘 다
+        # `reject` 를 거쳐 미확정 선택을 묻는다(현택님 2026-11-24).
         root.addLayout(head)
-
-        self._hint = QLabel(i18n.KO.UNMATCHED_REVIEW_HINT, self)
-        self._hint.setWordWrap(True)
-        self._hint.setProperty("role", "muted")
-        self._hint.setContentsMargins(4, 4, 4, 4)   # 옛 인라인 padding:4px 와 동일
-        self._hint.setVisible(False)          # 기본 접힘 — '?' 로 편다
-        root.addWidget(self._hint)
 
         # 좌표로 매칭한 세션에서만 — 후보 순서의 기준이 좌표가 아님을 밝힌다 (U-18).
         # ★ 이건 접지 않는다.  '사용법' 이 아니라 점수의 뜻을 바로잡는 고지라서,
@@ -582,15 +582,13 @@ class UnmatchedReviewDialog(QDialog):
         self.ref_filename.setProperty("role", "mutedPad2")
         self.ref_filename.setWordWrap(True)
         ll.addWidget(self.ref_filename)
-        self.ref_img = QLabel(left)
+        self.ref_img = _RefPhoto(left)
         self.ref_img.setFixedSize(self._ref_px, self._ref_px)
         self.ref_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ref_img.setProperty("role", "photoFrame")
-        # 우클릭 ‘크게보기’ — 후보와 동일한 좌우 비교 창을 열되, 기준 사진은 가장
+        # 더블클릭 · 우클릭 ‘크게 보기’ — 후보와 동일한 좌우 비교 창을 열되, 기준 사진은 가장
         # 유사도가 높은 후보부터(start=0) 보여준다 (#13).
-        # ★ 더블클릭 확대는 제거했다(사용자 지적).  여기에 걸려 있던 것은 인스턴스 메서드
-        #   몽키패치라 더 나빴다 — QLabel 의 이벤트 핸들러를 람다로 갈아끼우면 위젯이
-        #   자기 클래스 계약 밖에서 동작해 다음 사람이 찾을 수 없다.
+        self.ref_img.double_clicked.connect(lambda: self._open_compare(0))
         self.ref_img.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.ref_img.customContextMenuRequested.connect(self._on_ref_context_menu)
         ll.addWidget(self.ref_img, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -1169,10 +1167,10 @@ class UnmatchedReviewDialog(QDialog):
         self._open_compare(start)
 
     def _on_ref_context_menu(self, pos) -> None:
-        """기준 사진 우클릭 → 유사도순 좌우 비교 크게보기."""
-        menu = QMenu(self.ref_img)
-        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
-        if menu.exec(self.ref_img.mapToGlobal(pos)) is act:
+        """기준 사진 우클릭 → 모든 사진과 같은 메뉴, [크게 보기] 는 유사도순 좌우 비교."""
+        cur = self._current()
+        path = Path(cur.path) if cur is not None else None
+        if photo_menu.ask(self.ref_img, self.ref_img.mapToGlobal(pos), path):
             self._open_compare(0)
 
     def _make_match(self, ref_entry: MissEntry, val_item: ImageItem) -> None:
@@ -1217,10 +1215,6 @@ class UnmatchedReviewDialog(QDialog):
             n += 1
         self._pending.clear()
         return n
-
-    def _on_help_toggled(self, on: bool) -> None:
-        """'?' — 사용법 문단을 제자리에서 펼치고 접는다(스냅, 애니 없음)."""
-        self._hint.setVisible(bool(on))
 
     def _show_toast(self, text: str) -> None:
         """확정 결과를 헤더에서 잠깐 알린다(자리는 예약돼 있어 레이아웃 불변).
@@ -1267,7 +1261,7 @@ class UnmatchedReviewDialog(QDialog):
             return
         self._close_prompted = True
         r = sheets.ask(
-            self, i18n.KO.APP_TITLE, i18n.KO.UNMATCHED_CONFIRM_ON_CLOSE,
+            self, i18n.KO.UNMATCHED_SHEET_TITLE, i18n.KO.UNMATCHED_CONFIRM_ON_CLOSE,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
@@ -1278,6 +1272,13 @@ class UnmatchedReviewDialog(QDialog):
         self._maybe_prompt_pending()
         self._detach_scoring()      # [닫기] 로 나가는 경로도 ✕ 와 똑같이 끊는다.
         super().accept()
+
+    def reject(self) -> None:  # noqa: D401
+        # Esc·제목줄 [닫기] 도 같은 질문을 거친다 — 묻지 않고 나가면 고른 후보가
+        # 말없이 버려진다(현택님 2026-11-24).
+        self._maybe_prompt_pending()
+        self._detach_scoring()
+        super().reject()
 
     def closeEvent(self, event):  # noqa: N802
         self._maybe_prompt_pending()
@@ -1335,5 +1336,5 @@ class UnmatchedReviewDialog(QDialog):
     @staticmethod
     def show_empty_message(parent) -> None:
         sheets.info(
-            parent, i18n.KO.APP_TITLE, i18n.KO.UNMATCHED_REVIEW_EMPTY,
+            parent, i18n.KO.UNMATCHED_SHEET_TITLE, i18n.KO.UNMATCHED_REVIEW_EMPTY,
         )

@@ -54,7 +54,7 @@ from PyQt6.QtCore import (QBuffer, QCoreApplication, QEvent, QIODevice, QLocale,
                           QThread, QTimer, QUrl, pyqtProperty, pyqtSignal)
 from PyQt6.QtGui import (QColor, QDesktopServices, QDoubleValidator, QFont, QFontMetrics, QImage, QPainter, QPainterPath,
                          QPen, QPixmap, QPolygonF)
-from PyQt6.QtWidgets import (QAbstractButton, QAbstractSlider, QApplication, QButtonGroup, QDialog, QFileDialog, QFrame, QHBoxLayout,
+from PyQt6.QtWidgets import (QAbstractButton, QAbstractSlider, QApplication, QButtonGroup, QDialog, QFrame, QHBoxLayout,
                              QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
@@ -80,10 +80,13 @@ from .. import motion
 from ..deferred import call_later
 from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import guess_kinds, install_paste, local_paths, split_paths
-from ..folder_picker import FolderPicker
+from ..folder_picker import FilePicker, FolderPicker, SavePicker
+from ..undo_keys import bind_undo
+from . import photo_menu
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
+from .tool_open_save import EmptyOpen, SavedLine
 from .overkill_pick_dialog import OverkillPickDialog
 from .no_wheel_slider import NoWheelSlider
 
@@ -785,7 +788,7 @@ class _Tile(QFrame):
     """사진 한 장 — 테두리 · 캡션 없이 사진만.  누르면 ``clicked``.
 
     표시는 사진 위 작은 것만: 꼭 잡기 = 오른쪽 위 작은 체크, 펼친 타일 = 3px 강조 테두리, 가리킨 타일 = 옅은 외곽선.
-    우클릭 = [크게보기](``enlarge``)."""
+    더블클릭 · 우클릭 [크게 보기] = ``enlarge`` (우클릭 메뉴는 모든 사진과 같은 ``photo_menu``)."""
 
     clicked = pyqtSignal()
     enlarge = pyqtSignal()
@@ -799,6 +802,7 @@ class _Tile(QFrame):
         self.setToolTip(tip)
         self.picked = picked
         self.wait_path = None                          # 썸네일을 아직 기다리는 사진 경로(백그라운드가 채운다)
+        self.photo_path = None                         # Color 사진 경로 — 우클릭 [Defect 정보 조회] · [GL 히스토그램] 용
         pic = QLabel(self)
         pic.setProperty("role", "tilePic")
         pic.setGeometry(0, 0, size, size)
@@ -843,6 +847,7 @@ class _Tile(QFrame):
             pic.setText(_KO.OVERKILL_SCAN_WAIT)
             return
         if not isinstance(photo, QImage):               # Color 사진 — 캐시에 있으면 바로, 없으면 자리표시 뒤 백그라운드가 채운다
+            self.photo_path = photo
             pm = image_io._get_tile_cache().get(_tile_key(photo, size))
             if pm is not None:
                 pic.setPixmap(pm)
@@ -862,8 +867,16 @@ class _Tile(QFrame):
             self.hover.setVisible(False)
 
     def _on_context_menu(self, pos) -> None:
-        if _ask_enlarge(self, self.mapToGlobal(pos)):
+        if photo_menu.ask(self, self.mapToGlobal(pos), self.photo_path):
             self.enlarge.emit()
+
+    def mouseDoubleClickEvent(self, e):  # noqa: N802
+        # 더블클릭 = 크게 보기(현택님 2026-11-24).  첫 누름은 이미 값을 펼쳤다 — 그대로 둔다.
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.enlarge.emit()
+            e.accept()
+            return
+        super().mouseDoubleClickEvent(e)
 
     def enterEvent(self, e):        # noqa: N802
         self.hover.setVisible(not self.is_open)
@@ -879,24 +892,20 @@ class _Tile(QFrame):
         super().mousePressEvent(e)
 
 
-def _ask_enlarge(owner: QWidget, global_pos) -> bool:
-    """우클릭 메뉴 [크게보기] — 매치 검토 타일(``zoom_window._MidTile``)과 같은 메뉴.  고르면 True."""
-    menu = QMenu(owner)
-    act = menu.addAction(_KO.CTX_VIEW_LARGER)
-    return menu.exec(global_pos) is act
-
-
 class _BigPhoto(QLabel):
+    """펼친 값 칸의 사진 — 누르면 크게, 우클릭은 모든 사진과 같은 메뉴(``photo_menu``)."""
+
     clicked = pyqtSignal()
     enlarge = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.photo_path = None                         # Color 사진 경로 — Scan Crop 이면 None
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
 
     def _on_context_menu(self, pos) -> None:
-        if _ask_enlarge(self, self.mapToGlobal(pos)):
+        if photo_menu.ask(self, self.mapToGlobal(pos), self.photo_path):
             self.enlarge.emit()
 
     def mousePressEvent(self, e):   # noqa: N802
@@ -1753,8 +1762,14 @@ class ThresholdPreviewDialog(QDialog):
         self._rich_token = 0
         self._rich_thread: Optional[_RichLoad] = None
         self._rich_folder: Optional[Path] = None
-        self._picker = FolderPicker(self)
+        self._picker = FolderPicker(self, purpose="threshold_folder")
         self._picker.picked.connect(lambda p: p and self.add_folders([Path(p)]))
+        self._save_picker = SavePicker(self, purpose="threshold_export")
+        self._save_picker.picked.connect(self._export_to)
+        self._list_save_picker = SavePicker(self, purpose="overkill_list")     # 선택 목록 CSV
+        self._list_save_picker.picked.connect(self.save_list)
+        self._list_open_picker = FilePicker(self, purpose="overkill_list")
+        self._list_open_picker.picked.connect(lambda got: self.open_list(got[0]))
         self._build()
         for b in self.findChildren(QPushButton):     # 열릴 때 첫 버튼이 포커스 링을 달고 나오지 않게
             b.setAutoDefault(False)
@@ -1771,13 +1786,18 @@ class ThresholdPreviewDialog(QDialog):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # 윗줄 — 검산 · 모드만(폴더는 왼쪽 열, 되돌리기 · 내보내기는 요약 줄)
+        # 윗줄 — 위 왼쪽 회색 [폴더 선택] · 검산 · 모드 · 오른쪽 위 파랑 [HTML로 저장](현택님 2026-11-24)
         head = QFrame(self)
         head.setProperty("role", "ovHeader")
         head.setFixedHeight(56)
         top = QHBoxLayout(head)
-        top.setContentsMargins(24, 0, 16, 0)
+        top.setContentsMargins(16, 0, 16, 0)
         top.setSpacing(16)
+        self.pick_btn = NeonButton(_KO.OVERKILL_ADD_FOLDER, role="ghost")
+        self.pick_btn.setProperty("grade", "panel")
+        self.pick_btn.setToolTip(_KO.OVERKILL_ADD_FOLDER_TIP)
+        self.pick_btn.clicked.connect(self._on_pick)
+        top.addWidget(self.pick_btn)
         self.check_label = QLabel("", self)          # 제목은 창 맨 위 단계 줄이 이미 보인다 — 여기엔 두지 않는다
         self.check_label.setProperty("role", "muted")
         top.addWidget(self.check_label)
@@ -1799,6 +1819,12 @@ class ThresholdPreviewDialog(QDialog):
             seg.addWidget(b)
             self.mode_btns[key] = b
         top.addLayout(seg)
+        self.saved_line = SavedLine(head)
+        top.addWidget(self.saved_line)
+        self.export_btn = NeonButton(_KO.THRESH_PREVIEW_EXPORT, role="primary")
+        self.export_btn.setProperty("grade", "panel")
+        self.export_btn.clicked.connect(self._on_export)
+        top.addWidget(self.export_btn)
         root.addWidget(head)
 
         body = QHBoxLayout()
@@ -1824,13 +1850,9 @@ class ThresholdPreviewDialog(QDialog):
         fhead.setProperty("role", "ovGroupHead")
         fhead.setContentsMargins(12, 0, 0, 4)
         il.addWidget(fhead)
-        self._folder_lay = QVBoxLayout()               # 폴더 줄 — 비어 있으면 아래 [+ 폴더] 만 남는다
+        self._folder_lay = QVBoxLayout()               # 폴더 줄 — 더하기는 위 왼쪽 [폴더 선택]
         self._folder_lay.setSpacing(2)
         il.addLayout(self._folder_lay)
-        self.pick_btn = NeonButton(_KO.OVERKILL_ADD_FOLDER, role="textAccent")
-        self.pick_btn.setToolTip(_KO.OVERKILL_ADD_FOLDER_TIP)
-        self.pick_btn.clicked.connect(self._on_pick)
-        il.addWidget(self.pick_btn, 0, Qt.AlignmentFlag.AlignLeft)
         il.addSpacing(12)
         rule = self._side_rule = QFrame(inner)
         rule.setFixedHeight(1)
@@ -1866,6 +1888,7 @@ class ThresholdPreviewDialog(QDialog):
         nl.addWidget(self.notice_label, 1)
         self.undo_btn = NeonButton(_KO.OVERKILL_UNDO, role="ghost")
         self.undo_btn.clicked.connect(self._undo)
+        bind_undo(self.undo_btn, self._undo)         # Z — 버튼이 보일 때(되돌릴 것이 있을 때)만 산다
         nl.addWidget(self.undo_btn)
         self.notice.setVisible(False)
         main.addWidget(self.notice)
@@ -1879,21 +1902,8 @@ class ThresholdPreviewDialog(QDialog):
         al.addWidget(self.alert_label, 1)
         self.alert.setVisible(False)
         main.addWidget(self.alert)
-        # 폴더가 없을 때의 본문 — 한 줄 안내 + [+ 폴더].  폴더를 더하면 사라진다.
+        # 폴더가 없을 때 본문 자리를 채우는 빈 칸 — 화면은 가운데 큰 [폴더 선택](``EmptyOpen``)이 덮는다.
         self.empty_state = QWidget(self)
-        el = QVBoxLayout(self.empty_state)
-        el.setSpacing(12)
-        el.addStretch(1)
-        self.empty_hint = QLabel(_KO.OVERKILL_EMPTY, self.empty_state)
-        self.empty_hint.setProperty("role", "muted")
-        self.empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        el.addWidget(self.empty_hint)
-        self.empty_pick_btn = NeonButton(_KO.OVERKILL_ADD_FOLDER, role="ghost")
-        self.empty_pick_btn.setProperty("grade", "panel")
-        self.empty_pick_btn.setToolTip(_KO.OVERKILL_ADD_FOLDER_TIP)
-        self.empty_pick_btn.clicked.connect(self._on_pick)
-        el.addWidget(self.empty_pick_btn, 0, Qt.AlignmentFlag.AlignHCenter)
-        el.addStretch(2)
         main.addWidget(self.empty_state, 1)
         self._notice_timer = QTimer(self)
         self._notice_timer.setSingleShot(True)
@@ -1949,13 +1959,12 @@ class ThresholdPreviewDialog(QDialog):
         self.classify_btn.setEnabled(False)
         srow.addWidget(self.classify_btn)
         self.saved_btn = NeonButton(_KO.OVERKILL_SAVED_LOAD, role="textAction")   # 자동 추천 모드에서만 — 저장해 둔 선택
-        self.saved_btn.setToolTip(_KO.OVERKILL_SAVED_LOAD_TIP)
         self.saved_btn.clicked.connect(self.load_saved_picks)
         self.saved_btn.setVisible(self._mode == "auto")
         self.saved_btn.setEnabled(False)
         srow.addWidget(self.saved_btn)
         self.list_btn = NeonButton(_KO.OVERKILL_LIST, role="textAction")   # 고른 것 ↔ CSV(현택님 2026-11-24 안 B) — 줄이 넘치지 않게 메뉴 하나
-        list_menu = QMenu(self.list_btn)
+        list_menu = QMenu(self.list_btn)            # 사진 메뉴 아님 — 선택 목록 저장 · 열기
         self.list_save_act = list_menu.addAction(_KO.OVERKILL_LIST_SAVE, self._on_list_save)
         self.list_open_act = list_menu.addAction(_KO.OVERKILL_LIST_OPEN, self._on_list_open)
         self.list_btn.clicked.connect(lambda: list_menu.popup(self.list_btn.mapToGlobal(QPoint(0, self.list_btn.height()))))
@@ -1966,9 +1975,6 @@ class ThresholdPreviewDialog(QDialog):
         self.reset_btn.setToolTip(_KO.THRESH_PREVIEW_RESET_TIP)
         self.reset_btn.clicked.connect(self.reset)
         srow.addWidget(self.reset_btn)
-        self.export_btn = NeonButton(_KO.THRESH_PREVIEW_EXPORT, role="textAction")
-        self.export_btn.clicked.connect(self._on_export)
-        srow.addWidget(self.export_btn)
         sm.addLayout(srow)
         self.ratio = _RatioBar(self.summary)
         sm.addWidget(self.ratio)
@@ -2040,6 +2046,7 @@ class ThresholdPreviewDialog(QDialog):
         self.empty_label.setProperty("role", "muted")
         main.addWidget(self.empty_label)
         main.addStretch(1)
+        self._empty_open = EmptyOpen(self, _KO.OVERKILL_ADD_FOLDER, self._on_pick, _KO.EMPTY_DROP_HINT)
         self._sync_empty()
         body.addLayout(main, 1)
         root.addLayout(body, 1)
@@ -2719,6 +2726,11 @@ class ThresholdPreviewDialog(QDialog):
             return color
         return self._scans.get(idx[0])
 
+    def _photo_path(self, d: P.Defect):
+        """그 Defect 의 Color 사진 경로 — Scan Crop 뿐이면 None(우클릭 [Defect 정보 조회] · [GL 히스토그램] 이 꺼진다)."""
+        photo = self._pic(d)
+        return None if photo is None or isinstance(photo, QImage) else photo
+
     def is_loading(self) -> bool:
         return self._thread is not None and self._thread.isRunning()
 
@@ -2771,8 +2783,9 @@ class ThresholdPreviewDialog(QDialog):
 
     # ------------------------------------------------------------------ 그리기
     def _sync_empty(self) -> None:
-        """폴더가 하나도 없으면 본문 가운데 안내 + [+ 폴더], 폴더 없이는 못 하는 것은 끈다."""
+        """폴더가 하나도 없으면 가운데 큰 [폴더 선택] 하나만(``EmptyOpen``), 폴더 없이는 못 하는 것은 끈다."""
         empty = not self._roots and self._w is None
+        self._empty_open.set_empty(empty)
         for wid in (self.summary, self._tabs_host, self.grid_host, self.empty_label, self.rules,
                     self._side_folder_head, self.pick_btn, self._side_rule):
             wid.setVisible(not empty)
@@ -3389,9 +3402,10 @@ class ThresholdPreviewDialog(QDialog):
             pic.setText(_KO.OVERKILL_SCAN_WAIT)
         if photo is None:
             pic.setCursor(Qt.CursorShape.ArrowCursor)
-        else:                                           # 누르거나 우클릭 [크게보기] — Color 는 그대로, Scan Crop 은 원본 위 범위 표시
+        else:                                           # 누르거나 우클릭 [크게 보기] — Color 는 그대로, Scan Crop 은 원본 위 범위 표시
             pic.enlarge.connect(lambda i=key_of(d): self._enlarge_tile(i))
             if not isinstance(photo, QImage):
+                pic.photo_path = photo
                 pic.clicked.connect(lambda: self._enlarge(photo, d))
             else:
                 pic.clicked.connect(lambda i=key_of(d): self._enlarge_tile(i))
@@ -3970,17 +3984,11 @@ class ThresholdPreviewDialog(QDialog):
     def _on_list_save(self) -> None:
         if self._w is None or not (self._picked or self._overkill):
             return
-        home = Path.home()
-        start = home / "Desktop" if (home / "Desktop").is_dir() else home
+        from ...utils import paths
+        start = paths.results_dir()             # 저장 기본 폴더는 결과 폴더 하나(현택님 Q3 A안)
         base = self._roots[0].name if len(self._roots) == 1 else self._w.folder.name
         name = _KO.OVERKILL_LIST_FILE_FMT.format(base=base, stamp=f"{datetime.now():%Y%m%d_%H%M}")
-        dlg = QFileDialog(self, _KO.OVERKILL_LIST_SAVE, str(start / name), _KO.OVERKILL_LIST_FILTER)
-        dlg.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
-        dlg.setDefaultSuffix("csv")
-        dlg.fileSelected.connect(self.save_list)
-        dlg.finished.connect(dlg.deleteLater)
-        self._save_dlg = dlg
-        dlg.open()
+        self._list_save_picker.open(_KO.OVERKILL_LIST_SAVE, str(start / name), _KO.OVERKILL_LIST_FILTER, "csv")
 
     def save_list(self, path: str) -> None:
         if not path or self._w is None:
@@ -3996,14 +4004,8 @@ class ThresholdPreviewDialog(QDialog):
     def _on_list_open(self) -> None:
         if self._w is None:
             return
-        home = Path.home()
-        start = home / "Desktop" if (home / "Desktop").is_dir() else home
-        dlg = QFileDialog(self, _KO.OVERKILL_LIST_OPEN, str(start), _KO.OVERKILL_LIST_FILTER)
-        dlg.setFileMode(QFileDialog.FileMode.ExistingFile)
-        dlg.fileSelected.connect(self.open_list)
-        dlg.finished.connect(dlg.deleteLater)
-        self._save_dlg = dlg
-        dlg.open()
+        from ...utils import paths
+        self._list_open_picker.open(_KO.OVERKILL_LIST_OPEN, str(paths.results_dir()), _KO.OVERKILL_LIST_FILTER)
 
     def open_list(self, path: str) -> None:
         """선택 목록 CSV → 지금 폴더의 같은 Defect 를 고른다(웨이퍼 · 번호 · 좌표가 모두 맞는 것만)."""
@@ -4111,10 +4113,15 @@ class ThresholdPreviewDialog(QDialog):
                                  pixmap_of=self._pick_pixmap, request_pics=self._pick_request,
                                  caption_of=self._pick_caption, picked=self._picked, overkill=self._overkill,
                                  preview=self._pick_preview,
-                                 enlarge=lambda d: self._enlarge_tile(key_of(d)), parent=self)
+                                 enlarge=lambda d: self._enlarge_tile(key_of(d)),
+                                 path_of=self._photo_path, parent=self)
         dlg.applied.connect(self._on_pick_applied)
         dlg.finished.connect(self._on_pick_closed)
         self._pick_dlg = dlg
+        # ★ '폴더 뺐다 [되돌리기 (Z)]' 알림을 걷는다 — 남겨 두면 뒤의 Z 와 시트의 Z 가 둘 다 살아
+        #   Qt 가 '모호한 단축키' 로 보고 **어느 쪽도 발화하지 않는다**(실측).  고르기를 적용한 뒤
+        #   그 되돌리기를 누르면 옛 값(ov·고름)이 새로 고른 값을 덮으므로 어차피 걷는 게 맞다.
+        self._hide_notice()
         sheets.run(dlg, full_bleed=True)          # 창 전체로 — 큰 사진이 자리를 다 쓴다
 
     def _on_pick_closed(self, _code: int = 0) -> None:
@@ -4260,17 +4267,13 @@ class ThresholdPreviewDialog(QDialog):
         opts.finished.connect(opts.deleteLater)
         if sheets.run(opts) != QDialog.DialogCode.Accepted:
             return
-        home = Path.home()
-        start = home / "Desktop" if (home / "Desktop").is_dir() else home
+        # 기본 폴더는 다른 저장과 같은 결과 폴더(현택님 2026-11-25 Q3 A안 — 전엔 바탕화면).
+        from ...utils import paths
+        start = paths.results_dir()
         base = self._roots[0].name if len(self._roots) == 1 else self._w.folder.name
         name = f"Overkill_{base}_{datetime.now():%Y%m%d_%H%M}.html"
-        dlg = QFileDialog(self, _KO.THRESH_EXPORT_SAVE_TITLE, str(start / name), _KO.THRESH_EXPORT_FILTER)
-        dlg.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
-        dlg.setDefaultSuffix("html")
-        dlg.fileSelected.connect(self._export_to)
-        dlg.finished.connect(dlg.deleteLater)
-        self._save_dlg = dlg
-        dlg.open()
+        self._save_picker.open(_KO.THRESH_EXPORT_SAVE_TITLE, str(start / name),
+                               _KO.THRESH_EXPORT_FILTER, "html")
 
     def _export_to(self, path: str) -> None:
         if not path:
@@ -4281,6 +4284,7 @@ class ThresholdPreviewDialog(QDialog):
             _LOG.warning("Threshold HTML 저장 실패: %s", exc)
             self.check_label.setText(_KO.THRESH_EXPORT_FAILED.format(e=exc))
             return
+        self.saved_line.show_saved(path)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def export_html(self, path: Path, opts=None) -> None:

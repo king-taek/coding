@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (QDialog, QGridLayout, QHBoxLayout, QLabel,
 from ... import i18n
 from .. import theme
 from .neon_button import NeonButton
+from . import popup_layout
 
 __all__ = ["SaveNameDialog", "sanitize_name", "compose_title"]
 
@@ -104,42 +105,35 @@ _FIELD_LABELS = (
 class SaveNameDialog(QDialog):
     """추천 이름을 보여주고 고치게 한다.  :attr:`chosen` 이 결과(취소면 ``None``)."""
 
+    #: 작은 팝업 — 시트 제목줄 ✕ 를 뺀다(자기 [취소] 가 있다, `sheet_host.POPUP_SMALL_ATTR`).
+    POPUP_SMALL = True
+
     def __init__(self, suggested: str, folder: Path, parent=None,
-                 *, body: str | None = None,
-                 fields: dict[str, str] | None = None) -> None:
+                 *, fields: dict[str, str] | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(i18n.KO.SAVE_NAME_TITLE)
         self._chosen: str | None = None
+        self._confirm_overwrite: str | None = None
         self._folder = Path(folder)
         self._fields: dict[str, QLineEdit] = {}
         # 칸이 아닌 제목 종류 표시(``cross``) — 칸 입력과 함께 이름 재생성에 넘긴다.
         self._kind = {k: v for k, v in (fields or {}).items() if k == "cross"}
-        if body is None:
-            body = (i18n.KO.SAVE_NAME_CROSS_BODY if self._kind.get("cross")
-                    else i18n.KO.SAVE_NAME_BODY)
-        self._build(suggested, self._folder, body, fields)
+        self._build(suggested, self._folder, fields)
 
     @property
     def chosen(self) -> str | None:
         return self._chosen
 
     # ------------------------------------------------------------------
-    def _build(self, suggested: str, folder: Path, body_text: str,
+    def _build(self, suggested: str, folder: Path,
                fields: dict[str, str] | None) -> None:
         root = QVBoxLayout(self)
         m = theme.PROFILE.page_margin // 2
         root.setContentsMargins(m, m, m, m)
         root.setSpacing(10)
 
-        head = QLabel(i18n.KO.SAVE_NAME_TITLE, self)
-        head.setProperty("role", "title")
-        root.addWidget(head)
-
-        body = QLabel(body_text, self)
-        body.setProperty("role", "muted")
-        body.setWordWrap(True)
-        root.addWidget(body)
-
+        # 제목은 시트 제목줄에 있다 — 본문에 또 크게 쓰지 않고, 설명 문장도 두지 않는다
+        # (현택님 2026-11-24).  남는 글은 저장 폴더 한 줄뿐이다.
         self.edit = QLineEdit(suggested, self)
         self.edit.setMinimumWidth(420)
         self.edit.textChanged.connect(self._revalidate)
@@ -171,11 +165,8 @@ class SaveNameDialog(QDialog):
                                alignment=Qt.AlignmentFlag.AlignVCenter)
                 form.addWidget(ed, r, 1)
             root.addLayout(form)
-            hint = QLabel(i18n.KO.SAVE_NAME_FIELDS_HINT, self)
-            hint.setProperty("role", "muted")
-            hint.setWordWrap(True)
             auto_row = QHBoxLayout()
-            auto_row.addWidget(hint, 1)
+            auto_row.addStretch(1)
             self.btn_auto = NeonButton(i18n.KO.SAVE_NAME_AUTO, role="ghost")
             self.btn_auto.clicked.connect(self._on_auto)
             auto_row.addWidget(self.btn_auto)
@@ -186,17 +177,13 @@ class SaveNameDialog(QDialog):
         where.setWordWrap(True)
         root.addWidget(where)
 
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        row.addStretch(1)
         self.btn_cancel = NeonButton(i18n.KO.SAVE_NAME_CANCEL, role="ghost")
         self.btn_cancel.clicked.connect(self.reject)
         self.btn_ok = NeonButton(i18n.KO.SAVE_NAME_OK, role="primary")
         self.btn_ok.setDefault(True)
         self.btn_ok.clicked.connect(self._on_ok)
-        row.addWidget(self.btn_cancel)
-        row.addWidget(self.btn_ok)
-        root.addLayout(row)
+        root.addLayout(popup_layout.dialog_row(
+            QHBoxLayout(), cancels=[self.btn_cancel], primaries=[self.btn_ok]))
 
         self.edit.setFocus(Qt.FocusReason.OtherFocusReason)
         self._revalidate()
@@ -220,11 +207,23 @@ class SaveNameDialog(QDialog):
         _name, err = sanitize_name(self.edit.text())
         self._err.setText(err)
         self.btn_ok.setEnabled(not err)
+        self._confirm_overwrite = None      # 이름을 고치면 덮어쓰기 확인을 다시 받는다
+        self.btn_ok.setText(i18n.KO.SAVE_NAME_OK)
 
     def _on_ok(self) -> None:
         name, err = sanitize_name(self.edit.text())
         if err:
             self._err.setText(err)
+            return
+        # 같은 이름이 있으면 한 번 더 누를 때만 덮어쓴다(현택님 2026-11-25 Q3 A안).
+        try:
+            exists = (self._folder / name).exists()
+        except (OSError, ValueError):
+            exists = False
+        if exists and self._confirm_overwrite != name:
+            self._confirm_overwrite = name
+            self._err.setText(i18n.KO.SAVE_NAME_EXISTS)
+            self.btn_ok.setText(i18n.KO.SAVE_NAME_OVERWRITE)
             return
         self._chosen = name
         self.accept()

@@ -229,7 +229,7 @@ def test_describe_defect_values_match_the_excel_numbers(tmp_path, monkeypatch):
     for m in single_info.measures(img):
         # 'col / row' 처럼 라벨이 값 사이에 끼는 표기가 있어 문자열 포함은 성립하지
         # 않는다.  성립해야 하는 것은 **값 토큰이 전부 엑셀 줄에도 있다**는 것.
-        for token in m.value.split(" / "):
+        for token in m.value.replace("µm", "㎛").split(" / "):   # 단위 글자만 다르다(화면 µm · 엑셀 ㎛)
             assert token in m.line, f"{token!r} 가 {m.line!r} 안에 없다"
     # 엑셀 줄 목록도 같은 Measure 에서 나온다.
     assert single_info.defect_lines(img) == [
@@ -404,3 +404,13 @@ def test_describe_kla_rows_are_clustered(tmp_path):
     defect = _group(groups, i18n.KO.IMAGE_INFO_GROUP_DEFECT)
     assert _clusters(defect)[0] == single_info.CLUSTER_WHERE
     assert all(r.cluster for r in defect.rows)
+
+
+def test_screen_values_say_um_but_excel_lines_keep_the_old_unit(tmp_path, monkeypatch):
+    """화면 값은 µm, 엑셀 D열 줄은 ㎛ 그대로(F11a) — `utils/excel_ref` 가 ㎛ 줄을 되읽는다."""
+    img = _camtek_folder(tmp_path, monkeypatch)
+    with_unit = [m for m in single_info.measures(img) if "µm" in m.value or "㎛" in m.value]
+    assert {m.label for m in with_unit} >= {"area", "x / y"}
+    for m in with_unit:
+        assert "㎛" not in m.value and "µm" in m.value, m
+        assert "µm" not in m.line and "㎛" in m.line, m

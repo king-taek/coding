@@ -96,7 +96,7 @@ def _measure(tile_role: str, caption_role: str, text: str) -> float:
     "tile_role, caption_role, text",
     [
         ("statTile", "statCaption", "슬롯 불일치"),      # 실측 최저였던 문구
-        ("statTile", "statCaption", "매치 성공"),
+        ("statTile", "statCaption", "매치 없음(기준)"),
     ],
 )
 def test_caption_grade_meets_wcag_aa(qapp, tile_role, caption_role, text):

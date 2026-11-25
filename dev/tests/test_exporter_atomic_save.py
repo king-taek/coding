@@ -166,6 +166,15 @@ def test_summary_sheet_name_strips_quotes_and_ignores_case(qapp, tmp_path):
     assert e2._summary_sheet_name().casefold() != ex.SHEET_FULL_NAME.casefold()
 
 
+def test_long_summary_sheet_name_keeps_whole_machine_token(qapp, tmp_path):
+    """31자를 넘는 파일 이름도 호기 번호를 반만 남기지 않는다(SM-E2d) — 예전엔 '…검증(AOI-2'."""
+    from dataclasses import replace
+    res = replace(_result(tmp_path), ref_machine="AOI-24", val_machine="4F-AOI-03")
+    e = ex.ExcelExporter(res, dst_path=tmp_path / "4F-AOI-03 TB500_RDL4_GFW 검증(AOI-24 기준).xlsx")
+    name = e._summary_sheet_name()
+    assert len(name) <= 31 and "검증(AOI-24 기준)" in name and name.startswith("4F-AOI-03"), name
+
+
 # ---------------------------------------------------------------- rels 청소
 RELS = (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'

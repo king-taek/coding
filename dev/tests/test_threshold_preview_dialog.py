@@ -445,7 +445,7 @@ def test_chip_select_filters_tiles_but_not_counts(styled_qapp, tmp_path, monkeyp
 
 
 def test_remove_is_synchronous_and_undo_restores(styled_qapp, tmp_path, monkeypatch):
-    """✕ 는 읽지 않는다(스레드 · 덮개 없음) — 메모리에서 다시 합치고 '뺐습니다 · 꼭 잡기 n개도 빠짐' + [되돌리기].
+    """✕ 는 읽지 않는다(스레드 · 덮개 없음) — 메모리에서 다시 합치고 '뺌 · 꼭 잡기 n개도 빠짐' + [되돌리기].
     되돌리면 그 칩과 꼭 잡기가 돌아온다."""
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     a, lot = _lot_setup(tmp_path)
@@ -464,13 +464,45 @@ def test_remove_is_synchronous_and_undo_restores(styled_qapp, tmp_path, monkeypa
         assert dlg._thread is None and not dlg._overlay_on and not dlg.is_loading()
         assert dlg._roots == [a] and dlg._w.folders == (a,) and len(dlg._picked) == 1
         assert dlg.notice.isVisibleTo(dlg) and dlg.undo_btn.isVisibleTo(dlg)
-        assert dlg.notice_label.text() == "lot 를 뺐습니다 · 꼭 잡기 1개도 빠짐"
+        assert dlg.notice_label.text() == "lot 뺌 · 꼭 잡기 1개도 빠짐"
         assert dlg._view.get(lot)                                                # 칩 설정은 남는다
         dlg._undo()
         assert dlg._roots == [a, lot] and len(dlg._w.folders) == 3 and len(dlg._picked) == 2
         assert dlg._ov == ov and not dlg.notice.isVisibleTo(dlg) and dlg._thread is None
         dlg.remove_folder(a)                                                       # 첫 칩을 빼면 기준이 같아도 새 첫 칩이 된다
         assert dlg._roots == [lot] and dlg._w.folders[0].parent == lot
+    finally:
+        dlg.deleteLater()
+
+
+def test_z_undoes_folder_removal_and_pick_sheet_clears_it(styled_qapp, tmp_path, monkeypatch):
+    """'폴더 뺐다' 알림의 [되돌리기 (Z)] 는 Z 키로도 돈다(현택님: 되돌리기는 어디서나 Z).
+    [고르기] 시트를 열면 알림을 걷는다 — 뒤의 Z 와 시트의 Z 가 함께 살면 둘 다 죽는다."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    a, lot = _lot_setup(tmp_path)
+    _no_load(monkeypatch, T)
+    shown = _capture_run(monkeypatch, T)
+    dlg = T.ThresholdPreviewDialog()
+    dlg.resize(1280, 800)
+    try:
+        _prime(dlg, T, a, lot)
+        dlg.set_folders([a, lot])
+        dlg.set_mode("auto")
+        dlg.show()
+        dlg.activateWindow()
+        styled_qapp.processEvents()
+        dlg.remove_folder(lot)
+        styled_qapp.processEvents()
+        QTest.keyClick(dlg, Qt.Key.Key_Z)
+        styled_qapp.processEvents()
+        assert dlg._roots == [a, lot] and not dlg.notice.isVisibleTo(dlg)
+        dlg.remove_folder(lot)
+        assert dlg.undo_btn.isVisibleTo(dlg)
+        dlg.open_pick_dialog()
+        assert len(shown) == 1
+        assert not dlg.notice.isVisibleTo(dlg) and dlg._undo_snap is None
     finally:
         dlg.deleteLater()
 
@@ -912,7 +944,7 @@ def test_zone_rows_are_rows_not_boxes(styled_qapp, tmp_path):
 
 
 def test_left_column_stacks_folders_above_zones_without_chip_row(styled_qapp, tmp_path, monkeypatch):
-    """폴더 칩 줄은 없다 — 왼쪽 열 위가 폴더 목록, 아래가 Zone 이고, 윗줄에는 폴더 버튼이 없다.
+    """폴더 칩 줄은 없다 — 왼쪽 열 위가 폴더 목록, 아래가 Zone 이다.  [폴더 선택] 은 위 왼쪽 회색(현택님 2026-11-24).
     [컬러 | 스캔] 은 고른 폴더 줄에만 보이고, ✕ 는 줄마다 하나다."""
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     a, lot = _lot_setup(tmp_path)
@@ -927,8 +959,9 @@ def test_left_column_stacks_folders_above_zones_without_chip_row(styled_qapp, tm
         assert not hasattr(dlg, "_chips_host")
         rows = _chips(dlg, T)
         assert [r.info.root for r in rows] == [a, lot] and all(r.x_btn is not None for r in rows)
-        assert dlg.pick_btn.property("role") == "textAccent"              # 조용한 [+ 폴더]
-        assert dlg.pick_btn.mapTo(dlg, dlg.pick_btn.rect().topLeft()).x() < T.SIDE_W
+        assert dlg.pick_btn.property("role") == "ghost"                   # 위 왼쪽 회색 [폴더 선택]
+        tl = dlg.pick_btn.mapTo(dlg, dlg.pick_btn.rect().topLeft())
+        assert tl.x() < T.SIDE_W and tl.y() < rows[0].mapTo(dlg, rows[0].rect().topLeft()).y()
         assert rows[0].mapTo(dlg, rows[0].rect().topLeft()).y() < dlg.zone_btns[("Zones", 1)].mapTo(dlg, dlg.zone_btns[("Zones", 1)].rect().topLeft()).y()
         assert not any(r.seg_host.isVisibleTo(dlg) for r in rows)
         dlg.select_folder(lot)
@@ -1169,8 +1202,9 @@ def test_rules_panel_is_boxless_with_distribution_aligned_to_slider(styled_qapp,
 
 
 # ------------------------------------------------------------------ 2026-11-17 디자인 검토 반영
-def test_empty_overkill_shows_one_line_and_add_button_and_disables_modes(styled_qapp):
-    """폴더가 없으면 본문 가운데 안내 + [+ 폴더](32px), 모드 버튼은 꺼지고 'Zone' 소제목은 숨는다."""
+def test_empty_overkill_shows_one_big_pick_button_and_disables_modes(styled_qapp):
+    """폴더가 없으면 화면 가운데 큰 파랑 [폴더 선택] 하나(현택님 2026-11-24 B1 안 B), 모드 버튼은 꺼지고
+    'Zone' 소제목은 숨는다."""
     from aoi_verification.app import i18n
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     dlg = T.ThresholdPreviewDialog()
@@ -1178,13 +1212,13 @@ def test_empty_overkill_shows_one_line_and_add_button_and_disables_modes(styled_
         dlg.resize(1280, 800)
         dlg.show()
         styled_qapp.processEvents()
-        assert dlg.empty_state.isVisibleTo(dlg)
-        assert dlg.empty_hint.text() == i18n.KO.OVERKILL_EMPTY
-        assert dlg.empty_pick_btn.text() == i18n.KO.OVERKILL_ADD_FOLDER
-        assert dlg.empty_pick_btn.property("role") == "ghost" and dlg.empty_pick_btn.height() == 32
+        eo = dlg._empty_open
+        assert eo.isVisibleTo(dlg) and eo.geometry() == dlg.rect()
+        assert eo.btn.text() == i18n.KO.OVERKILL_ADD_FOLDER and eo.btn.property("role") == "primary"
+        c = eo.btn.mapTo(dlg, eo.btn.rect().center())
+        assert abs(c.x() - dlg.width() // 2) <= 2 and abs(c.y() - dlg.height() // 2) <= 40
         assert not any(b.isEnabled() for b in dlg.mode_btns.values())
         assert not dlg._zone_head.isVisibleTo(dlg) and not dlg.summary.isVisibleTo(dlg)
-        assert dlg.empty_hint.geometry().center().x() > dlg.width() // 3        # 본문 가운데쪽
     finally:
         dlg.deleteLater()
 
@@ -1193,7 +1227,7 @@ def test_empty_state_goes_away_with_a_wafer(styled_qapp, tmp_path):
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     dlg = _shown_dlg(T, styled_qapp, tmp_path)
     try:
-        assert not dlg.empty_state.isVisibleTo(dlg)
+        assert not dlg.empty_state.isVisibleTo(dlg) and not dlg._empty_open.isVisibleTo(dlg)
         assert all(b.isEnabled() for b in dlg.mode_btns.values())
         assert dlg._zone_head.isVisibleTo(dlg) and dlg.summary.isVisibleTo(dlg)
     finally:
@@ -1370,7 +1404,13 @@ def _ask_first_action(monkeypatch, T, seen):
     def fake_exec(self, *a, **k):
         seen.extend(x.text() for x in self.actions())
         return self.actions()[0]
-    monkeypatch.setattr(T.QMenu, "exec", fake_exec)
+    from PyQt6.QtWidgets import QMenu
+    monkeypatch.setattr(QMenu, "exec", fake_exec)
+
+
+def _menu3(T):
+    """모든 사진의 우클릭 메뉴 세 항목(``photo_menu``, 현택님 2026-11-24)."""
+    return [T._KO.CTX_VIEW_LARGER, T._KO.CTX_PHOTO_INFO, T._KO.CTX_PHOTO_GL]
 
 
 def test_right_click_on_color_tile_and_big_photo_offers_enlarge(styled_qapp, tmp_path, monkeypatch):
@@ -1385,7 +1425,7 @@ def test_right_click_on_color_tile_and_big_photo_offers_enlarge(styled_qapp, tmp
         k = next(iter(dlg.tiles))
         tile = dlg.tiles[k]
         tile.customContextMenuRequested.emit(QPoint(5, 5))                 # 우클릭
-        assert seen == [T._KO.CTX_VIEW_LARGER] and shown == [dlg._pic(dlg._tile_defects[k])]
+        assert seen == _menu3(T) and shown == [dlg._pic(dlg._tile_defects[k])]
         assert dlg._open is None and not dlg._picked                       # 선택 · 꼭 잡기는 건드리지 않는다
         dlg._toggle(k)
         big = dlg._band.findChildren(T._BigPhoto)[0]
@@ -1419,7 +1459,7 @@ def test_right_click_on_scan_tile_opens_full_scan_with_overlay_or_falls_back_to_
         monkeypatch.setattr(Z, "FullscreenViewer", _V)
         monkeypatch.setattr(T.sheets, "run", lambda viewer, **k: None)
         dlg.tiles[T.key_of(target)].customContextMenuRequested.emit(QPoint(5, 5))
-        assert seen == [T._KO.CTX_VIEW_LARGER]
+        assert seen == _menu3(T)
         th = dlg._full_scan
         assert th is not None
         th.wait(20000)

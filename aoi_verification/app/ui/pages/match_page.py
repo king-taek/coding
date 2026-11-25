@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from PyQt6.QtCore import QByteArray, Qt, pyqtSignal
-from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
                               QProgressBar, QScrollArea, QSizePolicy, QSlider,
                               QSplitter, QStackedWidget, QVBoxLayout, QWidget)
@@ -22,6 +21,7 @@ from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
 from ... import config, i18n
 from .. import theme
 from ..deferred import call_later
+from ..undo_keys import bind_undo
 from ...models.result import MatchResult
 from ...models.slot import ImageItem
 from ...utils import prefs as _prefs
@@ -302,6 +302,7 @@ class MatchPage(ProgressRowMixin, QWidget):
 
         # 이미지 (스크롤 영역) -----------------------------------------
         self.center_img = ScalableImage(center)
+        self.center_img.enable_photo_mouse()             # 더블클릭 = 크게 · 우클릭 = 사진 메뉴(현택님 2026-11-24)
         self._img_scroll = QScrollArea(center)
         self._img_scroll.setWidgetResizable(False)
         self._img_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -317,9 +318,8 @@ class MatchPage(ProgressRowMixin, QWidget):
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 6, 0, 0)
         # 되돌리기 (#C1) — 직전 매칭/매칭없음 결정을 취소하고 그 기준 사진을 다시
-        # 큐 맨 앞으로 복귀.  Stage 1 은 Z 를 쓰므로 충돌을 피해 Ctrl+Z 사용.
-        self.undo_btn = NeonButton(i18n.KO.BTN_MATCH_UNDO, role="ghost")
-        self.undo_btn.setToolTip(i18n.KO.MATCH_UNDO_TOOLTIP)
+        # 큐 맨 앞으로 복귀.  키는 Z · Ctrl+Z(`bind_undo`, 아래 단축키 자리).
+        self.undo_btn = NeonButton(i18n.KO.BTN_UNDO, role="ghost")
         self.undo_btn.clicked.connect(self._undo_match)
         self.undo_btn.setEnabled(False)
         bar.addWidget(self.undo_btn)
@@ -341,15 +341,6 @@ class MatchPage(ProgressRowMixin, QWidget):
         #   자동 경로가 쓰는 `_confirm_no_match(user=False)` 는 그대로 남는다.
         bar.addStretch(1)
         cl.addLayout(bar)
-
-        # 자동 모드에서 우측 후보 패널을 떼면 이 카드가 폭 전체를 쓴다 — 결과를
-        # 어디서 보는지 한 줄로 알려 준다(빈 칸에 용도를 말하는 emptyHint 규칙의
-        # 연장이다).  수동 폴백에서는 감춘다.
-        self._auto_note = QLabel(i18n.KO.MATCH_AUTO_RESULT_NOTE, center)
-        self._auto_note.setProperty("role", "muted")
-        self._auto_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._auto_note.setVisible(False)
-        cl.addWidget(self._auto_note)
 
         center.setMinimumWidth(360)
         self._h_splitter.addWidget(center)
@@ -416,8 +407,9 @@ class MatchPage(ProgressRowMixin, QWidget):
         #   버튼만 지우고 단축키를 남기면 **보이지 않는 손잡이**가 되어 더 나쁘다:
         #   화면에 아무 것도 없는데 키 하나로 사실이 아닌 미탐이 확정된다.
         #   ‘S’(잠시 보류) 는 이미 #3 에서 비활성화됐다.
-        # 되돌리기 (#C1) — Stage 1 의 Z 와 충돌하지 않도록 Ctrl+Z.
-        QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._undo_match)
+        # 되돌리기 (#C1) — 앱 어디서나 Z(Ctrl+Z 도).  선별 화면과 같은 키여도 둘은 한 번에
+        #   보이지 않으므로(쌓인 페이지) 부딪치지 않는다.  자동 사슬 중에는 덮개가 막는다.
+        bind_undo(self, self._undo_match)
 
     # ------------------------------------------------------------------
     def resizeEvent(self, event):                       # noqa: N802
@@ -1064,7 +1056,7 @@ class MatchPage(ProgressRowMixin, QWidget):
             # 자동 모드는 매 ref 마다 모달이 뜨는 ‘모달 폭격’ 을 피하려고
             # 모달 없이 조용히 ‘매칭 없음’ 처리 (Bug #4).  수동 모드만 안내.
             if not self._auto_mode:
-                sheets.info(self, i18n.KO.APP_TITLE,
+                sheets.info(self, i18n.KO.STAT_NO_MATCH,
                                         i18n.KO.INFO_NO_VAL_PHOTOS)
             self._confirm_no_match(user=False)
             return
@@ -1192,7 +1184,7 @@ class MatchPage(ProgressRowMixin, QWidget):
                 call_later(self, 0, lambda: self._confirm_no_match(user=False))
             else:
                 self._loading.hide_overlay()
-                sheets.info(self, i18n.KO.APP_TITLE,
+                sheets.info(self, i18n.KO.STAT_NO_MATCH,
                                         i18n.KO.INFO_NO_MATCH_FOUND)
                 self._confirm_no_match(user=False)  # ‘잠시 보류’ 제거 (#3)
             return
@@ -1258,12 +1250,11 @@ class MatchPage(ProgressRowMixin, QWidget):
                 w.deleteLater()
 
     def _set_candidate_pane_visible(self, on: bool) -> None:
-        """우측 후보 패널 표시/숨김 + 중앙 카드의 안내 한 줄을 반대로 토글.
+        """우측 후보 패널 표시/숨김.
 
         스플리터는 숨은 자식을 자리로 치지 않으므로 남은 pane 이 폭을 전부 쓴다
         (저장된 분할 비율은 그대로 남아 있다가 패널이 돌아오면 다시 적용된다)."""
         self._right_panel.setVisible(bool(on))
-        self._auto_note.setVisible(not on)
 
     def _populate_right(self, candidates: list[Candidate]) -> None:
         # 수동 폴백이 실제로 돌았다 — 자동 모드에서 떼어 뒀던 패널을 되살린다.

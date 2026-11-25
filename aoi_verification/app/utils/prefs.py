@@ -119,6 +119,9 @@ class UiPrefs:
     dev_mode: bool = False
     dev_update_repo: str = ""
     dev_update_branch: str = ""
+    # 파일·폴더 고르기 창이 용도마다 마지막에 고른 곳의 폴더(`ui/folder_picker.py`).
+    # 키는 용도 이름(예: "setup_ref", "image_info"), 값은 폴더 경로.
+    last_dirs: dict[str, str] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------

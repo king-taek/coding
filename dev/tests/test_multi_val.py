@@ -341,6 +341,56 @@ def test_setup_page_collects_extra_verification_folders(styled_qapp, tmp_path,
     assert page._collect_input().extra_vals is None, "줄을 다 빼면 예전 실행과 같아야 한다"
 
 
+def test_setup_val_rows_are_numbered_from_one(styled_qapp, isolated_cache):
+    """검증 줄이 둘 이상이면 '검증 1', '검증 2', … — 하나면 '검증 장비' (현택님 2026-11-24)."""
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.pages.setup_page import SetupPage
+    page = SetupPage()
+    head = page.val_group.property("_headLabel")
+    assert head.text() == i18n.KO.SETUP_VAL_GROUP
+    page._add_val_row()
+    page._add_val_row()
+    assert [head.text()] + [r["label"].text() for r in page._val_rows] == \
+        ["검증 1", "검증 2", "검증 3"]
+    page._remove_val_row(page._val_rows[0])
+    assert [head.text()] + [r["label"].text() for r in page._val_rows] == \
+        ["검증 1", "검증 2"]
+    page._remove_val_row(page._val_rows[0])
+    assert head.text() == i18n.KO.SETUP_VAL_GROUP
+    page.deleteLater()
+
+
+def test_setup_val_row_labels_and_remove_buttons_line_up(styled_qapp, isolated_cache):
+    """'검증 N' 은 '검증 1' 과 같은 x 에서 시작하고, ✕ 는 줄마다 한 열에 선다."""
+    from aoi_verification.app.ui.pages.setup_page import SetupPage
+    from aoi_verification.app.ui.widgets.neon_button import NeonButton
+    page = SetupPage()
+    page.resize(1440, 900)
+    for _ in range(3):
+        page._add_val_row()
+    page.show()
+    for _ in range(5):
+        styled_qapp.processEvents()
+
+    def x_of(w):
+        return w.mapTo(page, w.rect().topLeft()).x()
+
+    head = page.val_group.property("_headLabel")
+    labels = [x_of(r["label"]) for r in page._val_rows]
+    removes = [x_of(next(b for b in r["host"].findChildren(NeonButton)
+                         if b.text() == "✕")) for r in page._val_rows]
+    edits = [x_of(r["edit"]) for r in page._val_rows]
+    assert set(labels) == {x_of(head)}, f"라벨 시작이 어긋났다: {x_of(head)} vs {labels}"
+    assert len(set(removes)) == 1, f"✕ 가 한 열이 아니다: {removes}"
+    assert removes[0] > labels[0], "✕ 는 라벨 오른쪽"
+    assert set(edits) == {x_of(page.val_path_edit)}, "입력란이 첫 장비와 같은 자리에서 시작해야 한다"
+    assert {r["label"].property("role") for r in page._val_rows} == {head.property("role")}
+    assert all(r["label"].width() >= r["label"].sizeHint().width() for r in page._val_rows), \
+        "'검증 N' 글자가 잘린다"
+    page.close()
+    page.deleteLater()
+
+
 def test_setup_page_refuses_the_same_folder_twice(styled_qapp, tmp_path,
                                                    isolated_cache, monkeypatch):
     from aoi_verification.app.ui.pages import setup_page as sp
@@ -370,3 +420,24 @@ def test_result_page_equipment_buttons(styled_qapp):
     assert picked == [1]
     page.set_equipments([], 0, None)
     assert page._equip_host.isHidden() and page._results_provider is None
+
+
+def test_slot_mismatch_sheet_has_header_style(isolated_cache, tmp_path):
+    """'Slot 불일치 목록' 시트도 다른 시트처럼 남색 머리 · 격자 · 머리 줄 고정(현택님 2026-11-25 Q4)."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    pytest.importorskip("PyQt6.QtWidgets")
+    openpyxl = pytest.importorskip("openpyxl")
+    from aoi_verification.app.i18n import ko
+    from aoi_verification.app.workers.exporter import HEADER_NAVY, ExcelExporter
+    res = FinalResult(mode="single", ref_machine="KLA", val_machine="AOI-4",
+                      matches=[], slot_only_ref=["S9"], slot_only_val=["S7"])
+    ExcelExporter(res, dst_path=tmp_path / "out.xlsx",
+                  template_path=tmp_path / "none.xlsx").run()
+    wb = openpyxl.load_workbook(tmp_path / "out.xlsx")
+    ws = wb[[n for n in wb.sheetnames if n.startswith(ko.SLOT_MISMATCH_SHEET)][0]]
+    assert [ws.cell(r, 2).value for r in (2, 3)] == ["S9", "S7"]
+    head = ws["A1"]
+    assert head.fill.fgColor.rgb == HEADER_NAVY and head.font.bold
+    assert ws["B3"].border.bottom.style == "thin"
+    assert ws.freeze_panes == "A2"
+    assert ws.column_dimensions["A"].width == ws.column_dimensions["B"].width == 15

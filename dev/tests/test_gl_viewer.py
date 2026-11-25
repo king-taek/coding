@@ -209,7 +209,7 @@ def test_removed_widgets_are_gone(dlg):
     for attr in ("overlay_cb", "range_cb", "thr_range"):                            # D1 · D2 — 따로 있던 막대·토글
         assert not hasattr(dlg, attr), attr
     names = {b.accessibleName() for b in dlg.findChildren(QAbstractButton)}
-    assert {"되돌리기", "모두 지우기"} <= names                # 그림 버튼은 이름으로 찾는다
+    assert {"되돌리기 (Z)", "모두 지우기"} <= names            # 그림 버튼은 이름으로 찾는다
     from aoi_verification.app.ui.widgets import gl_charts
     assert not hasattr(gl_charts, "ProfileChart")
     assert not hasattr(gl_charts.HistogramChart, "set_log")
@@ -593,11 +593,14 @@ def test_drop_and_paste_open_first_file_only(styled_qapp, tmp_path, monkeypatch)
 
 
 # ------------------------------------------------------------------ 화면 구성(2026-11 개편)
-def test_head_has_one_primary_and_all_buttons_are_32px(dlg):
+def test_head_save_buttons_are_primary_top_right_and_all_buttons_are_32px(dlg):
+    """현택님 2026-11-24 B2 안 A — 저장은 모두 파랑 · 오른쪽 위, [사진 선택] 은 위 왼쪽 회색."""
     from PyQt6.QtWidgets import QPushButton
     heads = [dlg.open_btn, dlg.compare_btn, dlg.png_btn, dlg.xlsx_btn]
-    assert [b.property("role") for b in heads] == ["textAccent", "textAction", "ghost", "primary"]
-    assert [b for b in dlg.findChildren(QPushButton) if b.property("role") == "primary"] == [dlg.xlsx_btn]
+    assert [b.property("role") for b in heads] == ["ghost", "textAction", "primary", "primary"]
+    assert [b for b in dlg.findChildren(QPushButton)
+            if b.property("role") == "primary" and b.isVisibleTo(dlg)] == [dlg.png_btn, dlg.xlsx_btn]
+    assert (dlg.png_btn.text(), dlg.xlsx_btn.text()) == ("그림으로 저장", "엑셀로 저장")
     _pump()
     assert {b.height() for b in heads} == {32}, [(b.text(), b.height()) for b in heads]
     assert dlg.png_rois.isCheckable() and dlg.png_rois.isChecked()     # PNG 메뉴 안의 선택
@@ -885,8 +888,11 @@ def test_empty_viewer_has_open_as_only_primary_and_disables_the_rest(styled_qapp
         d.resize(1280, 820)
         d.show()
         _pump()
-        assert d.open_btn.property("role") == "primary" and d.xlsx_btn.property("role") != "primary"
-        assert [b for b in d.findChildren(QPushButton) if b.property("role") == "primary"] == [d.open_btn]
+        # 빈 화면 = 가운데 큰 [사진 선택] 하나(현택님 2026-11-24 B1 안 B) — 위 왼쪽 버튼은 덮여 안 보인다.
+        assert d._empty_open.isVisibleTo(d) and d._empty_open.btn.text() == d.open_btn.text()
+        assert [b for b in d.findChildren(QPushButton)
+                if b.property("role") == "primary" and b.isVisibleTo(d)
+                and not d._empty_open.isAncestorOf(b)] == [d.png_btn, d.xlsx_btn]
         assert not any(b.isEnabled() for b in (d.xlsx_btn, d.png_btn, d.compare_btn, d.clear_btn,
                                                d.undo_btn, *d._tool_btns.values()))
         assert not d.scope.isEnabled()
@@ -895,7 +901,8 @@ def test_empty_viewer_has_open_as_only_primary_and_disables_the_rest(styled_qapp
         d.show_view(loader.ViewLoad(loader.GlImage(rng.integers(0, 255, (H, W)).astype(np.uint8),
                                                    8, False, "y.png", [])))
         _pump()
-        assert d.xlsx_btn.property("role") == "primary" and d.open_btn.property("role") == "textAccent"
+        assert not d._empty_open.isVisibleTo(d)
+        assert d.xlsx_btn.property("role") == "primary" and d.open_btn.property("role") == "ghost"
         assert all(b.isEnabled() for b in (d.xlsx_btn, d.png_btn, d.compare_btn, *d._tool_btns.values()))
         assert d.scope.isEnabled() and d._zoom_bar.isVisibleTo(d)
         assert {b.height() for b in (d.open_btn, d.compare_btn, d.png_btn, d.xlsx_btn)} == {32}
@@ -968,8 +975,37 @@ def test_scan_missing_shows_reason_and_toast(styled_qapp):
     v = loader.ViewLoad(loader.GlImage(np.full((H, W), 9, np.uint8), 8, True, "c.jpg", []),
                         scan_missing=True, source_path="c.jpg", scan_status="no_candidate")
     d = _make(styled_qapp, view=v)
-    assert "결함 위치를 담은 Scan 사진이 목록에 없음" in d.note.text()
+    assert "Defect 위치를 담은 Scan 사진이 목록에 없음" in d.note.text()
     assert "Scan 사진을 못 찾았습니다" in d.toast.text()
     d.close()
 
 
+
+
+def test_long_notes_do_not_widen_the_viewer(styled_qapp):
+    """긴 안내(상태줄 note · 머리줄 toast)가 한 줄로 서서 화면 최소 폭을 1332px 까지 키웠다 —
+    1100px 창에서 가로 스크롤이 생겼다(실측 2026-11-24).  줄을 바꿔 최소 폭을 지킨다."""
+    v = loader.ViewLoad(loader.GlImage(np.full((H, W), 9, np.uint8), 8, True, "c.jpg", []),
+                        scan_missing=True, source_path="c.jpg", scan_status="no_candidate")
+    d = _make(styled_qapp, view=v)
+    long = "아주 긴 안내 문장이 이어진다 · " * 12
+    d._set_note([long, long], warn=True)
+    d.toast.setText(long)
+    _pump()
+    assert d.note.wordWrap() and d.toast.wordWrap()
+    # 1100px 창 − 접힌 메뉴(76px) − 여백 안에 들어가야 한다.
+    assert d.minimumSizeHint().width() <= 1000, d.minimumSizeHint().width()
+    d.close()
+
+
+def test_default_save_name_follows_tool_rule(dlg, tmp_path, monkeypatch):
+    """기본 저장 이름은 다른 도구와 같은 규칙 ``GL_<사진이름>_<YYYYMMDD_HHMM>`` 이고,
+    폴더도 같은 결과 폴더다(사진의 NAS 폴더가 아니라)."""
+    import re
+    from pathlib import Path
+    from aoi_verification.app.utils import paths
+    monkeypatch.setattr(paths, "results_dir", lambda: tmp_path)
+    for suffix in (".xlsx", ".png"):
+        p = Path(dlg._default_name(suffix))
+        assert p.parent == tmp_path
+        assert re.fullmatch(r"GL_x_\d{8}_\d{4}" + re.escape(suffix), p.name), p.name

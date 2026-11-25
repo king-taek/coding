@@ -1,4 +1,7 @@
-"""KLA 질문 팝업 — 네 선택지를 **대등하게** 보여준다.
+"""선택 시트의 타일 모드(``choose(tiles=True)``) — 네 선택지를 **대등하게** 보여준다.
+
+(KLA 질문은 2026-11-24 그림 카드 창 `kla_side_dialog` 로 옮겼다 → `test_kla_side_dialog.py`.
+타일 모드 자체는 시트의 기능으로 남아 있어 여기서 계속 지킨다.)
 
 사용자 지적: "기준만 파란색 버튼인데 좀 이상합니다."  기준/검증/둘 다/KLA 아님 중
 정답이 정해져 있지 않은데 하나만 주 액션(파란 버튼)으로 서 있었다.  어느 하나가
@@ -13,8 +16,6 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import inspect
-
 import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
@@ -23,7 +24,6 @@ from PyQt6.QtCore import Qt                                    # noqa: E402
 from PyQt6.QtWidgets import QGridLayout                        # noqa: E402
 
 from aoi_verification.app import i18n                          # noqa: E402
-from aoi_verification.app.ui import main_window as mw          # noqa: E402
 from aoi_verification.app.ui.widgets import sheet_host as sh   # noqa: E402
 
 
@@ -34,8 +34,7 @@ _OPTIONS = [("ref", i18n.KO.KLA_SIDE_REF, "option"),
 
 
 def _sheet(styled_qapp, **kw):
-    return sh._ChoiceSheet(i18n.KO.KLA_ASK_TITLE, i18n.KO.KLA_ASK_SIDE_BODY,
-                           _OPTIONS, heading=i18n.KO.KLA_ASK_SIDE_HEADING, **kw)
+    return sh._ChoiceSheet("제목", "본문", _OPTIONS, heading="질문", **kw)
 
 
 def test_four_tiles_in_a_two_by_two_grid(styled_qapp):
@@ -121,15 +120,8 @@ def test_button_row_mode_still_works(styled_qapp):
                           default="install")
     try:
         assert not dlg.findChildren(QGridLayout)
-        assert dlg._buttons["install"].isDefault()
+        # 강조는 남고 Enter 기본 버튼은 없다(Enter 는 아무것도 누르지 않는다).
+        assert not dlg._buttons["install"].isDefault()
         assert dlg._buttons["install"].property("role") == "primary"
     finally:
         dlg.deleteLater()
-
-
-def test_main_window_asks_with_tiles():
-    """호출부가 실제로 타일 모드를 쓰는지 — 시트만 고쳐 두면 화면은 그대로다."""
-    src = inspect.getsource(mw.MainWindow._ask_kla_side)
-    assert "tiles=True" in src
-    assert "primary" not in src, "선택지 하나가 다시 주 액션이 됐다"
-    assert 'default="ref"' not in src, "기본값이 다시 생겨 하나만 강조된다"

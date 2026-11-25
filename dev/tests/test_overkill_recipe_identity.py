@@ -196,7 +196,7 @@ def test_zone_list_groups_by_recipe_first(styled_qapp, tmp_path):
         # 레시피 2 에 Defect 가 더 많아도 레시피 1 이 먼저다
         assert dlg.zone_keys() == [("Zones", 1), ("Recipe2-Zones", 1)]
         assert {k: h.text() for k, h in dlg.recipe_heads.items()} == {
-            "Zones": "레시피 1 · BS_1", "Recipe2-Zones": "레시피 2 · BS_2"}
+            "Zones": "Recipe 1 · BS_1", "Recipe2-Zones": "Recipe 2 · BS_2"}
         col = dlg._zone_col
         order = [col.itemAt(i).widget() for i in range(col.count())]
         assert order == [dlg.recipe_heads["Zones"], dlg.zone_btns[("Zones", 1)],
@@ -221,8 +221,8 @@ def test_recipe_head_text():
     pytest.importorskip("PyQt6.QtWidgets")
     from aoi_verification.app.ui.widgets.threshold_preview_dialog import recipe_head, recipe_no
     assert (recipe_no("Zones"), recipe_no("Recipe3-Zones")) == (1, 3)
-    assert recipe_head("Recipe3-Zones", "x20") == "레시피 3 · x20"
-    assert recipe_head("Recipe2-Zones", "레시피 2") == "레시피 2"               # 이름이 없으면 번호만
+    assert recipe_head("Recipe3-Zones", "x20") == "Recipe 3 · x20"
+    assert recipe_head("Recipe2-Zones", "Recipe 2") == "Recipe 2"               # 이름이 없으면 번호만
 
 
 # --------------------------------------------------------------------------- 한 레시피 결과가 없는 웨이퍼
