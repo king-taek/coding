@@ -1403,6 +1403,11 @@ class SetupPage(QWidget):
     _RAIL_ICON_W = 52
     # 접은 메뉴의 좌우 여백.  펼친 메뉴는 창 여백(page_margin)·섹션 간격을 쓴다.
     _RAIL_FOLD_PAD = 12
+    # 접힌 메뉴 칸: 펼친 칸(44) + 줄 간격(10) 을 한 칸(54)으로 써서, 아이콘 + 짧은 이름 묶음이
+    # 선택 바탕 가운데에 오게 한다.  칸이 이어 붙어 간격이 같으니 아이콘 y 는 펼쳤을 때와 같다
+    # (아이콘은 칸 위에서 22 = 펼친 칸의 가운데, QSS [railFolded] 의 padding-bottom 10).
+    _RAIL_FOLDED_H = 54
+    _RAIL_SHORT_BOTTOM = 8
 
     def _build_tool_rail(self) -> QWidget:
         """왼쪽 메뉴 — 매칭 · 사진 정보 · Wafer Map · Defect 추출 · GL, 맨 아래 업데이트 확인.
@@ -1455,6 +1460,7 @@ class SetupPage(QWidget):
         head.setFixedHeight(34)
         col.addWidget(head)
         col.addSpacing(6)
+        self._rail_head_gap = col.itemAt(col.count() - 1).spacerItem()
         # 기본 화면(매칭 설정)으로 돌아오는 버튼 — 아이콘은 프로그램 아이콘(사용자 요청).
         self.match_btn = NeonButton(i18n.KO.MATCH_NAV_BUTTON, role="ghost")
         self.match_btn.clicked.connect(lambda: self.show_page("match"))
@@ -1513,7 +1519,7 @@ class SetupPage(QWidget):
         # 위아래 가운데, 이름은 그 아래 빈 자리)라 접힘·펼침에서 아이콘 y 가 달라지지 않는다.
         for key, b in (*self._nav_buttons.items(), ("update", self.update_btn)):
             lay = QVBoxLayout(b)
-            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setContentsMargins(0, 0, 0, self._RAIL_SHORT_BOTTOM)
             lay.addStretch(1)
             lb = QLabel(i18n.KO.RAIL_SHORT_NAMES[key], b)
             lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1685,6 +1691,26 @@ class SetupPage(QWidget):
             if lb is not None:
                 lb.setVisible(not on)
             b.setToolTip(tip if on else (f"{text}\n{tip}" if tip else text))
+            self._rail_set_compact(b, not on)
+        self._rail_lay.setSpacing(10 if on else 0)
+        # 머리줄 아래 간격은 줄 간격(10)이 빠진 만큼 메운다 — 첫 칸 위치가 그대로여야 한다.
+        self._rail_head_gap.changeSize(0, 6 if on else 16)
+
+    def _rail_set_compact(self, b: QPushButton, on: bool) -> None:
+        """접힌 칸 높이 54 · 아이콘 위로 10 — 펼치면 원래 높이 제한으로 되돌린다."""
+        if bool(b.property("railFolded")) == on:
+            return
+        if b.property("_railHeights") is None:
+            b.setProperty("_railHeights", (b.minimumHeight(), b.maximumHeight()))
+        b.setProperty("railFolded", on)
+        b.style().unpolish(b)
+        b.style().polish(b)
+        if on:
+            b.setFixedHeight(self._RAIL_FOLDED_H)
+        else:
+            lo, hi = b.property("_railHeights")
+            b.setMinimumHeight(lo)
+            b.setMaximumHeight(hi)
 
     def tool_title(self) -> str:
         """지금 보이는 도구 화면의 제목(매칭·추출이면 빈 문자열) — 창 맨 위 단계 줄에 띄운다."""

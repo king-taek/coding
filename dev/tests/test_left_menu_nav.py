@@ -424,7 +424,13 @@ def test_fold_keeps_every_row_at_the_same_height(styled_qapp):
         page.rail_fold_btn.click()
         page._apply_rail_collapsed(animate=False)
         assert page.is_rail_folded()
-        assert ys() == unfolded
+        folded = ys()
+        # 줄의 위치는 그대로.  메뉴 칸만 접으면 54 로 길어진다 — 아이콘 + 짧은 이름 묶음이 선택
+        # 바탕 가운데에 오게(현택님 2026-11-25).  아이콘 y 는 test_rail_style_fields 가 본다.
+        assert [y for y, _h in folded] == [y for y, _h in unfolded]
+        n_menu = len(page._tool_buttons) + 1
+        assert folded[:-n_menu] == unfolded[:-n_menu]
+        assert all(h == page._RAIL_FOLDED_H for _y, h in folded[-n_menu:])
     finally:
         page.close()
 

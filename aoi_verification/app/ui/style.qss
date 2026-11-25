@@ -693,6 +693,13 @@ QPushButton[grade="rail"]:focus {
     padding: $pad_control;
     padding-left: 16px;
 }
+/* 접힌 메뉴 칸(54) — 아이콘을 위로 올려 아래 짧은 이름과 한 묶음으로 바탕 가운데에 둔다.
+   아이콘 가운데 = 칸 위에서 22 = 펼친 칸(44)의 가운데라 접어도 아이콘이 움직이지 않는다. */
+QPushButton[grade="rail"][railFolded="true"],
+QPushButton[grade="rail"][railFolded="true"]:focus {
+    padding-top: 0px;
+    padding-bottom: 10px;
+}
 
 /* ★ :disabled 도 마찬가지다 — `[role="ghost"] { color: $ink2 }` 가 일반
    `:disabled { color: $mute }` 를 특이도 동급·후순위로 덮어, 비활성 ± 버튼의 글리프가
