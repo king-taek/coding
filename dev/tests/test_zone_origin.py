@@ -165,6 +165,145 @@ def test_dialog_arrows_move_open(dlg):
     assert dlg._open != first and dlg._open == dlg._tile_order[1]
 
 
+def test_arrow_keys_after_clicking_a_photo(dlg):
+    """사진을 누른 뒤 화살표 — 키보드가 스크롤 칸으로 가 화살표를 스크롤이 먹어 사진이 안 옮겨졌다(현택님 2026-11-25)."""
+    from PyQt6.QtCore import QPoint, Qt
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QApplication
+    dlg.show()
+    dlg.activateWindow()
+    QApplication.processEvents()
+    dlg._relayout_timer.stop()                 # 보인 뒤 폭이 정해진 열 수로 한 번 맞추고 시작한다(열 수가 바뀌면 아래 기대 칸이 달라진다)
+    dlg._relayout_now()
+    QApplication.processEvents()
+    k = dlg._tile_order[5]
+    QTest.mouseClick(dlg._tiles[k], Qt.MouseButton.LeftButton, pos=QPoint(30, 30))
+    QApplication.processEvents()
+    assert dlg._open == k
+    cols = len(dlg._tile_rows[0])
+    for key, want in ((Qt.Key.Key_Right, 6), (Qt.Key.Key_Down, 6 + cols), (Qt.Key.Key_Left, 5 + cols),
+                      (Qt.Key.Key_Up, 5)):
+        QTest.keyClick(QApplication.focusWidget() or dlg, key)
+        QApplication.processEvents()
+        assert dlg._open == dlg._tile_order[want], key
+
+
+def test_arrow_past_last_photo_shows_more(dlg):
+    """보이는 사진 끝에서 → — [더 보기] 처럼 다음 묶음을 붙이고 그 첫 사진으로 간다."""
+    from aoi_verification.app.ui.widgets import zone_origin_dialog as Z
+    dlg.open_item(dlg._tile_order[-1])
+    assert dlg.move_current(1, 0)
+    assert len(dlg._tiles) == 2 * Z.PAGE_TILES
+    assert dlg._open == dlg._tile_order[Z.PAGE_TILES]
+
+
+def test_arrows_drop_passed_detail_photos(dlg):
+    """화살표로 지나간 Defect 의 큰 사진은 원하는 목록에서 빠진다(만들러 가지 않는다) — 멈춘 Defect 것만 남는다."""
+    for _ in range(5):
+        dlg.move_current(1, 0)
+    mids = {w for w in dlg._wanted if w[2] == "mid"}
+    it = dlg.current()
+    assert mids <= {(str(it.photo), 136, "mid")}
+
+
+@pytest.fixture
+def dlg_photos(dlg, tmp_path):
+    """샘플은 사진 실물이 없어(이름만) 사진 경로가 비어 있다 — Defect 마다 가짜 사진 경로를 붙여 다시 그린다."""
+    from dataclasses import replace
+    for f, w in list(dlg._data.items()):
+        dlg._data[f] = replace(w, items=tuple(replace(it, photo=tmp_path / f"{it.kind}_{it.index}.c.jpeg")
+                                             for it in w.items))
+    dlg._open = None
+    dlg._render()
+    return dlg
+
+
+def test_thumb_queue_takes_visible_photo_first(dlg, monkeypatch):
+    """일꾼은 줄 맨 앞이 아니라 화면에 보이는 칸의 사진부터 꺼낸다(스크롤 · [더 보기] 뒤에도 보이는 것부터)."""
+    done = []
+    monkeypatch.setattr(dlg, "_thumb_job", lambda path, size, kind: done.append(str(path)))
+    with dlg._q_lock:
+        dlg._queue[:] = [("a", 118, "thumb"), ("b", 118, "thumb"), ("c", 118, "thumb")]
+    dlg._hot = frozenset({"c"})
+    dlg._thumb_next()
+    dlg._hot = frozenset()
+    dlg._thumb_next()
+    assert done == ["c", "a"]
+
+
+def test_visible_tiles_are_hot_after_scroll(dlg_photos):
+    from PyQt6.QtWidgets import QApplication
+    dlg = dlg_photos
+    dlg.show()
+    QApplication.processEvents()
+    dlg._update_hot()
+    first = {str(dlg._tiles[k].wait_path) for k in dlg._tile_order[:3]}
+    last = str(dlg._tiles[dlg._tile_order[-1]].wait_path)
+    assert first <= dlg._hot and last not in dlg._hot
+    dlg.grid_scroll.verticalScrollBar().setValue(dlg.grid_scroll.verticalScrollBar().maximum())
+    dlg._update_hot()
+    assert last in dlg._hot
+
+
+def test_detail_photo_not_queued_behind_list(dlg_photos, monkeypatch, tmp_path):
+    """오른쪽 큰 사진은 따로 1명이 받는다 — 목록 사진이 다 끝나기 전에 뜬다(실측: 줄 서면 5.7초, 따로면 0.7초)."""
+    import time
+    from PIL import Image
+    from PyQt6.QtWidgets import QApplication
+    from aoi_verification.app.utils import image_io
+    jpg = tmp_path / "t.jpg"
+    Image.new("RGB", (40, 30), (90, 90, 90)).save(jpg)
+    list_done = []
+
+    def slow_thumb(_p):
+        time.sleep(0.05)
+        list_done.append(1)
+        return jpg
+    monkeypatch.setattr(image_io, "get_map_thumb_path", slow_thumb)
+    monkeypatch.setattr(image_io, "get_mid_path", lambda _p: jpg)
+    image_io.clear_tile_cache()
+    dlg = dlg_photos
+    dlg._render()                                      # 목록 60칸 + 큰 사진을 다시 원한다
+    end = time.monotonic() + 5
+    while time.monotonic() < end:
+        QApplication.processEvents()
+        pm = dlg.color_pic.pixmap()
+        if pm is not None and not pm.isNull():
+            break
+        time.sleep(0.01)
+    assert dlg.color_pic.pixmap() is not None and not dlg.color_pic.pixmap().isNull()
+    assert len(list_done) < 30                          # 60칸이 다 끝나기 훨씬 전에 큰 사진이 왔다
+
+
+def test_detail_shows_small_photo_first(dlg_photos):
+    """큰 사진이 아직이면 목록의 작은 사진을 바로 보인다(흐렸다가 선명해진다)."""
+    from PyQt6.QtGui import QPixmap
+    from aoi_verification.app.ui.widgets.threshold_preview_dialog import _tile_key
+    from aoi_verification.app.ui.widgets import zone_origin_dialog as Z
+    from aoi_verification.app.utils import image_io
+    image_io.clear_tile_cache()
+    dlg = dlg_photos
+    it = dlg.current()
+    pm = QPixmap(Z.TILE_PX, Z.TILE_PX)
+    pm.fill()
+    image_io._get_tile_cache().put(_tile_key(it.photo, Z.TILE_PX), pm)
+    dlg._render_detail()
+    assert dlg.color_pic.pixmap() is not None and not dlg.color_pic.pixmap().isNull()
+
+
+def test_list_time_goes_to_log(dlg, caplog):
+    """목록 사진 한 묶음이 다 뜨면 app.log 에 걸린 시간 한 줄(고친 뒤 실제로 빨라졌는지 보는 용도)."""
+    import logging
+    dlg._batch = None
+    dlg._batch_add("p1")
+    dlg._batch_add("p2")
+    with caplog.at_level(logging.INFO, logger="aoi.zone_origin"):
+        dlg._batch_done("p1")
+        assert not [r for r in caplog.records if "목록 사진" in r.getMessage()]
+        dlg._batch_done("p2")
+    assert [r for r in caplog.records if "목록 사진 2장" in r.getMessage()]
+
+
 def test_dialog_remove_and_undo(dlg):
     dlg.remove_folder(SAMPLE)
     assert dlg._passed == [] and dlg.notice.isVisibleTo(dlg)
