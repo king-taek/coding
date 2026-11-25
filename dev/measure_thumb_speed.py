@@ -1,20 +1,24 @@
 """'어느 Zone에서 왔니?' 사진 목록 썸네일이 왜 느린지 재는 측정 도구(읽기 전용, 이 파일 하나로 돈다).
 
-현택님 사용법: VS Code 에서 이 파일을 열고 F5 → 사진이 든 폴더(LOT 이나 웨이퍼 폴더)를 고른다 →
-5분쯤 기다린다 → 바탕 화면에 생긴 ``속도측정_썸네일_날짜_시각.zip`` 을 올린다.  고칠 곳은 없다.
+현택님 사용법: VS Code 에서 이 파일을 열고 F5 → 그냥 기다린다(최대 30분) → 바탕 화면에 생긴
+``속도측정_썸네일_날짜_시각.zip`` 을 올린다.  고칠 곳도, 고를 폴더도 없다.
 
-* 고른 폴더에는 **아무것도 쓰지 않는다**(읽기만).  임시 파일은 PC 임시 폴더에 만들고 끝나면 지운다.
-* zip 에는 **사진이 들어가지 않는다** — 파일 이름 · 크기 · 가로세로 · 걸린 시간만 담는다.
+* NAS 의 ``AOI-*\\Scanresult`` 를 스스로 찾아 **여러 장비의 LOT 을 무작위로** 골라 잰다(Conder 도 조금).
+  NAS 가 안 보이면 폴더를 고르는 창이 뜬다.  중간에 멈춰도(Ctrl+C) 그때까지 잰 것으로 zip 을 만든다.
+* NAS 에는 **아무것도 쓰지 않는다**(읽기만).  임시 파일은 PC 임시 폴더에 만들고 끝나면 지운다.
+* zip 에는 **사진이 들어가지 않는다** — 폴더 · 파일 이름 · 크기 · 가로세로 · 걸린 시간만 담는다.
 * 표준 파이썬만 쓴다(앱 코드 · 다른 dev 스크립트를 불러오지 않는다).  Pillow 가 있으면 디코드 · 앱 흉내
   측정까지 하고, 없으면 그 부분만 건너뛰고 요약에 적는다.
 * 한 번 읽은 파일은 윈도우가 기억해 두 번째부터 빠르다.  그래서 '처음 읽기' 측정마다 **서로 다른 사진**을
-  쓰고, 같은 사진을 다시 읽는 측정(T4)을 따로 둬 그 효과를 숫자로 남긴다.
+  쓰고, 같은 사진을 다시 읽는 측정을 따로 둬 그 효과를 숫자로 남긴다(오늘 앱에서 본 LOT 은 표시).
 
-머리 없이 돌리기(개발자용): ``python dev/measure_thumb_speed.py <폴더> [<폴더> …]``
+개발자용: ``python dev/measure_thumb_speed.py [--minutes 분] [--nas-base 폴더] [<폴더> …]``
+(폴더를 주면 NAS 찾기 없이 그 폴더들만 잰다.  ``--nas-base`` 는 ``AOI-*`` 가 든 폴더 — 합성 트리 시험용.)
 """
 
 from __future__ import annotations
 
+import argparse
 import csv
 import io
 import json
@@ -30,6 +34,7 @@ import threading
 import time
 import traceback
 import zipfile
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -51,30 +56,62 @@ MID_PX, MID_Q = 800, 88                     # 오른쪽 큰 사진
 APP_WORKERS, PAGE_TILES = 3, 60
 CACHE_DIRNAME = ".aoi_verification_cache"
 
-# ── 측정 한도(전체 5분 안쪽) ────────────────────────────────────────────────────────────────────
-TOTAL_BUDGET_S = 280
-LIST_CAP_S, LIST_MAX_FILES, LIST_MAX_DEPTH = 30, 30000, 4
-RAW_WORKERS = (1, 3, 6, 8, 12, 16)
-PIPE_WORKERS = (3, 6, 8, 12, 16)
-STEP_CAP_S = 10                             # 일꾼 수 하나당 최대 시간
-MAX_READ_BYTES = 64 * 1024 * 1024           # 이보다 큰 파일은 읽지 않는다
-CPU_SAMPLES = 12
-CSV_FILE_ROWS = 30000
+# ── NAS 위치(dev/coord_lab.py nas_default_roots 와 같은 규칙) ───────────────────────────────────
+UNC_SHARES = [r"\\10.142.80.91\nas3-1"]
+CONDER_ROOT = r"\\k5cifsn2\k5tsvdata$\1. Conder Scan"
+CONDER_SKIP_TOP = ("0. 전산",)              # 고객 폴더가 아닌 파일 보관함
+WAFER_MARK = ("colorimagegrabinginfo.ini", "params_waferinfo.ini")
+SURFACE_NAME = "surface.flt"
 
-WANT = [("stat", 60), ("cold", 40)]
-WANT += [(f"raw{w}", 48) for w in RAW_WORKERS]
-WANT += [(f"pipe{w}", 40) for w in PIPE_WORKERS]
-WANT += [("pipe_bytes3", 40), ("first60_w3", PAGE_TILES), ("first60_w8", PAGE_TILES)]
+# ── 측정 한도 ───────────────────────────────────────────────────────────────────────────────────
+DEFAULT_MINUTES = 30.0
+DISCOVERY_SHARE = 1 / 6                     # 헛걸음(LOT 을 못 찾은 탐색)에 쓰는 시간 상한 = 전체의 1/6(30분이면 5분)
+MAX_DEPTH = 7
+SCAN_CAP = 5000                             # 폴더 하나에서 훑는 항목 수 — 수십만 개짜리 폴더가 있다
+SCAN_CAP_S = 10
+LOT_CAP_S = 90                              # LOT 하나에 쓰는 최대 시간
+MAX_LOTS = 80
+LOT_WAFERS = 4                              # LOT 마다 사진을 모으는 웨이퍼 수
+MIN_PHOTOS = 12                             # 이보다 적으면 그 LOT 은 재지 않는다
+CONDER_EVERY = 6                            # 6번에 한 번은 Conder
+RAW_WORKERS = (3, 6, 8, 12, 16)             # 1 은 '처음 읽기(한 장씩)' 가 맡는다
+STEP_CAP_S = 6                              # 일꾼 수 하나당 최대 시간
+MAX_READ_BYTES = 64 * 1024 * 1024           # 이보다 큰 파일은 읽지 않는다
+CPU_SAMPLES = 2                             # LOT 마다 PC 계산만 재는 사진 수
+SLOW_60_S = 3.0                             # 첫 화면 60칸이 이보다 오래 걸리면 '느린 LOT'
+
+WANT = [("stat", 20), ("cold", 24)] + [(f"raw{w}", 24) for w in RAW_WORKERS]
+WANT += [("first60_w3", PAGE_TILES), ("first60_w8", PAGE_TILES)]
+NEED = sum(n for _, n in WANT)
 
 T0 = time.perf_counter()
-END = T0 + TOTAL_BUDGET_S
+END = T0 + DEFAULT_MINUTES * 60             # main 이 --minutes 로 다시 정한다
+LOT_END = float("inf")
+STOP = threading.Event()
+CUR = {"lot": ""}
+RND = random.Random()
 timings: list[dict] = []                    # 파일별 측정 → timings.csv
 errors: list[str] = []
 _lock = threading.Lock()
 
 
+def _mmss(sec: float) -> str:
+    sec = max(0, int(sec))
+    return f"{sec // 60}:{sec % 60:02d}"
+
+
 def say(msg: str) -> None:
-    print(f"[{time.perf_counter() - T0:5.0f}초] {msg}", flush=True)
+    now = time.perf_counter()
+    print(f"[{_mmss(now - T0)} 지남 · 남은 시간 {_mmss(END - now)}] {msg}", flush=True)
+
+
+def limit(cap_s: float) -> float:
+    """지금부터 cap_s 초 뒤 — 단, 전체 마감 · LOT 마감을 넘지 않는다."""
+    return min(END, LOT_END, time.perf_counter() + cap_s)
+
+
+def expired(deadline=None) -> bool:
+    return STOP.is_set() or time.perf_counter() > (END if deadline is None else min(END, deadline))
 
 
 def ms(sec: float) -> float:
@@ -96,6 +133,7 @@ def note_error(where: str, exc: BaseException) -> None:
 
 
 def add_row(**row) -> None:
+    row = {"lot": CUR["lot"], **row}
     with _lock:
         timings.append(row)
 
@@ -183,81 +221,114 @@ def environment(folders) -> dict:
     return env
 
 
-# ── T1 폴더 훑기 ────────────────────────────────────────────────────────────────────────────────
-def list_folders(folders):
-    """(파일 목록, 폴더별 기록, 요약).  파일 = dict(path, name, kind, size, dir).  읽기만 한다."""
-    files, dir_rows = [], []
-    deadline = min(END, time.perf_counter() + LIST_CAP_S)
-    queue = [(os.path.abspath(f), 0) for f in folders]
-    seen, truncated = set(), ""
-    while queue:
-        if time.perf_counter() > deadline:
-            truncated = f"시간 한도 {LIST_CAP_S}초"
-            break
-        if len(files) >= LIST_MAX_FILES:
-            truncated = f"파일 한도 {LIST_MAX_FILES}개"
-            break
-        d, depth = queue.pop(0)
-        if d in seen:
-            continue
-        seen.add(d)
-        t = time.perf_counter()
-        n_entries, counts, subdirs = 0, {}, []
+# ── NAS 찾기 · 무작위로 LOT 고르기 ──────────────────────────────────────────────────────────────
+def nas_roots(extra_bases=()):
+    """이 PC 에서 보이는 ``<드라이브 또는 공유>\\AOI-*\\Scanresult`` 전부 + Conder Scan."""
+    bases = [Path(b) for b in extra_bases]
+    if os.name == "nt":
+        bases += [Path(f"{c}:\\") for c in "DEFGHIJKLMNOPQRSTUVWXYZ"] + [Path(u) for u in UNC_SHARES]
+    starts, seen = [], set()
+    for b in bases:
         try:
-            with os.scandir(d) as it:
-                for e in it:
-                    n_entries += 1
-                    try:
-                        if e.is_dir():
-                            subdirs.append(e.path)
-                        elif e.is_file():
-                            k = kind_of(e.name)
-                            counts[k] = counts.get(k, 0) + 1
-                            if k != "other":
-                                # 윈도우는 목록에 크기가 딸려 와 추가 왕복이 없다
-                                files.append({"path": e.path, "name": e.name, "kind": k,
-                                              "size": e.stat().st_size, "dir": len(dir_rows)})
-                    except OSError as exc:
-                        note_error(f"list {e.name}", exc)
-        except OSError as exc:
-            note_error(f"scandir {d}", exc)
-        took = time.perf_counter() - t
-        dir_rows.append({"dir_id": len(dir_rows), "dir": d, "depth": depth, "entries": n_entries,
-                         "scandir_ms": ms(took), **{k: counts.get(k, 0) for k in
-                                                    ("color", "scan", "overview", "other")}})
-        if len(dir_rows) % 20 == 0:
-            say(f"  폴더 {len(dir_rows)}개 훑음, 사진 {len(files)}장")
-        if depth < LIST_MAX_DEPTH:
-            queue.extend((s, depth + 1) for s in sorted(subdirs))
-    total_ms = sum(r["scandir_ms"] for r in dir_rows)
-    n_ent = sum(r["entries"] for r in dir_rows)
-    summary = {"dirs": len(dir_rows), "entries": n_ent, "total_ms": round(total_ms, 1),
-               "ms_per_1000_entries": round(total_ms / n_ent * 1000, 1) if n_ent else None,
-               "truncated": truncated, "slowest_dir_ms": max((r["scandir_ms"] for r in dir_rows), default=0)}
-    for k in ("color", "scan", "overview"):
-        sizes = [f["size"] for f in files if f["kind"] == k]
-        summary[k] = {"count": len(sizes), "total_mb": round(sum(sizes) / 1e6, 1),
-                      "size_kb": stats([s / 1024 for s in sizes])}
-    return files, dir_rows, summary
+            for d in sorted(b.glob("AOI-*")):
+                sr = next((p for p in (d / "Scanresult", d / "ScanResult", d / "ScanResults")
+                           if p.is_dir()), None)
+                if sr is not None and d.name.upper() not in seen:   # 같은 공유가 두 글자로 물려 있다
+                    seen.add(d.name.upper())
+                    starts.append({"kind": "scanresult", "machine": d.name, "path": str(sr), "fails": 0})
+        except OSError:
+            continue
+    conder = None
+    try:
+        if os.name == "nt" and os.path.isdir(CONDER_ROOT):
+            conder = {"kind": "conder", "machine": "Conder", "path": CONDER_ROOT, "fails": 0}
+    except OSError:
+        pass
+    return starts, conder
 
 
-def make_plan(color):
-    """측정마다 서로 다른 사진 묶음을 나눈다.  모자라면 같은 비율로 줄인다."""
-    seed = int(time.time())                 # 돌릴 때마다 다른 사진 — 두 번째 실행이 '이미 읽은 사진' 이 되지 않게
-    rnd = random.Random(seed)
-    pool = [f for f in color if 0 < f["size"] <= MAX_READ_BYTES]
-    rnd.shuffle(pool)
-    want = [w for w in WANT if Image is not None or not w[0].startswith(("pipe", "first60"))]
-    need = sum(n for _, n in want)
-    scale = min(1.0, len(pool) / need) if need else 0
-    plan, at = {}, 0
-    for name, n in want:
-        k = n if scale >= 1 else max(1, int(n * scale))
-        plan[name] = pool[at:at + k]
-        at += k
-    info = {"seed": seed, "usable_photos": len(pool), "wanted": need, "scale": round(scale, 3),
-            "set_sizes": {k: len(v) for k, v in plan.items()}}
-    return plan, info
+SCAN: dict[str, dict] = {}                  # 폴더 → 훑은 결과(같은 폴더를 두 번 훑지 않는다)
+DEAD: set[str] = set()                      # 아래에 잴 것이 없는 폴더
+DONE: set[str] = set()                      # 이미 잰 LOT
+folder_rows: list[dict] = []                # → folders.csv
+
+
+def scan_dir(d: str):
+    """폴더 하나를 한 번 훑는다(읽기만): 하위 폴더 · 사진(이름 · 크기) · 표식 파일.  못 읽으면 None."""
+    if d in SCAN:
+        return SCAN[d]
+    info = {"dirs": [], "files": [], "entries": 0, "truncated": False, "marker": False, "surface": False,
+            "mtime": None}
+    deadline = time.perf_counter() + SCAN_CAP_S
+    t = time.perf_counter()
+    try:
+        with os.scandir(d) as it:
+            for e in it:
+                if info["entries"] >= SCAN_CAP or expired(deadline):
+                    info["truncated"] = True
+                    break
+                info["entries"] += 1
+                try:
+                    if e.is_dir(follow_symlinks=False):
+                        info["dirs"].append((e.name, e.path, e.stat().st_mtime))
+                        continue
+                    low = e.name.lower()
+                    if low in WAFER_MARK:
+                        info["marker"] = True
+                    elif low == SURFACE_NAME:
+                        info["surface"] = True
+                    k = kind_of(e.name)
+                    if k != "other":                        # 윈도우는 목록에 크기가 딸려 와 추가 왕복이 없다
+                        info["files"].append({"path": e.path, "name": e.name, "kind": k, "size": e.stat().st_size})
+                except OSError as exc:
+                    note_error(f"scan {e.name}", exc)
+    except OSError as exc:
+        note_error(f"scandir {d}", exc)
+        SCAN[d] = None
+        return None
+    info["ms"] = ms(time.perf_counter() - t)
+    if info["truncated"]:                                   # 다 못 훑었으면 표식은 직접 묻는다
+        try:
+            info["marker"] = info["marker"] or any(os.path.isfile(os.path.join(d, m)) for m in
+                                                   ("ColorImageGrabingInfo.ini", "Params_WaferInfo.ini"))
+            info["surface"] = info["surface"] or os.path.isfile(os.path.join(d, "Surface.flt"))
+        except OSError:
+            pass
+    info["color"] = sum(1 for f in info["files"] if f["kind"] == "color")
+    SCAN[d] = info
+    return info
+
+
+def walk(start: dict, recent: bool):
+    """start 에서 무작위로 내려가 웨이퍼 폴더를 하나 찾는다 → (LOT 폴더, [첫 웨이퍼], LOT 수정 시각) 또는 None.
+
+    웨이퍼 폴더 = ``ColorImageGrabingInfo.ini`` 나 ``Params_WaferInfo.ini`` 가 든 폴더, LOT = 그 부모.
+    Scanresult 가 아닌 곳(Conder · 직접 고른 폴더)은 표식이 없어도 사진이 충분한 폴더를 그대로 한 단위로 본다.
+    recent 면 층마다 최근에 바뀐 폴더 쪽으로 기운다(새 LOT), 아니면 고르게 뽑는다(옛 LOT 포함)."""
+    d, parent, mtime, lot_mtime = start["path"], None, None, None
+    for depth in range(MAX_DEPTH + 1):
+        if expired() or d in DEAD or d in DONE:
+            return None
+        info = scan_dir(d)
+        if info is None:
+            DEAD.add(d)
+            return None
+        if info["marker"]:
+            lot, when = (parent, lot_mtime) if parent else (d, mtime)
+            return None if lot in DONE else (lot, [d], when)
+        if start["kind"] != "scanresult" and info["color"] >= MIN_PHOTOS:
+            return d, [d], mtime
+        subs = [s for s in info["dirs"] if s[1] not in DEAD and s[1] not in DONE]
+        if start["kind"] == "conder" and depth == 0:
+            subs = [s for s in subs if not s[0].startswith(CONDER_SKIP_TOP)]
+        if not subs:
+            DEAD.add(d)
+            return None
+        if recent and RND.random() < 0.7:
+            subs = sorted(subs, key=lambda s: -s[2])[:max(1, len(subs) // 5)]
+        name, path, mt = RND.choice(subs)
+        parent, lot_mtime, d, mtime = d, mtime, path, mt
+    return None
 
 
 # ── 읽기 측정 조각 ──────────────────────────────────────────────────────────────────────────────
@@ -290,15 +361,19 @@ def read_file(f, test, workers=1, keep=None, t_start=None):
 def run_pool(fn, items, workers, cap_s):
     """FIFO 풀(앱과 같은 ThreadPoolExecutor)로 돌린다.  시간 한도를 넘기면 남은 것은 건너뛴다."""
     start = time.perf_counter()
-    deadline = min(END, start + cap_s)
+    deadline = limit(cap_s)
 
     def job(item):
-        if time.perf_counter() > deadline:
+        if expired(deadline):
             return None
         return fn(item, start)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        rows = [r for r in pool.map(job, items) if r is not None]
+        try:
+            rows = [r for r in pool.map(job, items) if r is not None]
+        except BaseException:                               # Ctrl+C — 줄 선 일을 바로 비운다
+            STOP.set()
+            raise
     wall = time.perf_counter() - start
     ok = [r for r in rows if not r.get("error")]
     nbytes = sum(r.get("bytes", r.get("size", 0)) for r in ok)
@@ -369,7 +444,7 @@ def cpu_tests(kept):
         acc.setdefault(key, []).append(ms(t))
 
     for f, data in kept:
-        if time.perf_counter() > END:
+        if expired(LOT_END):
             break
         try:
             row = {"test": "cpu", "workers": 1, "name": f["name"], "size": f["size"]}
@@ -426,14 +501,14 @@ def first60(files, workers, tmpdir, detail_in_queue):
         box["detail_error"] = r.get("error")
 
     start = time.perf_counter()
-    deadline = min(END, start + STEP_CAP_S + 5)
+    deadline = limit(STEP_CAP_S + 3)
     side = None
     if not detail_in_queue:                                 # 고침 B 흉내: 큰 사진은 줄 서지 않는다
         side = threading.Thread(target=detail, args=(start,))
         side.start()
 
     def job(f):
-        if time.perf_counter() > deadline:
+        if expired(deadline):
             return None
         return pipeline(f, test, workers, tmpdir, start)
 
@@ -441,7 +516,11 @@ def first60(files, workers, tmpdir, detail_in_queue):
         futs = [pool.submit(job, f) for f in files]
         if detail_in_queue:                                 # 지금 앱: 목록 뒤에 줄 선다
             futs.append(pool.submit(detail, start))
-        rows = [x for x in (fu.result() for fu in futs[:len(files)]) if x]
+        try:
+            rows = [x for x in (fu.result() for fu in futs[:len(files)]) if x]
+        except BaseException:                               # Ctrl+C
+            STOP.set()
+            raise
     if side:
         side.join()
     done = sorted(r["t_done_ms"] for r in rows if not r.get("error"))
@@ -529,14 +608,14 @@ def cache_state():
     return out
 
 
-# ── 요약 ────────────────────────────────────────────────────────────────────────────────────────
-def best_workers(sweep):
-    """가장 빠른 속도의 90% 를 처음 넘는 일꾼 수(더 늘려도 이득이 작은 지점)."""
-    ok = [s for s in sweep if s.get("files_per_s") and s["done"] >= 3]
+# ── LOT 하나 재기 ───────────────────────────────────────────────────────────────────────────────
+def best_workers(curve):
+    """curve = [(일꾼 수, 초당 장수)] — 가장 빠른 속도의 90% 를 처음 넘는 일꾼 수(더 늘려도 이득이 작은 지점)."""
+    ok = sorted((w, v) for w, v in curve if v)
     if not ok:
         return None
-    top = max(s["files_per_s"] for s in ok)
-    return next(s["workers"] for s in sorted(ok, key=lambda s: s["workers"]) if s["files_per_s"] >= 0.9 * top)
+    top = max(v for _, v in ok)
+    return next(w for w, v in ok if v >= 0.9 * top)
 
 
 def med(d, *keys):
@@ -545,109 +624,257 @@ def med(d, *keys):
     return d
 
 
+def fold_reads(rows, wall):
+    ok = [r for r in rows if not r.get("error")]
+    d = {k: stats([r[k] for r in ok]) for k in ("open_ms", "first_ms", "read_ms", "total_ms")}
+    nb = sum(r["bytes"] for r in ok)
+    d.update(files=len(ok), errors=len(rows) - len(ok), wall_s=round(wall, 3),
+             files_per_s=round(len(ok) / wall, 2) if wall > 0 and ok else None,
+             mb_per_s=round(nb / 1e6 / wall, 2) if wall > 0 and ok else None)
+    return d
+
+
+def est60(f60, fps):
+    """첫 화면 60칸이 다 뜨는 데 걸릴 시간(초) — 흉내 측정이 있으면 그것으로, 없으면 초당 장수로."""
+    if f60 and f60.get("tiles_done") and f60.get("last_tile_ms"):
+        return round(f60["last_tile_ms"] / 1000 * PAGE_TILES / f60["tiles_done"], 2)
+    return round(PAGE_TILES / fps, 2) if fps else None
+
+
+def measure_lot(n, lot, wafers, lot_mtime, start, pick, tmpdir):
+    """LOT 하나(웨이퍼 몇 장)를 잰다 → (요약 한 줄 dict, 자세한 dict).  LOT_CAP_S 안에 끝낸다."""
+    global LOT_END
+    t_lot = time.perf_counter()
+    LOT_END = t_lot + LOT_CAP_S
+    CUR["lot"] = lot_id = f"L{n:02d}"
+    age = round((time.time() - lot_mtime) / 86400, 1) if lot_mtime else None
+    row = {"lot_id": lot_id, "kind": start["kind"], "machine": start["machine"], "lot_path": lot,
+           "pick": pick, "lot_age_days": age}
+    detail = {"lot_id": lot_id}
+
+    cands = list(wafers)
+    if lot != wafers[0] and SCAN.get(lot):
+        sibs = [s[1] for s in SCAN[lot]["dirs"] if s[1] != wafers[0]]
+        RND.shuffle(sibs)
+        cands += sibs[:8]
+    files, used, ent, lms, gather_end = [], [], 0, 0.0, limit(15)
+    for w in cands:
+        if len(used) >= LOT_WAFERS or sum(1 for f in files if f["kind"] == "color") >= NEED or expired(gather_end):
+            break
+        info = scan_dir(w)
+        if not info or (start["kind"] == "scanresult" and not info["marker"]):
+            continue
+        used.append(info)
+        files += info["files"]
+        ent += info["entries"]
+        lms += info["ms"]
+        folder_rows.append({"lot_id": lot_id, "dir": w, "entries": info["entries"], "scandir_ms": info["ms"],
+                            "truncated": info["truncated"], "marker": info["marker"], "surface_flt": info["surface"],
+                            **Counter(f["kind"] for f in info["files"])})
+    color = [f for f in files if f["kind"] == "color"]
+    scan_files = [f for f in files if f["kind"] == "scan"]
+    ckb = stats([f["size"] / 1024 for f in color])
+    row.update(wafers=len(used), marker=any(i["marker"] for i in used), surface_flt=any(i["surface"] for i in used),
+               entries=ent, list_ms=round(lms, 1), list_ms_per_1000=round(lms / ent * 1000, 1) if ent else None,
+               color_n=len(color), scan_n=len(scan_files), color_med_kb=ckb.get("median"), color_max_kb=ckb.get("max"),
+               scan_total_mb=round(sum(f["size"] for f in scan_files) / 1e6, 1))
+    pool = [f for f in color if 0 < f["size"] <= MAX_READ_BYTES]
+    if len(pool) < MIN_PHOTOS:
+        row["note"] = f"사진 부족({len(pool)}장) — 재지 않음"
+        return row, detail
+    RND.shuffle(pool)
+    want = [w for w in WANT if Image is not None or not w[0].startswith("first60")]
+    need = sum(k for _, k in want)
+    scale = min(1.0, len(pool) / need)
+    plan, at = {}, 0
+    for name, k in want:
+        k = k if scale >= 1 else max(1, int(k * scale))
+        plan[name] = pool[at:at + k]
+        at += k
+    row["scale"] = round(scale, 2)
+
+    st, cap = [], limit(5)                                  # 파일 정보 1회(앱의 memo_mtime)
+    for f in plan["stat"]:
+        if expired(cap):
+            break
+        try:
+            t = time.perf_counter()
+            os.stat(f["path"])
+            st.append(ms(time.perf_counter() - t))
+            add_row(test="stat", workers=1, name=f["name"], size=f["size"], stat_ms=st[-1])
+        except OSError as exc:
+            add_row(test="stat", workers=1, name=f["name"], size=f["size"], error=str(exc))
+    s = stats(st)
+    row.update(stat_med_ms=s.get("median"), stat_p90_ms=s.get("p90"))
+
+    kept, rows, read_set = [], [], []                       # 처음 읽기(한 장씩) → 같은 사진 다시 읽기
+    t, cap = time.perf_counter(), limit(15)
+    for f in plan["cold"]:
+        if expired(cap):
+            break
+        rows.append(read_file(f, "cold", keep=kept))
+        read_set.append(f)
+    cold = detail["cold"] = fold_reads(rows, time.perf_counter() - t)
+    t, cap, rows = time.perf_counter(), limit(8), []
+    for f in read_set:
+        if expired(cap):
+            break
+        rows.append(read_file(f, "warm"))
+    warm = detail["warm"] = fold_reads(rows, time.perf_counter() - t)
+    c_med, w_med = med(cold, "total_ms", "median"), med(warm, "total_ms", "median")
+    speed = round(c_med / w_med, 1) if c_med and w_med else None
+    row.update(cold_med_ms=c_med, cold_p90_ms=med(cold, "total_ms", "p90"), open_med_ms=med(cold, "open_ms", "median"),
+               first_med_ms=med(cold, "first_ms", "median"), read_med_ms=med(cold, "read_ms", "median"),
+               cold_mb_s=cold.get("mb_per_s"), warm_med_ms=w_med, warm_speedup=speed,
+               # 다시 읽어도 안 빨라졌다 = 처음 읽기가 이미 '기억된' 읽기였을 수 있다(오늘 앱에서 본 LOT)
+               warm_suspect=bool(speed is not None and speed < 1.5), fps_w1=cold.get("files_per_s"))
+
+    detail["sweep"] = []                                    # 동시에 읽는 수 바꿔 가며(묶음마다 다른 사진)
+    for w in RAW_WORKERS:
+        sw, _ = run_pool(lambda f, t0, w=w: read_file(f, f"raw{w}", w, t_start=t0), plan[f"raw{w}"], w, STEP_CAP_S)
+        detail["sweep"].append(sw)
+        row[f"fps_w{w}"] = sw["files_per_s"] if sw["done"] >= 3 else None
+    row["best_workers"] = best_workers([(1, row["fps_w1"])] + [(w, row[f"fps_w{w}"]) for w in RAW_WORKERS])
+
+    seen = [r for r in timings if r.get("lot") == lot_id and r.get("width")]
+    if seen:
+        row["dims_top"] = Counter(f"{r['width']}x{r['height']}" for r in seen).most_common(1)[0][0]
+        row["format"] = Counter(r.get("format", "") for r in seen).most_common(1)[0][0]
+
+    if Image is not None:
+        cpu = detail["cpu"] = cpu_tests(kept)               # PC 계산만(NAS 제외)
+        row.update(cpu_thumb_ms=med(cpu, "thumb120_total", "median"), cpu_mid_ms=med(cpu, "mid800_total", "median"),
+                   cpu_full_decode_ms=med(cpu, "full_decode_no_draft", "median"))
+        a = detail["first60_w3"] = first60(plan["first60_w3"], APP_WORKERS, tmpdir, detail_in_queue=True)
+        b = detail["first60_w8"] = first60(plan["first60_w8"], 8, tmpdir, detail_in_queue=False)
+        row.update(f60_w3_first_ms=a.get("first_tile_ms"), f60_w3_all_ms=a.get("last_tile_ms"),
+                   f60_w3_tiles=a.get("tiles_done"), f60_w3_detail_ms=a.get("detail_ms"),
+                   f60_w8_first_ms=b.get("first_tile_ms"), f60_w8_all_ms=b.get("last_tile_ms"),
+                   f60_w8_tiles=b.get("tiles_done"), f60_w8_detail_ms=b.get("detail_ms"))
+    kept.clear()
+    row["est60_w3_s"] = est60(detail.get("first60_w3"), row.get("fps_w3"))
+    row["est60_w8_s"] = est60(detail.get("first60_w8"), row.get("fps_w8"))
+    row["slow_first"] = bool(row["est60_w3_s"] and row["est60_w3_s"] > SLOW_60_S)
+    row["took_s"] = round(time.perf_counter() - t_lot, 1)
+    row["measured"] = True
+    return row, detail
+
+
+# ── 요약 ────────────────────────────────────────────────────────────────────────────────────────
+def col(rows, key):
+    return [r[key] for r in rows if r.get(key) is not None]
+
+
+def mid(rows, key, q=None):
+    v = sorted(col(rows, key))
+    if not v:
+        return "-"
+    return round(statistics.median(v) if q is None else v[min(len(v) - 1, int(q * len(v)))], 1)
+
+
 def write_summary(R) -> str:
-    L = ["썸네일 속도 측정 요약", f"측정 시각: {R['env']['when']}  (걸린 시간 {R.get('elapsed_s', '?')}초)", ""]
+    L = ["썸네일 속도 측정 요약", f"측정 시각: {R['env']['when']}  (걸린 시간 {_mmss(R.get('elapsed_s', 0))}, "
+         f"한도 {R.get('budget_min')}분)", ""]
     add = L.append
     if R.get("interrupted"):
-        add("※ 중간에 멈춰서 일부 측정만 들어 있습니다.")
+        add("※ 중간에 멈춰서 그때까지 잰 것만 들어 있습니다.")
     env = R["env"]
-    add(f"[환경] {env['os']} / Python {env['python']} / CPU {env['cpu_count']}개 / "
-        f"Pillow {env['pillow'] or '없음'}")
-    for f in env["folders"]:
-        add(f"  폴더({f['type']}): {f['path']}" + (f"  → {f['unc']}" if f.get("unc") else ""))
+    add(f"[환경] {env['os']} / Python {env['python']} / CPU {env['cpu_count']}개 / Pillow {env['pillow'] or '없음'}")
+    add(f"  고른 방식: {R.get('mode')}  /  시작 폴더 {len(env['folders'])}곳: "
+        + ", ".join(f"{f.get('machine', '')}({f['type']})" for f in env["folders"]))
     if not env["pillow"]:
-        add("  ※ Pillow 가 없어 디코드(T6) · 앱 흉내(T7~T8) 측정은 건너뛰었습니다. 읽기 측정은 정상입니다.")
-    ls = R.get("listing")
-    if ls:
+        add("  ※ Pillow 가 없어 PC 계산 · 첫 화면 흉내 측정은 건너뛰었습니다. NAS 읽기 측정은 정상입니다.")
+    lots = [r for r in R.get("lots_flat", []) if r.get("measured")]
+    skipped = [r for r in R.get("lots_flat", []) if not r.get("measured")]
+    d = R.get("discovery", {})
+    add(f"[찾기] 잰 LOT {len(lots)}개(사진 부족으로 건너뜀 {len(skipped)}개), 헛걸음 {d.get('failed_walks', 0)}번 "
+        f"{d.get('failed_s', 0)}초, 끝난 까닭: {d.get('stop_reason', '-')}")
+    if not lots:
+        add("  잰 LOT 이 없습니다.")
+    else:
         add("")
-        add(f"[T1 폴더 훑기] 폴더 {ls['dirs']}개, 항목 {ls['entries']}개, {ls['total_ms']} ms "
-            f"(1000개당 {ls['ms_per_1000_entries']} ms)" + (f"  ※ {ls['truncated']}에서 멈춤" if ls["truncated"] else ""))
-        for k, label in (("color", "Color 사진(목록에 나오는 것)"), ("scan", "Scan 사진(.t.)"), ("overview", "전경 사진")):
-            s = ls[k]
-            add(f"  {label}: {s['count']}장, 합계 {s['total_mb']} MB, 한 장 중앙값 {s['size_kb'].get('median', '-')} KB"
-                f" (최대 {s['size_kb'].get('max', '-')} KB)")
-    if R.get("dims"):
-        add(f"  가로세로(읽은 사진 기준): {R['dims']['top']}  / 형식: {R['dims']['formats']}")
-    pl = R.get("plan")
-    if pl and pl["scale"] < 1:
-        add(f"  ※ 사진이 {pl['usable_photos']}장뿐이라 측정 묶음을 {pl['scale']:.0%} 로 줄였습니다(필요 {pl['wanted']}장).")
-    if R.get("stat"):
-        add(f"[T2 파일 정보 1회(stat)] 중앙값 {R['stat'].get('median')} ms, 90% {R['stat'].get('p90')} ms")
-    c = R.get("cold")
-    if c:
-        add(f"[T3 처음 읽기, 한 번에 한 장] 한 장 {med(c, 'total_ms', 'median')} ms "
-            f"= 열기 {med(c, 'open_ms', 'median')} + 첫 64KB {med(c, 'first_ms', 'median')} + 나머지 {med(c, 'read_ms', 'median')}"
-            f"  / {c.get('mb_per_s')} MB/s")
-    w = R.get("warm")
-    if w:
-        add(f"[T4 같은 사진 다시 읽기] 한 장 {med(w, 'total_ms', 'median')} ms (처음 읽기 ÷ 다시 읽기 = {w.get('speedup', '?')}배)")
-    if R.get("raw_sweep"):
-        add("[T5 동시에 읽는 수를 바꿔 가며 읽기만] 일꾼 수: 초당 장수 (MB/s)")
-        add("  " + " | ".join(f"{s['workers']}: {s['files_per_s']} ({s['mb_per_s']})" for s in R["raw_sweep"]))
-    cpu = R.get("cpu")
-    if cpu:
-        add(f"[T6 PC 계산만(NAS 제외)] 120px 타일 한 장 {med(cpu, 'thumb120_total', 'median')} ms "
-            f"= 디코드 {med(cpu, 'thumb120_decode_draft', 'median')} + 줄이기 {med(cpu, 'thumb120_resize', 'median')}"
-            f" + 저장 {med(cpu, 'thumb120_save_optimize', 'median')}"
-            f" / 800px {med(cpu, 'mid800_total', 'median')} ms / 통째 디코드 {med(cpu, 'full_decode_no_draft', 'median')} ms")
-    if R.get("pipe_sweep"):
-        add("[T7 앱과 같은 방식(읽기+디코드+저장)] 일꾼 수: 초당 장수 → 60칸 예상")
-        add("  " + " | ".join(f"{s['workers']}: {s['files_per_s']} → {round(PAGE_TILES / s['files_per_s'], 1) if s['files_per_s'] else '?'}초"
-                              for s in R["pipe_sweep"]))
-    pb = R.get("pipe_bytes3")
-    if pb:
-        add(f"  통째로 읽은 뒤 디코드(일꾼 3): 초당 {pb['files_per_s']}장 (위 3과 비교)")
-    for key in ("first60_w3", "first60_w8"):
-        s = R.get(key)
-        if s and "skipped" not in s:
-            how = "목록 뒤에 줄 섬(지금 앱)" if s["detail_in_queue"] else "줄 서지 않음"
-            add(f"[T8 첫 화면 흉내, 일꾼 {s['workers']}] 첫 타일 {s['first_tile_ms']} ms, "
-                f"{s['tiles_done']}칸 다 뜸 {s['last_tile_ms']} ms, 오른쪽 큰 사진 {s['detail_ms']} ms ({how})")
-    lw = R.get("local_write")
-    if lw:
-        add(f"[T9 PC 디스크에 작은 파일 쓰기] 한 장 {med(lw, 'per_file_ms', 'median')} ms (90% {med(lw, 'per_file_ms', 'p90')} ms)")
-    for cst in R.get("cache", []):
-        if not cst["exists"]:
-            add(f"[T10 앱 캐시] {cst['root']} — 없음")
-            continue
-        add(f"[T10 앱 캐시] {cst['root']}")
-        for sub, d in cst["subdirs"].items():
-            add(f"  {sub}: {d['files']}개, {d['total_mb']} MB, 나이 {d['age']}"
-                + (f", 캐시에서 읽기 {d['hit_read_ms'].get('median')} ms" if d.get("hit_read_ms") else ""))
+        add(f"[전체 — LOT {len(lots)}개의 중앙값 (90%)]")
+        add(f"  사진 한 장: {mid(lots, 'color_med_kb')} KB  /  웨이퍼 폴더 훑기: 1000개당 {mid(lots, 'list_ms_per_1000')} ms")
+        add(f"  파일 정보 1회(stat): {mid(lots, 'stat_med_ms')} ms ({mid(lots, 'stat_med_ms', 0.9)})")
+        add(f"  처음 읽기 한 장: {mid(lots, 'cold_med_ms')} ms ({mid(lots, 'cold_med_ms', 0.9)}) "
+            f"= 열기 {mid(lots, 'open_med_ms')} + 첫 64KB {mid(lots, 'first_med_ms')} + 나머지 {mid(lots, 'read_med_ms')}"
+            f"  / {mid(lots, 'cold_mb_s')} MB/s")
+        add(f"  같은 사진 다시 읽기: {mid(lots, 'warm_med_ms')} ms (처음 ÷ 다시 = {mid(lots, 'warm_speedup')}배)")
+        if col(lots, "cpu_thumb_ms"):
+            add(f"  PC 계산만: 120px 타일 {mid(lots, 'cpu_thumb_ms')} ms ({mid(lots, 'cpu_thumb_ms', 0.9)}) / "
+                f"800px {mid(lots, 'cpu_mid_ms')} ms / 통째 디코드 {mid(lots, 'cpu_full_decode_ms')} ms")
+        add(f"  첫 화면 60칸: 일꾼 3(지금 앱) {mid(lots, 'est60_w3_s')}초 ({mid(lots, 'est60_w3_s', 0.9)}) → "
+            f"일꾼 8 {mid(lots, 'est60_w8_s')}초 ({mid(lots, 'est60_w8_s', 0.9)})")
+        if col(lots, "f60_w3_detail_ms"):
+            add(f"  오른쪽 큰 사진: 목록 뒤에 줄 서면 {mid(lots, 'f60_w3_detail_ms')} ms, 줄 안 서면 {mid(lots, 'f60_w8_detail_ms')} ms")
+        curve = [(w, mid(lots, f"fps_w{w}")) for w in (1,) + RAW_WORKERS]
+        curve = [(w, v) for w, v in curve if v != "-"]
+        add("  동시에 읽는 수별 초당 장수(읽기만): " + " | ".join(f"{w}: {v}" for w, v in curve))
+        rec = best_workers(curve)
+        votes = Counter(col(lots, "best_workers"))
+        R["recommended_workers"] = {"from_median_curve": rec, "per_lot_votes": dict(votes)}
+
+        add("")
+        add("[장비별] LOT 수 / 처음 읽기 ms 중앙값(90%) / stat ms / MB/s / 60칸 초: 일꾼3 → 일꾼8 / 권장 일꾼")
+        for m in sorted({r["machine"] for r in lots}):
+            g = [r for r in lots if r["machine"] == m]
+            bw = Counter(col(g, "best_workers")).most_common(1)
+            add(f"  {m}: {len(g)} / {mid(g, 'cold_med_ms')} ({mid(g, 'cold_med_ms', 0.9)}) / {mid(g, 'stat_med_ms')} / "
+                f"{mid(g, 'cold_mb_s')} / {mid(g, 'est60_w3_s')} → {mid(g, 'est60_w8_s')} / {bw[0][0] if bw else '-'}")
+        new = [r for r in lots if r.get("lot_age_days") is not None and r["lot_age_days"] <= 7]
+        old = [r for r in lots if r.get("lot_age_days") is not None and r["lot_age_days"] > 7]
+        add(f"  최근 7일 LOT {len(new)}개: 처음 읽기 {mid(new, 'cold_med_ms')} ms  /  그보다 옛 LOT {len(old)}개: {mid(old, 'cold_med_ms')} ms")
+
+        add("")
+        add("[LOT별] 번호 장비 나이(일) 사진수 KB | stat · 처음 읽기 · 다시 읽기 ms | 60칸 초 3→8 | 권장 | 표시 | 폴더")
+        for r in lots:
+            flags = ("느림 " if r.get("slow_first") else "") + ("기억됨? " if r.get("warm_suspect") else "") \
+                + ("" if r.get("scale", 1) >= 1 else f"묶음{r['scale']:.0%} ")
+            add(f"  {r['lot_id']} {r['machine']} {r.get('lot_age_days', '-')} {r['color_n']} {r.get('color_med_kb', '-')} | "
+                f"{r.get('stat_med_ms', '-')} · {r.get('cold_med_ms', '-')} · {r.get('warm_med_ms', '-')} | "
+                f"{r.get('est60_w3_s', '-')}→{r.get('est60_w8_s', '-')} | {r.get('best_workers', '-')} | {flags or '-'}| "
+                f"{os.path.basename(r['lot_path'])}")
+
+        add("")
+        add("[판단]")
+        nas, cpu_ms = mid(lots, "cold_med_ms"), mid(lots, "cpu_thumb_ms")
+        if nas != "-" and cpu_ms != "-":
+            if nas > 2 * cpu_ms:
+                add(f"- 가장 큰 원인: NAS 에서 사진을 읽어 오는 시간 (한 장 {nas} ms, PC 계산은 {cpu_ms} ms — "
+                    f"NAS 비중 {nas / (nas + cpu_ms):.0%})")
+            elif cpu_ms > 2 * nas:
+                add(f"- 가장 큰 원인: PC 계산(디코드 · 저장) (한 장 계산 {cpu_ms} ms, NAS 읽기 {nas} ms)")
+            else:
+                add(f"- NAS 읽기({nas} ms)와 PC 계산({cpu_ms} ms)이 비슷하게 든다")
+        elif nas != "-":
+            add(f"- NAS 에서 한 장 읽기 {nas} ms (Pillow 가 없어 PC 계산과 비교하지 못함)")
+        if nas != "-" and nas >= 2:
+            fixed = sum(v for v in (mid(lots, "open_med_ms"), mid(lots, "first_med_ms")) if v != "-")
+            if fixed >= 0.5 * nas:
+                add(f"- NAS 시간의 대부분이 '왕복 대기'({fixed:.0f} ms)다 → 동시에 읽는 수를 늘리면 잘 듣는다")
+            else:
+                add(f"- NAS 시간의 대부분이 '내려받는 양'이다(왕복 대기는 {fixed:.0f} ms) → 일꾼을 늘려도 회선 속도에서 막힐 수 있다")
+        add(f"- 권장 일꾼 수: {rec or '-'}  (LOT 중앙값 곡선 기준; LOT 별 표: "
+            + ", ".join(f"{w}개가 {n}곳" for w, n in sorted(votes.items())) + f"; 지금 앱은 {APP_WORKERS})")
+        slow = [r for r in lots if r.get("slow_first")]
+        add(f"- 첫 화면(60칸)이 {SLOW_60_S:.0f}초 넘게 걸리는 LOT: {len(slow)} / {len(lots)}"
+            + (f"  (가장 느린 곳 {max(col(slow, 'est60_w3_s'))}초)" if slow else ""))
+        sus = [r for r in lots if r.get("warm_suspect")]
+        add(f"- 다시 읽어도 안 빨라진 LOT: {len(sus)} / {len(lots)} — 오늘 앱에서 이미 본 LOT 이거나 NAS 가 원래 빠른 곳이다. "
+            "이런 LOT 의 '처음 읽기' 는 실제 첫 화면보다 좋게 나왔을 수 있다")
 
     add("")
-    add("[판단]")
-    nas = med(c, "total_ms", "median")
-    cpu_ms = med(cpu, "thumb120_total", "median")
-    if nas is not None and cpu_ms is not None:
-        share = nas / (nas + cpu_ms)
-        if nas > 2 * cpu_ms:
-            add(f"- 가장 큰 원인: NAS 에서 사진을 읽어 오는 시간 (한 장 {nas} ms 중 PC 계산은 {cpu_ms} ms, NAS 비중 {share:.0%})")
-        elif cpu_ms > 2 * nas:
-            add(f"- 가장 큰 원인: PC 계산(디코드 · 저장) (한 장 계산 {cpu_ms} ms, NAS 읽기 {nas} ms)")
-        else:
-            add(f"- NAS 읽기({nas} ms)와 PC 계산({cpu_ms} ms)이 비슷하게 든다")
-    elif nas is not None:
-        add(f"- NAS 에서 한 장 읽기 {nas} ms (Pillow 가 없어 PC 계산과 비교하지 못함)")
-    if c and nas and nas >= 2:
-        fixed = (med(c, "open_ms", "median") or 0) + (med(c, "first_ms", "median") or 0)
-        if fixed >= 0.5 * nas:
-            add(f"- NAS 시간의 대부분이 '왕복 대기'({fixed:.0f} ms)다 → 동시에 읽는 수를 늘리면 잘 듣는다")
-        else:
-            add(f"- NAS 시간의 대부분이 '내려받는 양'이다(왕복 대기는 {fixed:.0f} ms) → 일꾼을 늘려도 회선 속도에서 막힐 수 있다")
-    rec_raw, rec_pipe = best_workers(R.get("raw_sweep", [])), best_workers(R.get("pipe_sweep", []))
-    R["recommended_workers"] = {"raw": rec_raw, "pipeline": rec_pipe}
-    if rec_pipe or rec_raw:
-        add(f"- 권장 일꾼 수: {rec_pipe or rec_raw}  (앱 방식 기준 {rec_pipe or '측정 없음'}, 읽기만 기준 {rec_raw or '측정 없음'}; 지금 앱은 {APP_WORKERS})")
-    if w and w.get("speedup"):
-        if w["speedup"] >= 1.5:
-            add(f"- 다시 읽으면 {w['speedup']}배 빠르다(윈도우가 기억한 덕) → 처음 읽기 숫자가 실제 첫 화면 속도다")
-        else:
-            add("- 다시 읽어도 빨라지지 않았다 → 이 사진들을 방금 이미 읽었거나(앱에서 본 직후) NAS 가 아니다. "
-                "'처음 읽기' 숫자가 실제보다 좋게 나왔을 수 있다")
-    a, b = R.get("first60_w3") or {}, R.get("first60_w8") or {}
-    if a.get("detail_ms") and b.get("detail_ms"):
-        add(f"- 오른쪽 큰 사진: 줄 서면 {a['detail_ms']} ms, 줄 안 서면 {b['detail_ms']} ms")
+    lw = R.get("local_write")
+    if lw:
+        add(f"[PC 디스크에 작은 파일 쓰기] 한 장 {med(lw, 'per_file_ms', 'median')} ms (90% {med(lw, 'per_file_ms', 'p90')} ms)")
+    for cst in R.get("cache", []):
+        if not cst["exists"]:
+            add(f"[앱 캐시] {cst['root']} — 없음")
+            continue
+        add(f"[앱 캐시] {cst['root']}")
+        for sub, dd in cst["subdirs"].items():
+            add(f"  {sub}: {dd['files']}개, {dd['total_mb']} MB, 나이 {dd['age']}"
+                + (f", 캐시에서 읽기 {dd['hit_read_ms'].get('median')} ms" if dd.get("hit_read_ms") else ""))
     if errors:
         add("")
         add(f"[오류 {len(errors)}건] (측정은 계속됨, 처음 10건)")
@@ -658,99 +885,65 @@ def write_summary(R) -> str:
 
 
 # ── 본체 ────────────────────────────────────────────────────────────────────────────────────────
-def measure(folders, R, tmpdir, out_csv):
-    R["env"] = environment(folders)
-    say("T1 폴더를 훑는 중…")
-    files, dir_rows, R["listing"] = list_folders(folders)
-    out_csv["folders"] = dir_rows
-    out_csv["files"] = files
-    color = [f for f in files if f["kind"] == "color"]
-    say(f"  Color 사진 {len(color)}장, Scan(.t.) {R['listing']['scan']['count']}장")
-    if not color:
-        R["fatal"] = "고른 폴더에 Color 사진이 없습니다."
-        return
-    plan, R["plan"] = make_plan(color)
-
-    say("T2 파일 정보(stat) 속도…")
-    st = []
-    for f in plan["stat"]:
-        try:
-            t = time.perf_counter()
-            os.stat(f["path"])
-            st.append(ms(time.perf_counter() - t))
-            add_row(test="stat", workers=1, name=f["name"], size=f["size"], stat_ms=st[-1])
-        except OSError as exc:
-            add_row(test="stat", workers=1, name=f["name"], size=f["size"], error=str(exc))
-    R["stat"] = stats(st)
-
-    say("T3 처음 읽기(한 장씩)…")
-    kept: list = []
-
-    def fold(rows, wall):
-        ok = [r for r in rows if not r.get("error")]
-        d = {k: stats([r[k] for r in ok]) for k in ("open_ms", "first_ms", "read_ms", "total_ms")}
-        nb = sum(r["bytes"] for r in ok)
-        d.update(files=len(ok), errors=len(rows) - len(ok), wall_s=round(wall, 3),
-                 mb_per_s=round(nb / 1e6 / wall, 2) if wall > 0 else None,
-                 mean_size_kb=round(nb / 1024 / len(ok), 1) if ok else None)
-        return d
-
-    t, rows, read_set = time.perf_counter(), [], []
-    cap = min(END, t + 25)
-    for f in plan["cold"]:
-        if time.perf_counter() > cap:
-            break
-        rows.append(read_file(f, "cold", keep=kept))
-        read_set.append(f)
-    R["cold"] = fold(rows, time.perf_counter() - t)
-
-    say("T4 같은 사진 다시 읽기…")
-    t = time.perf_counter()
-    rows = [read_file(f, "warm") for f in read_set]
-    R["warm"] = fold(rows, time.perf_counter() - t)
-    c_med, w_med = med(R["cold"], "total_ms", "median"), med(R["warm"], "total_ms", "median")
-    if c_med and w_med:
-        R["warm"]["speedup"] = round(c_med / w_med, 1)
-
-    R["raw_sweep"] = []
-    for w in RAW_WORKERS:
-        say(f"T5 읽기만, 일꾼 {w}개…")
-        s, _ = run_pool(lambda f, start, w=w: read_file(f, f"raw{w}", w, t_start=start),
-                        plan[f"raw{w}"], w, STEP_CAP_S)
-        R["raw_sweep"].append(s)
-
-    seen = [r for r in timings if r.get("width")]
-    if seen:
-        from collections import Counter
-        dims = Counter(f"{r['width']}x{r['height']}" for r in seen)
-        R["dims"] = {"top": ", ".join(f"{k} ({n}장)" for k, n in dims.most_common(4)),
-                     "all": dict(dims), "formats": dict(Counter(r.get("format", "") for r in seen))}
-
-    if Image is None:
-        say("Pillow 가 없어 T6~T8 은 건너뜁니다.")
-    else:
-        say("T6 PC 계산만(디코드 · 줄이기 · 저장)…")
-        R["cpu"] = cpu_tests(kept)
-        kept.clear()
-        R["pipe_sweep"] = []
-        for w in PIPE_WORKERS:
-            say(f"T7 앱과 같은 방식, 일꾼 {w}개…")
-            s, _ = run_pool(lambda f, start, w=w: pipeline(f, f"pipe{w}", w, tmpdir, start),
-                            plan[f"pipe{w}"], w, STEP_CAP_S)
-            R["pipe_sweep"].append(s)
-        say("T7 통째로 읽은 뒤 디코드, 일꾼 3개…")
-        R["pipe_bytes3"], _ = run_pool(
-            lambda f, start: pipeline(f, "pipe_bytes3", 3, tmpdir, start, bytes_first=True),
-            plan["pipe_bytes3"], 3, STEP_CAP_S)
-        say("T8 첫 화면 60칸 흉내(일꾼 3, 지금 앱)…")
-        R["first60_w3"] = first60(plan["first60_w3"], APP_WORKERS, tmpdir, detail_in_queue=True)
-        say("T8 첫 화면 60칸 흉내(일꾼 8, 큰 사진 따로)…")
-        R["first60_w8"] = first60(plan["first60_w8"], 8, tmpdir, detail_in_queue=False)
-
-    say("T9 PC 디스크 쓰기 속도…")
+def measure(starts, conder, R, tmpdir):
+    R["env"] = environment([s["path"] for s in starts + ([conder] if conder else [])])
+    for f, s in zip(R["env"]["folders"], starts + ([conder] if conder else [])):
+        f["machine"], f["kind"] = s["machine"], s["kind"]
+    say("PC 디스크 쓰기 속도 · 앱 캐시 폴더 상태…")
     R["local_write"] = local_write(tmpdir)
-    say("T10 앱 캐시 폴더 상태…")
     R["cache"] = cache_state()
+    R["lots"], R["lots_flat"] = [], []
+    disc = R["discovery"] = {"failed_walks": 0, "failed_s": 0.0, "cap_s": round((END - T0) * DISCOVERY_SHARE, 1)}
+    RND.shuffle(starts)
+    near: list[dict] = []                                   # 이미 잰 LOT 의 부모 — 헛걸음 한도를 다 쓰면 여기서만 고른다
+    attempt = consec = 0
+    while True:
+        if expired():
+            disc["stop_reason"] = "시간 한도"
+            break
+        if len(R["lots_flat"]) >= MAX_LOTS:
+            disc["stop_reason"] = f"LOT {MAX_LOTS}개"
+            break
+        alive = [s for s in starts if s["fails"] < 8]
+        far_ok = disc["failed_s"] < disc["cap_s"] and (alive or (conder and conder["fails"] < 8))
+        if far_ok and consec < 40:
+            if conder and conder["fails"] < 8 and (attempt % CONDER_EVERY == CONDER_EVERY - 1 or not alive):
+                start = conder
+            else:
+                start = alive[attempt % len(alive)]         # 장비를 돌아가며
+        elif near and consec < 60:
+            start = RND.choice(near)
+        else:
+            disc["stop_reason"] = "더 찾을 LOT 이 없음" if not far_ok or consec >= 40 else "헛걸음 한도"
+            break
+        attempt += 1
+        recent = attempt % 2 == 0                           # 새 LOT 과 옛 LOT 을 번갈아
+        t = time.perf_counter()
+        found = walk(start, recent)
+        if not found:
+            dt = time.perf_counter() - t
+            disc["failed_walks"] += 1
+            disc["failed_s"] = round(disc["failed_s"] + dt, 2)
+            start["fails"] += 1
+            consec += 1
+            continue
+        lot, wafers, lot_mtime = found
+        DONE.add(lot)
+        n = len(R["lots_flat"]) + 1
+        say(f"LOT {n} [{start['machine']}] {os.path.basename(lot)} 재는 중…")
+        row, detail = measure_lot(n, lot, wafers, lot_mtime, start, "최근" if recent else "고르게", tmpdir)
+        R["lots_flat"].append(row)
+        R["lots"].append(detail)
+        if row.get("measured"):
+            start["fails"] = consec = 0
+            say(f"  → 사진 {row['color_n']}장, 처음 읽기 {row.get('cold_med_ms')} ms/장, "
+                f"60칸 {row.get('est60_w3_s')}초(일꾼 3) → {row.get('est60_w8_s')}초(일꾼 8), {row['took_s']}초 걸림")
+            parent = os.path.dirname(lot)
+            if lot != start["path"] and all(x["path"] != parent for x in near):
+                near.append({"kind": start["kind"], "machine": start["machine"], "path": parent, "fails": 0})
+        else:
+            consec += 1
+            say(f"  → {row.get('note')}")
 
 
 def desktop_dir() -> Path:
@@ -770,7 +963,7 @@ def desktop_dir() -> Path:
     return Path(tempfile.gettempdir())
 
 
-def write_zip(R, out_csv) -> Path:
+def write_zip(R) -> Path:
     R["elapsed_s"] = round(time.perf_counter() - T0, 1)
     R["errors"] = errors[:500]
     try:
@@ -778,11 +971,10 @@ def write_zip(R, out_csv) -> Path:
     except Exception:                                       # noqa: BLE001 — 요약이 깨져도 숫자는 보낸다
         summary = "요약을 만들다 오류가 났습니다. result.json 을 봐 주세요.\n" + traceback.format_exc()
 
-    def to_csv(rows, fields=None):
-        if not fields:
-            fields = []
-            for r in rows:
-                fields += [k for k in r if k not in fields]
+    def to_csv(rows):
+        fields = []
+        for r in rows:
+            fields += [k for k in r if k not in fields]
         buf = io.StringIO()
         wr = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
         wr.writeheader()
@@ -793,20 +985,16 @@ def write_zip(R, out_csv) -> Path:
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("요약.txt", summary)
         z.writestr("result.json", json.dumps(R, ensure_ascii=False, indent=1, default=str))
+        z.writestr("lots.csv", to_csv(R.get("lots_flat", [])))
+        z.writestr("folders.csv", to_csv(folder_rows))
         z.writestr("timings.csv", to_csv(timings))
-        z.writestr("folders.csv", to_csv(out_csv.get("folders", [])))
-        z.writestr("files.csv", to_csv(out_csv.get("files", [])[:CSV_FILE_ROWS],
-                                       ["dir", "name", "kind", "size"]))
     print()
     print(summary)
     return out
 
 
 def pick_folders():
-    """(폴더 목록, tk root 또는 None)."""
-    args = [a for a in sys.argv[1:] if os.path.isdir(a)]
-    if args:
-        return args, None
+    """폴더 고르는 창 → (폴더 목록, tk root 또는 None)."""
     try:
         import tkinter as tk
         from tkinter import filedialog, messagebox
@@ -816,9 +1004,9 @@ def pick_folders():
     except Exception:                                       # noqa: BLE001 — 창을 못 띄우는 환경
         p = input("사진이 든 폴더 경로를 붙여 넣고 Enter: ").strip().strip('"')
         return ([p] if os.path.isdir(p) else []), None
-    messagebox.showinfo("썸네일 속도 측정", "현택님, 사진이 든 폴더를 골라 주세요.\n"
-                        "(LOT 폴더나 웨이퍼 폴더 하나면 됩니다. 폴더는 읽기만 하고 아무것도 바꾸지 않습니다.)",
-                        parent=root)
+    messagebox.showinfo("썸네일 속도 측정", "현택님, NAS(AOI-*\\Scanresult)가 이 PC 에서 보이지 않습니다.\n"
+                        "사진이 든 폴더를 직접 골라 주세요(LOT 폴더나 그 위 폴더).\n"
+                        "폴더는 읽기만 하고 아무것도 바꾸지 않습니다.", parent=root)
     folders = []
     while True:
         d = filedialog.askdirectory(title="사진이 든 폴더 고르기", parent=root)
@@ -833,43 +1021,74 @@ def pick_folders():
             return folders, root
 
 
+def manual_starts(folders):
+    return [{"kind": "manual", "machine": f"직접{i + 1}", "path": os.path.abspath(f), "fails": 0}
+            for i, f in enumerate(folders)]
+
+
 def main() -> int:
+    global END
     try:
         sys.stdout.reconfigure(errors="replace")            # 콘솔이 못 찍는 글자로 멈추지 않게
     except Exception:                                       # noqa: BLE001
         pass
-    folders, root = pick_folders()
-    if not folders:
-        print("폴더를 고르지 않아 끝냅니다.")
+    ap = argparse.ArgumentParser(description="썸네일 속도 측정(읽기 전용)")
+    ap.add_argument("folders", nargs="*", help="직접 잴 폴더(주면 NAS 를 찾지 않는다)")
+    ap.add_argument("--minutes", type=float, default=DEFAULT_MINUTES, help="전체 시간 한도(분)")
+    ap.add_argument("--nas-base", action="append", default=[], help="AOI-* 가 든 폴더(시험용)")
+    args = ap.parse_args()
+    END = T0 + max(0.2, args.minutes) * 60
+    seed = int(time.time())                                 # 돌릴 때마다 다른 LOT · 다른 사진
+    RND.seed(seed)
+    R: dict = {"tool": "measure_thumb_speed", "version": 2, "seed": seed, "budget_min": args.minutes}
+
+    root, conder, ui = None, None, False
+    folders = [f for f in args.folders if os.path.isdir(f)]
+    if folders:
+        starts, R["mode"] = manual_starts(folders), "직접 준 폴더"
+    else:
+        ui = not args.nas_base
+        print("NAS 를 찾는 중… (안 보이는 드라이브가 있으면 잠깐 걸립니다)", flush=True)
+        starts, conder = nas_roots(args.nas_base)
+        R["mode"] = "NAS 자동(무작위 LOT)"
+        if not starts and not conder:
+            folders, root = pick_folders()
+            starts, R["mode"] = manual_starts(folders), "창에서 고른 폴더"
+    if not starts and not conder:
+        print("잴 폴더가 없어 끝냅니다.")
         return 1
-    say(f"측정을 시작합니다(최대 5분쯤). 폴더 {len(folders)}개 — 읽기만 합니다.")
-    R: dict = {"tool": "measure_thumb_speed", "version": 1}
-    out_csv: dict = {}
+    END = time.perf_counter() + max(0.2, args.minutes) * 60 if root else END      # 창에서 보낸 시간은 빼 준다
+    say(f"측정을 시작합니다(최대 {args.minutes:g}분, 읽기만 합니다). 시작 폴더: "
+        + ", ".join(s["machine"] for s in starts + ([conder] if conder else [])))
     tmpdir = tempfile.mkdtemp(prefix="aoi_thumb_speed_")
     try:
-        measure(folders, R, tmpdir, out_csv)
+        measure(starts, conder, R, tmpdir)
     except KeyboardInterrupt:
+        STOP.set()
         R["interrupted"] = True
-        say("멈춤 요청을 받았습니다. 지금까지 잰 것만 저장합니다.")
+        print("멈춤 요청을 받았습니다. 지금까지 잰 것만 저장합니다.", flush=True)
     except Exception as exc:                                # noqa: BLE001
         R["crash"] = traceback.format_exc()
         note_error("measure", exc)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
-    R.setdefault("env", environment(folders))
-    out = write_zip(R, out_csv)
+    R.setdefault("env", environment([s["path"] for s in starts]))
+    out = write_zip(R)
     msg = f"끝났습니다. 이 파일을 올려 주세요:\n{out}"
-    if R.get("fatal"):
-        msg = f"{R['fatal']}\n다른 폴더로 다시 돌려 주세요.\n(기록: {out})"
     print(msg)
     if os.name == "nt":
         try:
             os.startfile(str(out.parent))                   # noqa: S606 — 결과 폴더 열기
         except OSError:
             pass
-    if root is not None:
+    if ui or root is not None:
         try:
+            import tkinter as tk
             from tkinter import messagebox
+            if root is None:
+                root = tk.Tk()
+                root.withdraw()
+                root.attributes("-topmost", True)
             messagebox.showinfo("썸네일 속도 측정", msg, parent=root)
             root.destroy()
         except Exception:                                   # noqa: BLE001
