@@ -49,16 +49,16 @@ def _cancel(picker) -> None:
 # ---------------------------------------------------------------------------
 def test_image_info_pick_is_async(styled_qapp, tmp_path, monkeypatch):
     from aoi_verification.app.ui.widgets.image_info_dialog import ImageInfoDialog
-    d = ImageInfoDialog()
     shown: list = []
-    monkeypatch.setattr(d, "show_image", shown.append)
+    monkeypatch.setattr(ImageInfoDialog, "open_many", lambda self, p: shown.append(p))   # 여러 장(넘겨 보기)
+    d = ImageInfoDialog()
     d._on_pick()                                   # exec 였다면 여기서 멈춘다
     assert d._picker.is_open and d._picker.purpose == "image_info"
     _cancel(d._picker)
     assert shown == [] and not d._loading.isVisible()
     d._on_pick()
     _choose(d._picker, [str(tmp_path / "a.jpg")])
-    assert shown == [tmp_path / "a.jpg"]
+    assert shown == [[str(tmp_path / "a.jpg")]]
     assert fp.last_dir("image_info") == str(tmp_path)
     d.deleteLater()
 
@@ -144,7 +144,7 @@ def test_threshold_export_uses_the_shared_save_picker(styled_qapp, tmp_path, mon
     assert isinstance(d._save_picker, fp.SavePicker)
     assert d._save_picker.purpose == "threshold_export"
     got: list = []
-    monkeypatch.setattr(d, "export_html", got.append)
+    monkeypatch.setattr(d, "export_html", lambda p, *a: got.append(p))
     monkeypatch.setattr(T.QDesktopServices, "openUrl", lambda *_a: True)
     d._save_picker.open("저장", str(tmp_path / "x.html"), "HTML (*.html)", "html")
     _choose(d._save_picker, str(tmp_path / "x.html"))
