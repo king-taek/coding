@@ -993,6 +993,7 @@ class ZoneOriginDialog(QDialog):
                 v = getattr(self._flags, key)
                 ed.setText(_num_text(v) if v else "")
                 ed.editingFinished.connect(lambda key=key, ed=ed: self._edit_done(key, _float(ed.text())))
+                ed.textEdited.connect(lambda t, key=key: self._edit_done(key, 0.0) if not t.strip() else None)
                 row.addWidget(ed)
                 il.addLayout(row)
                 self.min_edits[key] = ed
@@ -1038,6 +1039,8 @@ class ZoneOriginDialog(QDialog):
             v = getattr(self._flags, key)
             ed.setText("" if v is None else str(v))
             ed.editingFinished.connect(lambda key=key, ed=ed: self._edit_done(key, _int_or_none(ed.text())))
+            # 빈칸은 검사기가 '덜 쓴 값' 으로 봐 editingFinished 가 안 온다 — 지우면 바로 푼다(2026-11-25).
+            ed.textEdited.connect(lambda t, key=key: self._edit_done(key, None) if not t.strip() else None)
             line.addWidget(ed)
             il.addLayout(line)
             self.coord_edits[key] = ed

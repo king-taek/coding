@@ -295,6 +295,7 @@ def read_detect_values(folder: Path, zone_dir: str, zone_id: int) -> list:
     return []
 
 
+_GENERAL_RECIPE_NAME = re.compile(r"(?im)^\s*Recipe\s+Name[ \t]*=[ \t]*(\S.*?)\s*$")   # coords.recipe_name._GENERAL_NAME 과 같은 식
 _SETUP_PATH = re.compile(r"(?im)^\s*SetupPath\s*=[ \t]*(.*?)\s*$")
 
 
@@ -307,7 +308,8 @@ def recipe_identity(folder: Path) -> tuple:
     경로는 대소문자 · 끝 ``\`` 를 맞춘다(윈도 경로)."""
     m = _SETUP_PATH.search(read_ini_text(Path(folder) / "Params_WaferInfo.ini") or "")
     setup = m.group(1).strip().rstrip("\\/").lower() if m else ""
-    return setup, tuple(sorted(read_recipe_names(Path(folder)).items()))
+    # SetupPath 가 이미 단일 레시피의 이름을 담으므로, 여기서는 RecipesInfo.ini 이름만 쓴다(read_recipe_names 의 폴백은 뺀다)
+    return setup, tuple(sorted(read_recipe_values(Path(folder), "Name").items()))
 
 
 # 웨이퍼 · 장비마다 달라지는 광학 칸 — 레시피 차이가 아니다: Id(GUID), 초점 높이(Zwafer · FocusPosAboveChuck)
@@ -374,8 +376,19 @@ def same_recipe(a: tuple, b: tuple) -> bool:
 
 @lru_cache(maxsize=64)
 def read_recipe_names(folder: Path) -> dict:
-    """``RecipesInfo.ini [Recipe-N] Name=`` → ``{N: 이름}``.  없으면 빈 dict."""
-    return read_recipe_values(folder, "Name")
+    r"""레시피 이름 → ``{N: 이름}``.  ``RecipesInfo.ini [Recipe-N] Name=`` 이 1순위(다중 레시피 스캔에만 있다).
+    없으면(레시피 하나뿐인 폴더) ``{1: 이름}`` — ``Recipe.ini [General] Recipe Name=``, 그것도 없으면
+    ``Params_WaferInfo.ini SetupPath`` 의 마지막 폴더 이름.  Zones 폴더가 레시피 1 이라 번호는 1.  모두 없으면 빈 dict."""
+    names = read_recipe_values(folder, "Name")
+    if names:
+        return names
+    m = _GENERAL_RECIPE_NAME.search(read_ini_text(Path(folder) / "Recipe.ini") or "")
+    name = m.group(1).strip() if m else ""
+    if not name:
+        m = _SETUP_PATH.search(read_ini_text(Path(folder) / "Params_WaferInfo.ini") or "")
+        parts = [t for t in re.split(r"[\\/]", m.group(1)) if t.strip()] if m else []
+        name = parts[-1].strip() if parts else ""
+    return {1: name} if name else {}
 
 
 def read_recipe_values(folder: Path, key: str) -> dict:
