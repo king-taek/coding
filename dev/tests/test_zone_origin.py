@@ -373,6 +373,40 @@ def test_typing_coord_then_moving_focus_does_not_crash(dlg):
     assert dlg._flags.min_area == 1.0 and dlg._flags.min_width == 1.0
 
 
+
+def test_clearing_coord_applies_right_away(dlg):
+    """좌표 칸을 지우면 바로 풀린다 — 빈칸은 QIntValidator 가 '덜 쓴 값' 으로 봐 editingFinished 가
+    오지 않아, 숫자를 넣을 땐 걸러지고 지울 땐 그대로 남았다(2026-11-25).  파라미터 칸도 같다."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QApplication
+    n_all = len(dlg._passed)
+    dlg.set_flag("col", 4)
+    dlg.set_flag("row", 3)
+    QApplication.processEvents()
+    assert dlg.coord_edits["col"].text() == "4" and len(dlg._passed) < n_all
+    for key in ("col", "row"):
+        ed = dlg.coord_edits[key]
+        ed.setFocus()
+        ed.selectAll()
+        QTest.keyClick(ed, Qt.Key.Key_Backspace)       # 지우기만 — Enter · 포커스 이동 없이
+        for _ in range(5):
+            QApplication.processEvents()
+        assert getattr(dlg._flags, key) is None
+    assert len(dlg._passed) == n_all
+    if not dlg._params_open:
+        dlg.toggle_params()
+    dlg.set_flag("min_area", 5.0)
+    QApplication.processEvents()
+    ed = dlg.min_edits["min_area"]
+    ed.setFocus()
+    ed.selectAll()
+    QTest.keyClick(ed, Qt.Key.Key_Backspace)
+    for _ in range(5):
+        QApplication.processEvents()
+    assert dlg._flags.min_area == 0.0
+
+
 # ---------------------------------------------------------------- 전체 점검에서 나온 것 (2026-11-24)
 @pytest.fixture
 def dlg2(styled_qapp, sample, tmp_path):
