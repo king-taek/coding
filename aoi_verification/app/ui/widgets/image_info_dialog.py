@@ -446,7 +446,7 @@ class ImageInfoDialog(QDialog):
         # 대신 시트 전체가 복사돼 버린다.  전체 복사는 버튼이 맡는다.
         QShortcut(QKeySequence.StandardKey.Open, self, self._on_pick)
         self._empty_open = EmptyOpen(self, i18n.KO.IMAGE_INFO_PICK, self._on_pick,
-                                     i18n.KO.EMPTY_DROP_HINT)
+                                     i18n.KO.EMPTY_DROP_HINT, preview="info")
         # 여러 장일 때 ← → 로 넘긴다(띠가 숨어 있으면 아무 일도 없다).
         QShortcut(QKeySequence(Qt.Key.Key_Left), self, lambda: self.step_photo(-1))
         QShortcut(QKeySequence(Qt.Key.Key_Right), self, lambda: self.step_photo(1))

@@ -313,7 +313,8 @@ class ZoneOriginDialog(QDialog):
         self._build()
         for b in self.findChildren(QPushButton):
             b.setAutoDefault(False)
-        self._empty_open = EmptyOpen(self, _KO.ZO_ADD_FOLDER, self._on_pick, _KO.EMPTY_DROP_HINT)
+        self._empty_open = EmptyOpen(self, _KO.ZO_ADD_FOLDER, self._on_pick, _KO.EMPTY_DROP_HINT,
+                                     preview="zone")
         self._loading = LoadingOverlay(self)
         self._loading.cancel_requested.connect(self._cancel_load)
         self._render()
