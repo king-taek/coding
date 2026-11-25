@@ -44,12 +44,19 @@ def test_folded_icons_keep_vertical_position_and_names_fit(styled_qapp):
         page._set_rail_folded(True, animate=False)
         for _ in range(5):
             styled_qapp.processEvents()
-        assert [_icon_y(page, b) for b in btns] == open_y      # 세로 위치 불변
+        # 세로 위치 불변 — 접힌 칸은 아이콘을 칸 위에서 22(펼친 칸 44 의 가운데)에 둔다.
+        assert [b.mapTo(page, QPoint(0, 0)).y() + 22 for b in btns] == open_y
         assert page._tool_rail.width() == 76
         for key, b in zip([*page._nav_buttons, "update"], btns):
             lb = b.property("_railShort")
             assert lb.isVisible() and lb.text() == i18n.KO.RAIL_SHORT_NAMES[key]
             assert lb.sizeHint().width() <= b.width()          # 76px 칸 안에서 안 잘림
+            # 아이콘(20) + 이름(12) 묶음이 선택 바탕 가운데 — 위 여백(아이콘 위) ≈ 아래 여백(이름 아래).
+            icon_center = open_y[btns.index(b)] - b.mapTo(page, QPoint(0, 0)).y()
+            top_gap = icon_center - 10                          # 아이콘 20px 의 위 끝
+            bottom_gap = b.height() - (lb.y() + lb.height())
+            assert b.height() == SetupPage._RAIL_FOLDED_H
+            assert abs(top_gap - bottom_gap) <= 4, (key, top_gap, bottom_gap)
         page._set_rail_folded(False, animate=False)
         assert not any(b.property("_railShort").isVisible() for b in btns)
     finally:
