@@ -1454,7 +1454,7 @@ def test_right_click_on_scan_tile_opens_full_scan_with_overlay_or_falls_back_to_
         _ask_first_action(monkeypatch, T, seen)
 
         class _V:
-            def __init__(self, path, parent=None, *, image=None, overlay=None):
+            def __init__(self, path, parent=None, *, image=None, overlay=None, others=()):
                 opened.append((Path(path), image, overlay))
         monkeypatch.setattr(Z, "FullscreenViewer", _V)
         monkeypatch.setattr(T.sheets, "run", lambda viewer, **k: None)

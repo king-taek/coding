@@ -469,7 +469,7 @@ UPDATE_GIT_HINT = "개발(git) 환경입니다. 'git pull' 로 업데이트하�
 MENU_CHECK_UPDATE = "업데이트 확인"
 # 접힌 왼쪽 메뉴 — 아이콘 아래에 붙는 짧은 이름(76px 폭 안에 들어가야 한다).
 RAIL_SHORT_NAMES = {
-    "match": "매칭", "image_info": "정보 조회", "wafer_map": "Map",
+    "match": "매칭", "image_info": "Defect 정보", "wafer_map": "Map",
     "extract": "추출", "gl": "GL", "threshold": "Overkill", "zone_origin": "Zone",
     "update": "업데이트",
 }

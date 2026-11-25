@@ -163,6 +163,7 @@ def test_click_opens_full_scan_with_overlay(qapp, isolated_cache, tmp_path, monk
     (viewer,) = opened
     assert isinstance(viewer, FullscreenViewer)
     assert viewer._overlay == dlg._scan_box
+    assert viewer._others == ()        # 이 폴더엔 Defect 좌표 INI 가 없다 — defects_in 이 안 되면 박스 하나(오늘과 같다)
     assert viewer._pix.width() == 320 and viewer._loader is None   # 원본 그대로, 재로딩 없음
     viewer.resize(800, 500)
     viewer.show()
