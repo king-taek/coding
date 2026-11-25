@@ -909,7 +909,7 @@ def test_summary_is_one_line_with_ratio_bar(styled_qapp, tmp_path):
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     dlg = _shown_dlg(T, styled_qapp, tmp_path)
     try:
-        assert (dlg.ratio.drop, dlg.ratio.total) == (0, 10) and not dlg.ratio.ticks
+        assert (dlg.ratio.drop, dlg.ratio.total) == (0, 10)
         assert (dlg.keep_label.text(), dlg.all_label.text()) == ("10", "10")
         assert not dlg.pick_box.isVisibleTo(dlg) and not dlg.miss_box.isVisibleTo(dlg)
         dlg.set_value(14, R.FEATURE_AREA, 40.0)
@@ -921,7 +921,7 @@ def test_summary_is_one_line_with_ratio_bar(styled_qapp, tmp_path):
         d = max(dlg._in_zone(), key=lambda x: x.area)
         dlg.toggle_pick(T.key_of(d))
         assert dlg.pick_box.isVisibleTo(dlg) and dlg.pick_label.text() == "1"
-        assert len(dlg.ratio.ticks) == 1 and 0 < dlg.ratio.ticks[0] < 1   # 꼭 잡기 눈금
+        assert dlg.ratio.total == 10 and not hasattr(dlg.ratio, "ticks")    # 꼭 잡기 눈금은 그리지 않는다 — 막대는 빠짐 : 남음만
     finally:
         dlg.deleteLater()
 
@@ -1916,6 +1916,9 @@ def test_picks_are_saved_on_apply_and_loadable_later(styled_qapp, tmp_path, monk
         dlg2.set_wafer(_two_zone_wafer(T, tmp_path))
         assert dlg2._picked == {} and dlg2.saved_btn.isEnabled()
         dlg2.load_saved_picks()
+        assert dlg2._picked == {} and dlg2.apply_btn.isEnabled()        # 고르기만 — [적용] 해야 반영
+        dlg2.apply_pending()
+        _wait_apply(dlg2, styled_qapp)
         assert set(dlg2._picked) == want_picked and dlg2._ov == want_ov
         assert [T.key_of(d) for d in dlg2._overkill.values()] == [T.key_of(ds[0])]
         dlg2.reset()                                                   # 그 Zone 을 되돌리면 저장분도 비운다
@@ -1946,6 +1949,8 @@ def test_saved_picks_of_other_zones_survive_before_loading(styled_qapp, tmp_path
         _wait_apply(dlg, styled_qapp)
         assert SP.load(tmp_path, 6) == {z1: ({ds1[1].index}, {ds1[0].index}), z2: ({ds2[0].index}, set())}
         dlg.load_saved_picks()                                            # 불러오면 둘 다 돌아온다
+        dlg.apply_pending()
+        _wait_apply(dlg, styled_qapp)
         assert set(dlg._picked) == {T.key_of(ds1[1]), T.key_of(ds2[0])}
     finally:
         dlg.deleteLater()
@@ -2064,35 +2069,126 @@ def test_enlarged_photo_without_scan_list_says_none_at_once(styled_qapp, tmp_pat
         dlg.deleteLater()
 
 
-def test_band_marks_defect_or_overkill_at_once_and_z_undoes(styled_qapp, tmp_path, monkeypatch):
-    """값 띠 [Defect] · [Overkill] — 누르면 바로 가르고 기준을 다시 계산한다.  띠는 열린 채, Z 는 하나씩 되돌린다(현택님 2026-11-24 안 D)."""
+def _z(dlg):
     from PyQt6.QtCore import Qt
     from PyQt6.QtGui import QKeyEvent
+    dlg.setFocus()
+    dlg.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Z, Qt.KeyboardModifier.NoModifier, "z"))
+
+
+def test_band_marks_only_stage_until_apply_and_z_undoes(styled_qapp, tmp_path, monkeypatch):
+    """값 띠 [Defect] · [Overkill] — 누르면 '고르는 중' 에만 담긴다(계산 · 로딩 없음).  [적용] 해야 반영되고 Z 는 한 단계씩 되돌린다."""
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     _capture_run(monkeypatch, T)
     dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
     try:
         k = next(iter(dlg.tiles))
         d = dlg._tile_defects[k]
+        assert dlg.apply_btn.isVisibleTo(dlg) and not dlg.apply_btn.isEnabled() and not dlg.cancel_btn.isVisibleTo(dlg)
         dlg._toggle(k)
         assert set(dlg.mark_btns) == {"defect", "overkill"}
         assert not any(b.isChecked() for b in dlg.mark_btns.values())
         dlg.mark_btns["defect"].click()
-        _wait_apply(dlg, styled_qapp)
-        assert set(dlg._picked) == {k} and dlg._overkill == {}
-        assert dlg._ov == P.recommend([d], dlg._w.zones, dlg._snap)[0]
-        assert dlg._open == k and dlg._band is not None                   # 띠는 닫히지 않는다
+        assert not dlg._overlay_on                                          # 계산 · 로딩 없음
+        assert dlg._picked == {} and dlg._overkill == {} and dlg._ov == {}  # 적용된 값은 그대로
+        assert set(dlg._stage_picked) == {k} and dlg._stage_over == {}
+        assert dlg._open == k and dlg._band is not None                     # 띠는 닫히지 않는다
         assert dlg.mark_btns["defect"].isChecked() and not dlg.mark_btns["overkill"].isChecked()
-        dlg.mark_btns["overkill"].click()                                 # 다른 쪽으로 옮긴다
+        assert dlg.apply_btn.isEnabled() and dlg.cancel_btn.isVisibleTo(dlg)
+        assert dlg.apply_btn.text() == T._KO.OVERKILL_APPLY_FMT.format(n=1)
+        assert dlg.tiles[k].pending == "defect" and not dlg.tiles[k].picked
+        dlg.mark_btns["overkill"].click()                                   # 다른 쪽으로 옮긴다 — 아직 1개 바뀜
+        assert dlg._stage_picked == {} and set(dlg._stage_over) == {k}
+        assert dlg.apply_btn.text() == T._KO.OVERKILL_APPLY_FMT.format(n=1) and dlg.tiles[k].pending == "overkill"
+        _z(dlg)                                                             # Z — 한 단계 전(Defect)
+        assert set(dlg._stage_picked) == {k} and dlg._stage_over == {} and dlg._picked == {}
+        dlg.apply_btn.click()
         _wait_apply(dlg, styled_qapp)
-        assert dlg._picked == {} and set(dlg._overkill) == {k}
-        dlg.setFocus()
-        z = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Z, Qt.KeyboardModifier.NoModifier, "z")
-        dlg.keyPressEvent(z)                                              # Z — 한 단계 전(꼭 잡기)
-        assert set(dlg._picked) == {k} and dlg._overkill == {}
-        dlg.keyPressEvent(z)                                              # 처음으로
-        assert dlg._picked == {} and dlg._overkill == {} and dlg._ov == {}
-        assert dlg._mark_undo == []
+        assert set(dlg._picked) == {k} and dlg._overkill == {} and set(dlg._stage_picked) == {k}
+        assert dlg._ov == P.recommend([d], dlg._w.zones, dlg._snap)[0]
+        assert dlg._open == k and not dlg.apply_btn.isEnabled() and dlg.tiles[k].picked and not dlg.tiles[k].pending
+        _z(dlg)                                                             # 적용도 Z 로 되돌린다(고르는 중 상태까지)
+        assert dlg._picked == {} and dlg._ov == {} and set(dlg._stage_picked) == {k}
+        assert dlg.apply_btn.isEnabled()
+        _z(dlg)
+        assert dlg._stage_picked == {} and dlg._stage_over == {} and not dlg.apply_btn.isEnabled()
+        _z(dlg)                                                             # 처음으로
+        assert dlg._mark_undo == [] and dlg._picked == {} and dlg._overkill == {}
+    finally:
+        dlg.deleteLater()
+
+
+def test_cancel_discards_staged_changes(styled_qapp, tmp_path, monkeypatch):
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    try:
+        ks = list(dlg.tiles)[:3]
+        dlg.mark(ks[0], "defect")
+        dlg.mark(ks[1], "overkill")
+        dlg.mark(ks[2], "defect")
+        assert dlg.apply_btn.text() == T._KO.OVERKILL_APPLY_FMT.format(n=3)
+        dlg.cancel_btn.click()
+        assert dlg._stage_picked == {} and dlg._stage_over == {} and dlg._picked == {} and not dlg._overlay_on
+        assert not dlg.apply_btn.isEnabled() and not dlg.cancel_btn.isVisibleTo(dlg)
+        assert dlg.apply_btn.text() == T._KO.OVERKILL_APPLY
+        _z(dlg)                                                             # 취소도 Z 로 되돌린다
+        assert len(dlg._stage_picked) == 2 and len(dlg._stage_over) == 1
+    finally:
+        dlg.deleteLater()
+
+
+def test_pending_count_includes_removals(styled_qapp, tmp_path, monkeypatch):
+    """적용된 것을 고르는 중에 빼면 그것도 '바뀜' 이다 — 같은 쪽으로 되돌리면 0."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    try:
+        k1, k2 = list(dlg.tiles)[:2]
+        dlg.mark(k1, "defect")
+        dlg.apply_btn.click()
+        _wait_apply(dlg, styled_qapp)
+        dlg.mark(k1, "defect")                                              # 빼기
+        dlg.mark(k2, "overkill")
+        assert dlg.apply_btn.text() == T._KO.OVERKILL_APPLY_FMT.format(n=2)
+        assert dlg.tiles[k1].pending == "none" and dlg.tiles[k1].picked      # 적용된 ✓ 는 남고, 빠질 예정 표시
+        dlg.mark(k1, "defect")                                              # 다시 넣으면 적용된 것과 같다
+        assert dlg.apply_btn.text() == T._KO.OVERKILL_APPLY_FMT.format(n=1)
+        dlg.apply_btn.click()
+        _wait_apply(dlg, styled_qapp)
+        assert set(dlg._picked) == {k1} and set(dlg._overkill) == {k2} and dlg._stage_picked == dlg._picked
+    finally:
+        dlg.deleteLater()
+
+
+def test_apply_failure_keeps_stage(styled_qapp, tmp_path, monkeypatch):
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    try:
+        k = next(iter(dlg.tiles))
+        monkeypatch.setattr(T.P, "recommend", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("x")))
+        dlg.mark(k, "defect")
+        dlg.apply_btn.click()
+        _wait_apply(dlg, styled_qapp)
+        assert dlg._picked == {} and set(dlg._stage_picked) == {k} and dlg.apply_btn.isEnabled()
+    finally:
+        dlg.deleteLater()
+
+
+def test_pick_dialog_opens_from_stage_and_commit_syncs_stage(styled_qapp, tmp_path, monkeypatch):
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    try:
+        k1, k2 = list(dlg.tiles)[:2]
+        dlg.mark(k1, "defect")
+        dlg.open_pick_dialog()
+        assert set(dlg._pick_dlg.picked()) == {k1}                          # 팝업은 고르는 중에서 연다
+        d2 = dlg._tile_defects[k2]
+        dlg._pick_dlg.applied.emit({k1: dlg._tile_defects[k1], k2: d2}, {})
+        _wait_apply(dlg, styled_qapp)
+        assert set(dlg._picked) == {k1, k2} and set(dlg._stage_picked) == {k1, k2} and not dlg.apply_btn.isEnabled()
     finally:
         dlg.deleteLater()
 
@@ -2104,13 +2200,15 @@ def test_band_mark_same_button_again_unmarks(styled_qapp, tmp_path, monkeypatch)
     try:
         k = T.key_of(dlg._in_zone()[0])                                   # 직접 조정 첫 화면은 빠진 사진이 없다
         dlg.mark(k, "overkill")
+        assert set(dlg._stage_over) == {k} and dlg._overkill == {}
+        dlg.mark(k, "overkill")
+        assert dlg._stage_over == {} and not dlg.apply_btn.isEnabled()
+        dlg.mark(k, "overkill")
+        dlg.apply_pending()
         _wait_apply(dlg, styled_qapp)
         assert set(dlg._overkill) == {k}
-        dlg.mark(k, "overkill")
-        _wait_apply(dlg, styled_qapp)
-        assert dlg._overkill == {}
         dlg.reset()                                                       # 되돌리기(레시피 값)는 Z 기록도 비운다
-        assert dlg._mark_undo == []
+        assert dlg._mark_undo == [] and dlg._stage_over == {}
     finally:
         dlg.deleteLater()
 
@@ -2129,9 +2227,7 @@ def test_classify_rows_default_good_to_overkill_and_others_to_defect(tmp_path):
     assert picked == {} and len(over) == 3
 
 
-def test_classify_import_fills_picks_and_overkill_and_z_undoes(styled_qapp, tmp_path, monkeypatch):
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtGui import QKeyEvent
+def test_classify_import_stages_then_apply_and_z_undoes(styled_qapp, tmp_path, monkeypatch):
     from aoi_verification.app.threshold import classify as CL
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     shown = _capture_run(monkeypatch, T)
@@ -2140,19 +2236,23 @@ def test_classify_import_fills_picks_and_overkill_and_z_undoes(styled_qapp, tmp_
         assert not dlg.classify_btn.isVisibleTo(dlg)                     # 자동 추천에서만
         dlg.set_mode("auto")
         assert dlg.classify_btn.isVisibleTo(dlg) and dlg.classify_btn.isEnabled()
+        assert dlg.classify_btn.text() == T._KO.OVERKILL_CLASSIFY_OPEN
         dlg.classify_btn.click()
         pop = shown[-1]
         assert pop.apply_btn.text() == T._KO.OVERKILL_CLASSIFY_APPLY_FMT.format(d="3", o="11")
         pop.groups[(0, CL.SKIP)].click()                                   # Accept 는 안 씀
         assert pop.apply_btn.text() == T._KO.OVERKILL_CLASSIFY_APPLY_FMT.format(d="3", o="0")
         pop.apply_btn.click()
-        _wait_apply(dlg, styled_qapp)
+        assert not dlg._overlay_on and dlg._picked == {} and dlg._ov == {}  # 고르기만 — 적용은 따로
         rows = CL.class_rows(dlg._w.defects, dlg._w.classes)
         fm = next(r for r in rows if r.cls == 31)
+        assert set(dlg._stage_picked) == {T.key_of(d) for d in fm.defects} and dlg._stage_over == {}
+        assert dlg.apply_btn.text() == T._KO.OVERKILL_APPLY_FMT.format(n=3)
+        dlg.apply_btn.click()
+        _wait_apply(dlg, styled_qapp)
         assert set(dlg._picked) == {T.key_of(d) for d in fm.defects} and dlg._overkill == {}
         assert dlg._ov == P.recommend(list(fm.defects), dlg._w.zones, dlg._snap)[0]
-        dlg.setFocus()
-        dlg.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Z, Qt.KeyboardModifier.NoModifier, "z"))
+        _z(dlg)
         assert dlg._picked == {} and dlg._ov == {}
     finally:
         dlg.deleteLater()
@@ -2165,10 +2265,13 @@ def test_classify_button_off_without_changed_classes(styled_qapp, tmp_path, monk
     w = T.load_wafer(_wafer_with_photos(tmp_path))
     w.defects = tuple(dataclasses.replace(d, cls=d.bin) for d in w.defects)
     dlg = T.ThresholdPreviewDialog()
+    dlg.resize(1280, 800)
+    dlg.show()
     try:
         dlg.set_wafer(w)
         dlg.set_mode("auto")
-        assert not dlg.classify_btn.isEnabled()
+        assert dlg.classify_btn.isVisibleTo(dlg) and not dlg.classify_btn.isEnabled()
+        assert dlg.classify_btn.text() == T._KO.OVERKILL_CLASSIFY_NONE_BTN == "리뷰 결과 없음"
     finally:
         dlg.deleteLater()
 
@@ -2185,8 +2288,8 @@ def test_pick_list_csv_round_trip_reselects_same_defects(styled_qapp, tmp_path, 
         assert dlg.list_btn.isVisibleTo(dlg) and not dlg.list_save_act.isEnabled() and dlg.list_open_act.isEnabled()
         ds = dlg._in_zone()
         dlg.mark(T.key_of(ds[0]), "defect")
-        _wait_apply(dlg, styled_qapp)
         dlg.mark(T.key_of(ds[1]), "overkill")
+        dlg.apply_pending()
         _wait_apply(dlg, styled_qapp)
         assert dlg.list_save_act.isEnabled()
         dlg.save_list(str(out))
@@ -2201,6 +2304,8 @@ def test_pick_list_csv_round_trip_reselects_same_defects(styled_qapp, tmp_path, 
         dlg2.set_wafer(T.load_wafer(tmp_path / "27125535EWA5"))
         dlg2.set_mode("auto")
         dlg2.open_list(str(out))
+        assert dlg2._picked == {} and dlg2.apply_btn.isEnabled()        # 불러오기는 고르기만
+        dlg2.apply_pending()
         _wait_apply(dlg2, styled_qapp)
         assert (set(dlg2._picked), set(dlg2._overkill)) == want
         assert dlg2.notice_label.text() == T._KO.OVERKILL_LIST_LOADED.format(n=2, k=2)
