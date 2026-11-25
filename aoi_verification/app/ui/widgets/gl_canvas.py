@@ -15,7 +15,7 @@ import time
 from typing import Optional
 
 import numpy as np
-from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QPointF, QRectF, Qt, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import (QColor, QFont, QImage, QPainter, QPen, QCursor,
                          QFontMetrics)
 from PyQt6.QtWidgets import QSizePolicy, QWidget
@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import QSizePolicy, QWidget
 from ... import i18n
 from ...gl import roi as R
 from ...gl.roi import Roi, RoiSet
-from .. import theme
+from .. import motion, theme
 
 TOOL_MOVE = "move"
 TOOLS = (TOOL_MOVE, R.RECT, R.CIRCLE)
@@ -57,6 +57,13 @@ class GlCanvas(QWidget):
         self._space = False
         self._cursor_img: Optional[tuple] = None
         self._last_key: tuple = (None, "", 0.0)
+        # 확대·맞춤 애니메이션 — _scale/_off 는 늘 '지금 보이는' 값이라 좌표 계산은 그대로 맞다.
+        self._zoom_anim = QVariantAnimation(self)
+        self._zoom_anim.setStartValue(0.0)
+        self._zoom_anim.setEndValue(1.0)
+        self._zoom_anim.valueChanged.connect(self._on_zoom_tick)
+        self._zoom_plan: Optional[dict] = None
+        self._zoom_goal: Optional[tuple] = None     # 목표 (배율, 오프셋) — 연속 휠이 여기에 쌓인다
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
         self.setMinimumSize(320, 240)
@@ -101,6 +108,7 @@ class GlCanvas(QWidget):
     def set_view_state(self, state: tuple[float, float, float]) -> None:
         """다른 화면(비교 상대)의 배율·이동을 그대로 따라간다 — 신호를 다시 내지 않는다."""
         scale, ox, oy = state
+        self._stop_zoom()
         if (scale, ox, oy) == self.view_state():
             return
         self._scale, self._off, self._fitted = scale, QPointF(ox, oy), False
@@ -124,18 +132,68 @@ class GlCanvas(QWidget):
     # ------------------------------------------------------------------
     # 보기
     # ------------------------------------------------------------------
-    def fit(self) -> None:
+    def fit(self, animate: bool = False) -> None:
         w, h = self.image_size()
         if w <= 0 or self.width() <= 0 or self.height() <= 0:
             return
         s = min(self.width() / w, self.height() / h)
-        self._scale = max(_MIN_SCALE, min(s, _MAX_SCALE))
-        self._off = QPointF((self.width() - w * self._scale) / 2.0,
-                            (self.height() - h * self._scale) / 2.0)
+        scale = max(_MIN_SCALE, min(s, _MAX_SCALE))
+        self._go_to(scale, QPointF((self.width() - w * scale) / 2.0,
+                                   (self.height() - h * scale) / 2.0),
+                    pivot=None, animate=animate)
         self._fitted = True
+
+    # ------------------------------------------------------------------
+    # 확대·맞춤 애니메이션 — 휠 120ms, 상자 확대·맞춤 300ms
+    # ------------------------------------------------------------------
+    def _center_img(self, scale: float, off: QPointF, pivot: QPointF) -> QPointF:
+        return QPointF((pivot.x() - off.x()) / scale, (pivot.y() - off.y()) / scale)
+
+    def _go_to(self, scale: float, off: QPointF, *, pivot: Optional[QPointF],
+               animate: bool, wheel: bool = False) -> None:
+        """목표 (배율, 오프셋)로 간다.  pivot 은 화면에서 제자리인 점(휠은 커서, 그 밖은 중앙).
+        끄면 한 프레임에 간다.  배율은 지수, pivot 아래 이미지 점은 직선으로 보간한다."""
+        self._stop_zoom()
+        self._zoom_goal = (scale, QPointF(off))
+        if not (animate and motion.enabled() and self.isVisible()):
+            self._apply_view(scale, off)
+            return
+        pv = pivot if pivot is not None else QPointF(self.width() / 2.0, self.height() / 2.0)
+        self._zoom_plan = {
+            "pivot": pv, "s0": self._scale, "s1": scale,
+            "i0": self._center_img(self._scale, self._off, pv),
+            "i1": self._center_img(scale, off, pv),
+        }
+        self._zoom_anim.setDuration(motion.DUR_ZOOM_STEP if wheel else motion.DUR_MORPH)
+        self._zoom_anim.setEasingCurve(motion.EASE_PRIMARY if wheel else motion.EASE_MORPH)
+        self._zoom_anim.start()
+
+    def _apply_view(self, scale: float, off: QPointF) -> None:
+        self._scale, self._off = scale, QPointF(off)
         self.viewChanged.emit(self._scale)
         self.viewStateChanged.emit()
         self.update()
+
+    def _on_zoom_tick(self, v) -> None:
+        plan = self._zoom_plan
+        if plan is None:
+            return
+        e = float(v)
+        if e >= 1.0:
+            scale, off = self._zoom_goal
+            self._apply_view(scale, off)
+            return
+        s = plan["s0"] * (plan["s1"] / plan["s0"]) ** e
+        i0, i1, pv = plan["i0"], plan["i1"], plan["pivot"]
+        ix, iy = i0.x() + (i1.x() - i0.x()) * e, i0.y() + (i1.y() - i0.y()) * e
+        self._apply_view(s, QPointF(pv.x() - ix * s, pv.y() - iy * s))
+
+    def _stop_zoom(self) -> None:
+        """도는 확대를 지금 보이는 자리에서 멈춘다(끌기·그리기·새 목표가 중간값 위에서 시작)."""
+        if self._zoom_anim.state() == QVariantAnimation.State.Running:
+            self._zoom_anim.stop()
+        self._zoom_plan = None
+        self._zoom_goal = None
 
     def zoom_to_box(self, box: tuple, margin: float = 1.15) -> None:
         """이미지 px 상자(left, top, w, h)가 화면에 꽉 차게 확대한다."""
@@ -143,30 +201,29 @@ class GlCanvas(QWidget):
         if bw <= 0 or bh <= 0 or self.width() <= 0 or self.height() <= 0:
             return
         s = min(self.width() / (bw * margin), self.height() / (bh * margin))
-        self._scale = max(_MIN_SCALE, min(s, _MAX_SCALE))
+        scale = max(_MIN_SCALE, min(s, _MAX_SCALE))
         cx, cy = l + bw / 2.0, t + bh / 2.0
-        self._off = QPointF(self.width() / 2.0 - cx * self._scale,
-                            self.height() / 2.0 - cy * self._scale)
         self._fitted = False
-        self.viewChanged.emit(self._scale)
-        self.viewStateChanged.emit()
-        self.update()
+        self._go_to(scale, QPointF(self.width() / 2.0 - cx * scale,
+                                   self.height() / 2.0 - cy * scale),
+                    pivot=None, animate=True)
 
     def set_scale(self, scale: float, anchor: Optional[QPointF] = None) -> None:
         if self._data is None:
             return
         scale = max(_MIN_SCALE, min(scale, _MAX_SCALE))
         a = anchor if anchor is not None else QPointF(self.width() / 2.0, self.height() / 2.0)
-        ix, iy = self.to_image(a.x(), a.y())
-        self._scale = scale
-        self._off = QPointF(a.x() - ix * scale, a.y() - iy * scale)
+        ix, iy = self.to_image(a.x(), a.y())       # 지금 보이는 점 — 커서 아래가 제자리
         self._fitted = False
-        self.viewChanged.emit(self._scale)
-        self.viewStateChanged.emit()
-        self.update()
+        self._go_to(scale, QPointF(a.x() - ix * scale, a.y() - iy * scale),
+                    pivot=a, animate=True, wheel=True)
 
     def zoom_by(self, factor: float, anchor: Optional[QPointF] = None) -> None:
-        self.set_scale(self._scale * factor, anchor)
+        # 연속 휠은 도는 중이면 목표 배율에 쌓는다(보이는 배율에 쌓으면 휠이 먹힌다).
+        base = (self._zoom_goal[0] if self._zoom_goal is not None
+                and self._zoom_anim.state() == QVariantAnimation.State.Running
+                else self._scale)
+        self.set_scale(base * factor, anchor)
 
     def resizeEvent(self, e):  # noqa: N802
         if self._fitted:
@@ -362,6 +419,7 @@ class GlCanvas(QWidget):
         self.setFocus()
         if self._data is None:
             return
+        self._stop_zoom()
         pos = e.position()
         btn = e.button()
         if btn in (Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton) or (
@@ -576,7 +634,7 @@ class GlCanvas(QWidget):
             else:
                 super().keyPressEvent(e)       # 대화상자 닫기 등은 위로 넘긴다
         elif k == Qt.Key.Key_F:
-            self.fit()
+            self.fit(animate=True)
             e.accept()
         elif k == Qt.Key.Key_Space and not e.isAutoRepeat():
             self._space = True

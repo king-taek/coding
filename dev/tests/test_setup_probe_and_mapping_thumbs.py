@@ -28,6 +28,7 @@ def test_headless_stays_synchronous(styled_qapp, tmp_path):
     """헤드리스는 동기 — `_validate()` 의 반환값을 그 자리에서 믿을 수 있어야 한다."""
     page = SP.SetupPage()
     assert page._sync_probe, "offscreen 인데 비동기로 확인한다"
+    (tmp_path / "a.jpg").write_bytes(b"x")     # 사진 없는 폴더는 통과 못 한다(E2)
     page.ref_path_edit.setText(str(tmp_path))
     page.val_path_edit.setText(str(tmp_path))
     assert page._validate() is True

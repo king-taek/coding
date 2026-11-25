@@ -68,3 +68,27 @@ def test_copy_is_original_pixels(styled_qapp):
     got = QApplication.clipboard().image()
     assert abs(got.width() - 100) <= 3 and abs(got.height() - 100) <= 3   # 원본은 2배
     assert not v._crop_mode
+
+
+def test_copy_before_original_loaded_waits_on_background_decode(styled_qapp, tmp_path):
+    """L8 — 원본이 아직일 때 Ctrl+C 는 UI 스레드에서 디코드하지 않고, 힌트로 알린 뒤 도착하면 복사한다."""
+    import time
+    from PyQt6.QtWidgets import QApplication
+    src = QImage(400, 300, QImage.Format.Format_RGB32)
+    src.fill(QColor(10, 20, 30))
+    path = tmp_path / "big.png"
+    assert src.save(str(path))
+    QApplication.clipboard().clear()
+    v = FullscreenViewer(path)                      # image=None, 헤드리스라 시작 로더는 없다
+    v.resize(800, 600)
+    v.show()
+    v._copy_original()
+    assert v._orig is None and v._hint.text() == i18n.KO.VIEWER_ORIG_WAIT
+    t0 = time.perf_counter()
+    while v._wait_orig is not None and time.perf_counter() - t0 < 10:
+        styled_qapp.processEvents()
+        time.sleep(0.005)
+    assert v._wait_orig is None
+    got = QApplication.clipboard().image()
+    assert (got.width(), got.height()) == (400, 300)
+    v.close()

@@ -549,7 +549,12 @@ class _Load(QThread):
                                 f.cancel()      # 아직 시작 안 한 것만 멈춘다 — 이미 다 읽은 웨이퍼는 아래에서 올린다
                         if fut.cancelled():
                             continue
-                        self.signals.wafer.emit(t, futs[fut], fut.result())
+                        try:
+                            got = fut.result()
+                        except Exception as e:      # noqa: BLE001 — 한 웨이퍼 실패가 나머지를 버리지 않게
+                            _LOG.exception("Overkill 튜닝 웨이퍼 읽기 실패: %s", futs[fut])
+                            got = WaferData(futs[fut], note=_KO.OVERKILL_LOAD_WAFER_FAIL.format(err=e))
+                        self.signals.wafer.emit(t, futs[fut], got)
                         self.signals.progress.emit(t, i, len(todo),
                                                    _KO.OVERKILL_LOADING_WAFERS.format(i=i, n=len(todo)))
             if stop():
@@ -582,6 +587,7 @@ class _RichLoad(QThread):
                                 self.isInterruptionRequested)
         except Exception:       # noqa: BLE001 — 내리기만 못 쓸 뿐
             _LOG.exception("Overkill 튜닝 RichSurface 읽기 실패: %s", self._folder)
+            self.signals.done.emit(self._token, self._folder, None)      # 진행 글자를 걷고 알린다(None = 읽기 실패)
             return
         if self.isInterruptionRequested():
             return
@@ -1277,7 +1283,7 @@ class _FolderRow(QFrame):
 
 
 class _OnMark(QWidget):
-    """웨이퍼 줄 앞 표시 — 넣었으면 채운 원 + 체크, 뺐으면 빈 고리."""
+    """웨이퍼 줄 앞 표시 — 여러 개를 고르므로 네모.  넣었으면 채운 둥근 네모 + 체크, 뺐으면 빈 네모."""
 
     def __init__(self, on: bool, parent=None) -> None:
         super().__init__(parent)
@@ -1292,18 +1298,18 @@ class _OnMark(QWidget):
         if self.on:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(theme.ACCENT))
-            p.drawEllipse(r)
-            pen = QPen(QColor(theme.ON_ACCENT), 1.6)
+            p.drawRoundedRect(r, 3, 3)
+            pen = QPen(QColor(theme.ON_ACCENT), 1.8)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
             p.setPen(pen)
             x, y, w, h = r.x(), r.y(), r.width(), r.height()
-            p.drawPolyline([QPointF(x + w * .26, y + h * .52), QPointF(x + w * .44, y + h * .70),
-                            QPointF(x + w * .76, y + h * .32)])
+            p.drawPolyline([QPointF(x + w * .22, y + h * .52), QPointF(x + w * .42, y + h * .72),
+                            QPointF(x + w * .78, y + h * .30)])
         else:
             p.setPen(QPen(QColor(theme.LINE_STRONG), 1.2))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawEllipse(r)
+            p.drawRoundedRect(r, 3, 3)
         p.end()
 
 
@@ -1438,7 +1444,7 @@ class _RatioBar(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setFixedHeight(self.BAR_H + 8)
+        self.setFixedHeight(36)         # 막대 + 아래 범례 한 줄
         self.setMaximumWidth(self.MAX_W)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.drop, self.total, self.ticks = 0, 0, ()
@@ -1450,6 +1456,28 @@ class _RatioBar(QWidget):
     def paintEvent(self, _e):       # noqa: N802
         p = QPainter(self)
         paint_ratio(p, 0, 4, self.width(), self.BAR_H, self.drop, self.total, self.ticks, tick_over=4.0)
+        f = QFont(self.font())
+        f.setPixelSize(12)
+        p.setFont(f)
+        fm = p.fontMetrics()
+        kept = max(0, self.total - self.drop)
+        rest = QColor(theme.INK2)
+        rest.setAlpha(120)
+        y = 4 + self.BAR_H + 8
+        x = 0.0
+
+        def item(col, text: str) -> None:
+            nonlocal x
+            p.fillRect(QRectF(x, y + 2, 10, 10), col)
+            p.setPen(QColor(theme.INK2))
+            p.drawText(int(x + 16), int(y + 12), text)
+            x += 16 + fm.horizontalAdvance(text) + 22
+
+        if self.drop > 0:
+            item(QColor(theme.DANGER), _KO.OVERKILL_RATIO_DROP_FMT.format(n=self.drop))
+            item(rest, _KO.OVERKILL_RATIO_KEEP_FMT.format(n=kept))
+        else:
+            item(rest, _KO.OVERKILL_RATIO_NONE_FMT.format(n=kept))
         p.end()
 
 
@@ -1716,6 +1744,7 @@ class ThresholdPreviewDialog(QDialog):
         self._overkill: dict = {}         # Overkill 로 가른 Defect — key_of(d) → Defect (팝업에서 고른다 · 추천에는 안 쓰고 '빠짐 m/n' 만 센다)
         self._pick_bus = _PickBus(self)
         self._pick_bus.done.connect(self._on_pick_computed)
+        self._pick_prev: Optional[tuple] = None     # [적용] 직전의 (고른 것, Overkill) — 계산 실패 때 되돌린다
         self._pick_token = 0              # [적용] 계산의 세대 — 늦게 온 옛 결과는 버린다
         self._pick_touched: set = set()   # 마지막 [적용] 에서 고른 것이 바뀐 Zone — 그 Zone 저장분만 고친다
         self._mark_undo: list = []        # 값 띠 [Defect] · [Overkill] 직전 상태 — Z 로 하나씩 되돌린다
@@ -2333,6 +2362,9 @@ class ThresholdPreviewDialog(QDialog):
         if token != self._rich_token:
             return
         self.rich_label.setText("")
+        if rich is None:
+            self._show_notice(_KO.OVERKILL_RICH_FAIL, "warn")
+            return
         base = self._cache.get(folder)
         if base is not None:
             base.rich = rich
@@ -2502,11 +2534,11 @@ class ThresholdPreviewDialog(QDialog):
         self.notice_label.setText(text)
         self._undo_snap = undo
         self.undo_btn.setVisible(undo is not None)
-        self.notice.setVisible(True)
+        motion.banner_in(self.notice)
         self._notice_timer.start(NOTICE_MS)
 
     def _hide_notice(self) -> None:
-        self.notice.setVisible(False)
+        motion.banner_out(self.notice)
         self._undo_snap = None
 
     def hideEvent(self, event):         # noqa: N802
@@ -4200,6 +4232,7 @@ class ThresholdPreviewDialog(QDialog):
         """팝업 [적용] — 고른 Defect · Overkill 를 받아 추천값을 다시 계산하고 화면을 다시 그린다."""
         if self._w is None:
             return
+        self._pick_prev = (self._picked, self._overkill)     # 계산이 실패하면 고르기 전으로 되돌린다
         self._pick_touched = {(d.zone_dir, d.zone) for src in (self._picked, self._overkill, picked, overkill)
                               for d in src.values()}     # 팝업에서 비운 Zone 도 — 그 Zone 저장분을 지운다
         self._picked = dict(picked)
@@ -4228,6 +4261,10 @@ class ThresholdPreviewDialog(QDialog):
         if token != self._pick_token:
             return                                   # 그 사이 다시 적용했다 — 옛 결과
         try:
+            if rec is None and self._pick_prev is not None:
+                self._picked, self._overkill = self._pick_prev
+                self._show_notice(_KO.THRESH_PREVIEW_APPLY_FAIL, "warn")
+            self._pick_prev = None
             if self._w is not None and rec is not None:
                 self._merge_recommended(rec)
                 self._save_picks(self._pick_touched)

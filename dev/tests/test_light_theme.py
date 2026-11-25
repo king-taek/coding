@@ -174,7 +174,7 @@ def test_removed_strings_are_gone():
                  "LEGACY_SWITCH_DESC", "ENGINE_ACTIVE_COORD"):
         assert not hasattr(i18n.KO, gone), f"i18n.KO.{gone} 가 남아 있다"
     # 스위치 제목·툴팁·배지 문구는 그대로다.
-    assert i18n.KO.LEGACY_SWITCH_TITLE == "유사도 엔진(구형) 사용"
+    assert i18n.KO.LEGACY_SWITCH_TITLE == "유사도 매치"
     assert i18n.KO.LEGACY_MODE_HINT
     assert i18n.KO.ENGINE_ACTIVE_LEGACY_FMT
 

@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout
 from ... import i18n
 from ...coords import notch
 from .. import theme
+from ..deferred import call_later
 from .neon_button import NeonButton
 from . import popup_layout
 from .option_group import OptionGroup
@@ -63,6 +64,16 @@ class NotchDialog(QDialog):
         self.setMinimumWidth(460)
         if auto_result is not None:
             self._on_auto_done(auto_result)
+
+    def showEvent(self, e):  # noqa: N802
+        super().showEvent(e)
+        # 시작 포커스(첫 방향 버튼)의 테두리를 없앤다 — 대화 상자는 show 뒤에 포커스를 준다.
+        call_later(self, 0, self._clear_start_focus)
+
+    def _clear_start_focus(self) -> None:
+        fw = self.focusWidget()
+        if fw is not None:
+            fw.clearFocus()
 
     def _run_auto(self) -> None:
         """기준 방향은 그대로 두고 검증 방향을 찾는다(백그라운드 — 창이 멈추지 않는다)."""

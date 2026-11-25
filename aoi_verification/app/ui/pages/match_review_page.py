@@ -19,7 +19,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import (QEvent, QObject, QPoint, QRect, QRectF, Qt, QTimer,
                           pyqtSignal)
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPixmap, QTextDocument
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPixmap
 from PyQt6.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout,
                              QLabel, QScrollArea, QSizePolicy,
                              QVBoxLayout, QWidget)
@@ -61,6 +61,7 @@ _ARROW_W = 24
 # 슬롯 이름 열 폭.  화살표와 같은 이유로 상수다 — 행(`slot_host`)·예약폭 계산·헤더
 # 세 곳이 **같은 값**을 봐야 한다.  예전엔 96 이 세 군데에 따로 적혀 있었다.
 _SLOT_W = 96
+_SLOT_HEAD_CHARS = 8      # 슬롯 이름 윗줄 글자 수(나머지는 아랫줄)
 # ✕/↩ 토글 열 폭.  헤더·행·예약폭 계산 세 곳이 공유한다.
 # ★ 예전엔 `PROFILE.toggle_w`(스위치 트랙 크기 토큰)를 빌려 썼는데, 이 열은 스위치가
 #   아니라 컴팩트 버튼이라 이름과 쓰임이 어긋났다 — 토큰을 스위치에 맞게 고치면 이
@@ -460,8 +461,8 @@ class _MatchRow(QFrame):
         self._slot_label.setProperty("role", "slotHead")
         # ★ 좁은 열(96px)이라 웨이퍼 ID 는 대부분 넘친다.  평범한 QLabel 은 말줄임 없이
         #   **그냥 잘라** 버려서 어느 슬롯인지 알 수 없었다(툴팁도 없었다).
-        #   **가운데** 생략인 이유: 실제 ID 는 앞이 공통이다(W75483·04XYG4 / W75483·03XYC2).
-        #   뒤를 자르면 서로 다른 웨이퍼가 똑같이 렌더된다 — `_SlotTile._elide` 와 같은 판단.
+        #   그래서 전체를 두 줄(앞 8자 / 나머지)로 보인다 — 실제 ID 는 앞이 공통이라
+        #   (W75483·04XYG4 / W75483·03XYC2) 한 줄로 줄이면 서로 다른 웨이퍼가 같아 보인다.
         self._slot_label.setWordWrap(False)       # 공백 없는 ID 는 줄바꿈이 안 듣고
         self._slot_label.setToolTip(match.slot)   # 최소 폭만 부풀린다(가로 넘침).
         self._elide_slot()
@@ -710,15 +711,19 @@ class _MatchRow(QFrame):
         return max(0, int(fit))
 
     def _elide_slot(self) -> None:
-        """슬롯 이름을 열 폭에 맞춰 **가운데** 생략.  전체 이름은 툴팁이 갖는다.
+        """슬롯 이름 전체를 두 줄로(앞 8자 / 나머지).  전체 이름은 툴팁이 갖는다.
 
-        ``_SLOT_W`` 가 고정이라 한 번만 계산해도 되지만, 폭이 바뀔 때를 대비해
-        ``resizeEvent`` 에서도 다시 부른다(`_SlotTile._elide` 와 같은 형태).
+        가운데를 줄이면 앞뒤가 같은 두 슬롯(W7548304XYG4 / W7548306XYG4)이 똑같이
+        보였다.  둘째 줄이 열 폭을 넘을 때만 그 줄을 가운데 생략한다.
+        ``resizeEvent`` 에서도 다시 부른다.
         """
-        avail = max(40, (self._slot_label.width() or _SLOT_W) - 4)
-        fm = QFontMetrics(self._slot_label.font())
-        self._slot_label.setText(fm.elidedText(
-            self.match.slot, Qt.TextElideMode.ElideMiddle, avail))
+        name = self.match.slot
+        head, tail = name[:_SLOT_HEAD_CHARS], name[_SLOT_HEAD_CHARS:]
+        if tail:
+            avail = max(40, (self._slot_label.width() or _SLOT_W) - 4)
+            fm = QFontMetrics(self._slot_label.font())
+            tail = fm.elidedText(tail, Qt.TextElideMode.ElideMiddle, avail)
+        self._slot_label.setText(f"{head}\n{tail}" if tail else head)
 
     def _grid_cols(self) -> int:
         """아래 추가 줄 후보 열 수 — 가용 폭에 맞게(가로 스크롤 방지, #3)."""
@@ -1119,12 +1124,14 @@ class MatchReviewPage(QWidget):
 
         bar = QHBoxLayout()
         bar.setSpacing(12)
-        self._tally_label = QLabel("", self)
-        self._tally_label.setTextFormat(Qt.TextFormat.RichText)
-        # 낱말만 봐서는 '매치 없음' 과 '매치 실패' 가 같은 말로 읽힌다 — 넷의
-        # 차이를 화면에서 바로 확인할 수 있게 한다 (U-13).
-        self._tally_label.setToolTip(i18n.KO.TALLY_TOOLTIP)
-        bar.addWidget(self._tally_label)
+        # 통계는 왼쪽 칩(표시만, 누르는 기능 없음).  낱말만 봐서는 '매치 없음' 과
+        # '매치 실패' 가 같은 말로 읽히므로 칩마다 차이를 설명하는 툴팁을 단다 (U-13).
+        self._chip_host = QWidget(self)
+        self._chip_lay = QHBoxLayout(self._chip_host)
+        self._chip_lay.setContentsMargins(0, 0, 0, 0)
+        self._chip_lay.setSpacing(8)
+        self._chips: dict[str, QLabel] = {}
+        bar.addWidget(self._chip_host)
         bar.addStretch(1)
         # ※ '확인 필요만' 필터는 제거했다 — 상단 탤리(일치·허용 초과·매치 없음)가 이미
         #   '무엇을 확인해야 하는지'를 말한다.  행을 숨기는 필터는 그 위에 상태를 하나
@@ -1313,6 +1320,9 @@ class MatchReviewPage(QWidget):
         # ★ 세대 토큰 — 배치 생성 도중 다시 들어오면(결과에서 검토로 복귀 등) 옛 배치가
         #   새 목록에 행을 섞어 넣는다.  토큰이 바뀐 배치는 스스로 멈춘다.
         self._load_gen = getattr(self, "_load_gen", 0) + 1
+        if getattr(self, "_pending_rows", None):
+            # 옛 배치가 만들던 중이면 그 덮개가 남지 않게 걷는다.
+            self._loading.hide_overlay()
         self._pending_rows = []
         if getattr(self, "_row_batch_timer", None) is not None:
             self._row_batch_timer.stop()
@@ -1806,53 +1816,62 @@ class MatchReviewPage(QWidget):
         self._update_summary()
 
     def _update_summary(self) -> None:
-        """상단 탤리 갱신 — 일치는 기준선으로 항상, 예외(초과/매치 없음/실패)는
-        0 이 아닐 때만 노출해 시선을 예외로 모은다. 숫자는 mono·tabular."""
+        """상단 통계 칩 갱신 — 유지·일치는 항상, 예외(초과/매치 없음/실패)는
+        0 이 아닐 때만 노출해 시선을 예외로 모은다."""
         ok, over, none = tally(self._matches, self._unmatched_keys,
                                self._coord_mode)
-
-        def seg(label_fmt, n, color):
-            # 라벨은 색, 숫자는 mono tabular 로 자릿수 흔들림 없이.
-            txt = label_fmt.format(n="")  # '일치 ' 처럼 숫자 자리 비움
-            return (f"<span style='color:{color}'>{txt.strip()} "
-                    f"<span style='font-family:{theme.FONT_MONO}'>{n}</span></span>")
-
-        sep = f"<span style='color:{theme.LINE2}'>&nbsp;&nbsp;</span>"
-        parts = [seg(i18n.KO.TALLY_OK_FMT, ok, theme.PASS)]
-        if over > 0:
-            parts.append(seg(i18n.KO.TALLY_OVER_FMT, over, theme.DANGER))
-        if none > 0:
-            parts.append(seg(i18n.KO.TALLY_NO_MATCH_FMT, none, theme.INK2))
-        if self._coord_failed_count > 0:
-            # 매치 실패(좌표 미검출)는 이 화면에서 조치 불가 → 정보성 mute.
-            parts.append(seg(i18n.KO.TALLY_COORD_FAILED_FMT,
-                             self._coord_failed_count, theme.MUTE))
-        self._tally_label.setText(sep.join(parts))
-        self._pulse_changed_tally(
-            [("ok", ok), ("over", over), ("none", none),
-             ("fail", self._coord_failed_count)], parts, sep)
         kept = len(self._matches) - len(self._unmatched_keys)
-        self.btn_done.setText(
-            i18n.KO.BTN_FINISH_REVIEW_KEPT_NONE_FMT.format(n=kept, m=none) if none
-            else i18n.KO.BTN_FINISH_REVIEW_KEPT_FMT.format(n=kept))
+        self._set_chips([
+            ("kept", i18n.KO.TALLY_KEPT_FMT, kept, theme.INK, True),
+            ("ok", i18n.KO.TALLY_OK_FMT, ok, theme.PASS, True),
+            ("over", i18n.KO.TALLY_OVER_FMT, over, theme.DANGER, over > 0),
+            ("none", i18n.KO.TALLY_NO_MATCH_FMT, none, theme.INK2, none > 0),
+            ("fail", i18n.KO.TALLY_COORD_FAILED_FMT,
+             self._coord_failed_count, theme.MUTE,
+             self._coord_failed_count > 0),
+        ])
+        self._pulse_changed_tally(
+            [("kept", kept), ("ok", ok), ("over", over), ("none", none),
+             ("fail", self._coord_failed_count)])
 
-    def _pulse_changed_tally(self, counts, parts, sep) -> None:
-        """P14B — 바뀐 칸 뒤에만 연한 강조색이 한 번 지나간다.  숫자는 즉시 바뀐다(보간 없음).
+    def _set_chips(self, specs) -> None:
+        """통계 칩 — 표시만(누르는 기능 없음).  0 인 예외 칩은 숨긴다."""
+        for key, fmt, n, color, shown in specs:
+            chip = self._chips.get(key)
+            if chip is None:
+                chip = self._chips[key] = QLabel(self._chip_host)
+                chip.setObjectName("tallyChip_" + key)
+                c = QColor(color)
+                chip.setStyleSheet(
+                    f"QLabel#tallyChip_{key} {{ color: {color};"
+                    f" background: rgba({c.red()},{c.green()},{c.blue()},36);"
+                    " border-radius: 11px; padding: 3px 12px;"
+                    " font-weight: 600; }")
+                chip.setToolTip(i18n.KO.TALLY_TOOLTIP)
+                self._chip_lay.addWidget(chip)
+            chip.setText(fmt.format(n=n))
+            chip.setVisible(shown)
 
-        칸 = 0 이 아닌 항목(일치는 늘).  처음 그릴 때와 칸 구성이 같은 값이면 아무것도 안 한다."""
-        segs = [(k, n) for k, n in counts if k == "ok" or n > 0]
+    def _pulse_changed_tally(self, counts) -> None:
+        """P14B — 바뀐 칩 뒤에만 연한 강조색이 한 번 지나간다.  숫자는 즉시 바뀐다(보간 없음).
+
+        칩 = 유지·일치는 늘, 나머지는 0 이 아닐 때.  처음 그릴 때와 같은 값이면 아무것도 안 한다."""
+        segs = [(k, n) for k, n in counts if k in ("kept", "ok") or n > 0]
         old = getattr(self, "_tally_segs", None)
         self._tally_segs = segs
-        lbl = self._tally_label
-        if old is None or old == segs or not motion.enabled() or not lbl.isVisible():
+        host = self._chip_host
+        if old is None or old == segs or not motion.enabled() or not host.isVisible():
             return
         prev = dict(old)
-        changed = {i for i, (k, n) in enumerate(segs) if prev.get(k) != n}
+        changed = {k for k, n in segs if prev.get(k) != n}
         band = getattr(self, "_tally_band", None)
         if band is None:
-            band = self._tally_band = _TallyPulse(lbl)
-        band.setGeometry(lbl.rect())
-        band.set_spans(_rich_spans(lbl, parts, sep, changed))
+            band = self._tally_band = _TallyPulse(host)
+        host.layout().activate()
+        band.setGeometry(host.rect())
+        band.set_spans([QRectF(c.geometry()).adjusted(-3, 0, 3, 0)
+                        for k, c in self._chips.items()
+                        if k in changed and c.isVisibleTo(host)])
         band.show()
         band.raise_()
         motion.pulse(band, duration=motion.DUR_SLOW)
@@ -1871,30 +1890,8 @@ class MatchReviewPage(QWidget):
         self.finished.emit(kept, unmatched_refs)
 
 
-def _rich_width(label, html: str) -> float:
-    d = QTextDocument()
-    d.setDefaultFont(label.font())
-    d.setDocumentMargin(0)
-    d.setHtml(html)
-    return d.idealWidth()
-
-
-def _rich_spans(label, parts, sep, wanted) -> list:
-    """리치 텍스트 라벨에서 ``wanted`` 번째 칸들의 가로 범위(라벨 좌표)."""
-    pad = 5
-    x = label.contentsRect().left() + label.margin()
-    sep_w = _rich_width(label, sep)
-    out = []
-    for i, html in enumerate(parts):
-        w = _rich_width(label, html)
-        if i in wanted:
-            out.append(QRectF(x - pad, 0, w + 2 * pad, label.height()))
-        x += w + sep_w
-    return out
-
-
 class _TallyPulse(QWidget):
-    """탤리 라벨 위 투명 띠 — ``motion.pulse`` 가 모는 ``_pulse`` 만큼 칸 뒤를 물들인다(P14B)."""
+    """탤리 칩 줄 위 투명 띠 — ``motion.pulse`` 가 모는 ``_pulse`` 만큼 칸 뒤를 물들인다(P14B)."""
 
     ALPHA = 0.22
 

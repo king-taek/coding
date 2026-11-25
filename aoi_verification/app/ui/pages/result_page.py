@@ -85,6 +85,7 @@ class ResultPage(QWidget):
         self._coord_mode: bool = False
         self._tolerance: float = _DFLT_TOL
         self._loading = LoadingOverlay(self)
+        self._loading.cancel_requested.connect(self._on_export_cancel)
         self._exporter: ExcelExporter | None = None
         # 이번 결과를 한 번이라도 저장했는가 — [새 검증 시작] 확인의 근거(U-06).
         self._exported = False
@@ -162,6 +163,8 @@ class ResultPage(QWidget):
             i18n.KO.EXPORT_UNMATCHED_ORIGINAL_LABEL, self,
         )
         self.unmatched_original_chk.setChecked(False)
+        # 시작부터 포커스 테두리가 뜨지 않게 — 눌렀을 때만 포커스를 받는다.
+        self.unmatched_original_chk.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.unmatched_original_chk.setToolTip(
             i18n.KO.EXPORT_UNMATCHED_ORIGINAL_TOOLTIP
         )
@@ -171,6 +174,7 @@ class ResultPage(QWidget):
             i18n.KO.EXPORT_ORIGINAL_QUALITY_LABEL, self,
         )
         self.original_quality_chk.setChecked(False)
+        self.original_quality_chk.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.original_quality_chk.setToolTip(
             i18n.KO.EXPORT_ORIGINAL_QUALITY_TOOLTIP
         )
@@ -569,7 +573,7 @@ class ResultPage(QWidget):
         self._start_export()
 
     def _start_export(self) -> None:
-        self._loading.show_overlay(i18n.KO.LOAD_EXPORT)
+        self._loading.show_overlay(i18n.KO.LOAD_EXPORT, cancelable=True)
         self._exporter = ExcelExporter(
             self._result, self._save_path, template_path=self._template_path,
             original_quality=self.original_quality_chk.isChecked(),
@@ -633,6 +637,19 @@ class ResultPage(QWidget):
         if not sheets.run(dlg) or dlg.chosen is None:
             return None
         return target.with_name(dlg.chosen)
+
+    def _on_export_cancel(self) -> None:
+        """덮개 [중지] — 워커의 멈춤 장치(`stop`)를 건다.  워커는 임시 파일(.part)에만 쓰고
+        멈추면 그것을 지우므로 반쯤 쓴 결과 파일이 남지 않는다(이전 파일도 그대로)."""
+        exp = self._exporter
+        if exp is not None and exp.isRunning():
+            for sig in (exp.signals.done, exp.signals.failed):
+                try:
+                    sig.disconnect()
+                except TypeError:
+                    pass
+            exp.stop()
+        self._loading.hide_overlay()
 
     def _on_export_done(self, path: str) -> None:
         self._loading.hide_overlay()

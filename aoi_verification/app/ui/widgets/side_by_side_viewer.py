@@ -58,6 +58,7 @@ def fit_scale(pix_w: int, pix_h: int, box_w: int, box_h: int) -> float:
     return min(box_w / float(pix_w), box_h / float(pix_h))
 
 
+_TITLE_H = 24          # 좌우 패널 제목 줄 높이(px)
 _ZOOM_STEP = 1.1
 _SCALE_MIN = 0.02
 _SCALE_MAX = 8.0
@@ -87,6 +88,8 @@ class _Pane(QWidget):
         self._title = QLabel(title, self)
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._title.setProperty("role", "paneTitle")
+        # 좌우 제목 높이를 같게 — 'µ' 같은 글리프가 줄 높이를 달리 만들어 사진이 2~3px 어긋났다.
+        self._title.setFixedHeight(_TITLE_H)
         lay.addWidget(self._title)
         self._img = QLabel(self)
         self._img.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -301,7 +304,7 @@ class _Pane(QWidget):
         cw = max(1, self._img.width())
         ch = max(1, self._img.height())
         canvas = QPixmap(cw, ch)
-        canvas.fill(QColor(theme.VIEWER_BG))   # 뷰어 바탕(테마 무관 순검정)
+        canvas.fill(QColor(theme.PANEL))   # 사진 칸 여백 = 패널색(검은 띠 없음)
         p = QPainter(canvas)
         p.drawPixmap((cw - scaled.width()) // 2 + self._off_x,
                      (ch - scaled.height()) // 2 + self._off_y, scaled)
@@ -470,7 +473,10 @@ class SideBySideViewer(QDialog):
             self.btn_next.setEnabled(False)
             return
         item, caption = self._candidates[self._idx]
-        self._cand_pane.set_title(caption or item.filename)
+        self._cand_pane.set_title(
+            i18n.KO.VIEWER_CAND_TITLE_CAP_FMT.format(n=self._idx + 1, cap=caption)
+            if caption else
+            i18n.KO.VIEWER_CAND_TITLE_FMT.format(n=self._idx + 1))
         # ★ 후보를 바꿔도 확대 배율·위치는 **유지한다**(초기화하지 않는다).  같은
         #   자리를 같은 배율로 후보끼리 비교하는 것이 이 화면의 목적이다.
         self._cand_pane.set_pixmap(_decode_fast(Path(item.path)))

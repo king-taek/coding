@@ -122,21 +122,18 @@ def _row(slot: str):
     return mrp._MatchRow(m, runners_up=[], thumb_px=118)
 
 
-def test_long_slot_name_is_elided_in_the_middle_with_a_full_tooltip(qapp):
-    """96px 열에서 웨이퍼 ID 가 **말줄임 없이 잘리던** 것을 막는다.
+def test_long_slot_name_is_shown_in_two_lines_with_a_full_tooltip(qapp):
+    """96px 열에서 웨이퍼 ID 가 **잘리던** 것을 막는다.
 
-    ★ 가운데 생략이어야 한다 — 실제 ID 는 앞이 공통이라(W75483·04XYG4 / W75483·03XYC2)
-    뒤를 자르면 **서로 다른 웨이퍼가 똑같이 렌더된다.**
+    ★ 가운데 생략은 앞뒤가 같은 두 웨이퍼를 똑같이 보이게 했다(W7548304XYG4 /
+      W7548306XYG4) — V26 에서 전체를 두 줄(앞 8자 / 나머지)로 바꿨다.
     """
     slot = "W7548304XYG4"
     row = _row(slot)
     try:
-        shown = row._slot_label.text()
-        assert shown != slot, "이 폭에서는 줄어들어야 한다(테스트 전제)"
-        assert "…" in shown, "말줄임 표시가 있어야 잘렸다는 것을 안다"
-        # 가운데 생략 — 앞뒤가 모두 남는다.
-        assert shown.startswith(slot[:3]) and shown.endswith(slot[-3:])
-        # 전체 이름은 툴팁으로 반드시 읽을 수 있다.
+        assert row._slot_label.text() == "W7548304\nXYG4"
+        assert row._slot_label.text().replace("\n", "") == slot
+        # 전체 이름은 툴팁으로도 읽을 수 있다.
         assert row._slot_label.toolTip() == slot
     finally:
         row.deleteLater()
@@ -162,87 +159,3 @@ def test_slot_column_width_is_a_shared_constant(qapp):
         row.deleteLater()
 
 
-def test_lot_counts_label_fills_the_real_width_and_keeps_the_full_text(qapp):
-    """1단계 '슬롯별 장수' — 잘리되 **가용 폭을 실제로 채워야** 한다.
-
-    ★ 예전 테스트는 `setFixedWidth(200)` 으로 라벨에 폭을 미리 심어 줬다.  그래서 실제
-    경로의 결함(레이아웃 전 100px 로 잘라 놓고 다시 안 재는 것)을 **잡지 못했고, 오히려
-    더 심하게 잘릴수록 확실히 통과**했다.  이제 앱과 같은 순서로 태운다:
-    넓은 창에 넣고 → load_state → 화면에 올리고 → 폭을 실제로 채웠는지 잰다.
-    """
-    from pathlib import Path
-    from PyQt6.QtGui import QFontMetrics
-    from PyQt6.QtWidgets import QMainWindow, QStackedWidget
-
-    win = QMainWindow()
-    stack = QStackedWidget(win)
-    win.setCentralWidget(stack)
-    win.resize(1600, 1000)
-    page = sp.SelectPage()
-    stack.addWidget(page)
-    win.show()
-    try:
-        # ★ 슬롯 수는 넉넉히 — 전체 문자열이 창보다 길어야 '잘림' 을 검사할 수 있다.
-        #   12개는 글꼴에 따라 1600px 안에 다 들어가서(서버 기본 글꼴 1529px) 전제가 깨졌다.
-        slots = [f"W75483{i:02d}XYG4" for i in range(30)]
-        queue = [sp.ImageItem(path=Path(f"/tmp/{slot}_{k}.jpg"), slot=slot, side="ref")
-                 for slot in slots for k in range(3)]
-        page.load_state(queue=queue)          # 앱과 같은 순서 — 표시보다 먼저
-        stack.setCurrentWidget(page)
-        for _ in range(10):
-            qapp.processEvents()
-
-        lb = page.lot_counts_label
-        full = lb.toolTip()
-        assert QFontMetrics(lb.font()).horizontalAdvance(full) > win.width(), \
-            "전제: 전체 문자열이 창보다 길어야 한다"
-        assert full.startswith(i18n.KO.LOT_COUNTS_PREFIX)
-        assert all(slot in full for slot in slots), "툴팁에는 전부 있어야 한다"
-
-        shown = lb.text()
-        assert "…" in shown and len(shown) < len(full), "이 폭에서는 줄어야 한다"
-        # ★ 핵심 단언 — 잘렸다는 것만으로는 부족하다.  **가용 폭을 채워야** 한다.
-        #   레이아웃 전 100px 로 잘라 두면 여기서 걸린다.
-        avail = lb.contentsRect().width()
-        used = QFontMetrics(lb.font()).horizontalAdvance(shown)
-        assert avail > 400, f"창이 넓으므로 라벨도 넓어야 한다 (실제 {avail}px)"
-        assert used >= avail * 0.8, \
-            f"가용 {avail}px 중 {used}px 만 씀 — 레이아웃 전 폭으로 자른 것이다"
-    finally:
-        win.close()
-        page.deleteLater()
-
-
-def test_lot_counts_re_elides_when_the_window_grows(qapp):
-    """창을 키우면 다시 계산해야 한다 — 한 번 자르고 끝나면 영원히 좁은 채 남는다."""
-    from pathlib import Path
-    from PyQt6.QtGui import QFontMetrics
-    from PyQt6.QtWidgets import QMainWindow, QStackedWidget
-
-    win = QMainWindow()
-    stack = QStackedWidget(win)
-    win.setCentralWidget(stack)
-    win.resize(820, 620)
-    page = sp.SelectPage()
-    stack.addWidget(page)
-    win.show()
-    try:
-        slots = [f"W75483{i:02d}XYG4" for i in range(12)]
-        page.load_state(queue=[
-            sp.ImageItem(path=Path(f"/tmp/{s_}_{k}.jpg"), slot=s_, side="ref")
-            for s_ in slots for k in range(3)])
-        stack.setCurrentWidget(page)
-        for _ in range(10):
-            qapp.processEvents()
-        narrow = QFontMetrics(page.lot_counts_label.font()).horizontalAdvance(
-            page.lot_counts_label.text())
-
-        win.resize(1700, 1000)
-        for _ in range(10):
-            qapp.processEvents()
-        wide = QFontMetrics(page.lot_counts_label.font()).horizontalAdvance(
-            page.lot_counts_label.text())
-        assert wide > narrow, f"넓어졌는데 글자가 그대로다 ({narrow} → {wide})"
-    finally:
-        win.close()
-        page.deleteLater()

@@ -1760,6 +1760,41 @@ def test_apply_large_set_shows_loading_and_does_not_block(styled_qapp, tmp_path,
         dlg.deleteLater()
 
 
+def test_apply_failure_restores_picks_and_shows_notice(styled_qapp, tmp_path, monkeypatch):
+    """B5 — 추천값 계산이 실패하면 고르기 전 상태로 되돌리고 알린다(적용된 것처럼 보이지 않게)."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    try:
+        d = dlg._in_zone()[0]
+        before = (dict(dlg._picked), dict(dlg._overkill))
+
+        def boom(*a, **k):
+            raise RuntimeError("x")
+        monkeypatch.setattr(T.P, "recommend", boom)
+        dlg._on_pick_applied({T.key_of(d): d}, {})
+        _wait_apply(dlg, styled_qapp)
+        assert (dlg._picked, dlg._overkill) == before
+        assert dlg.notice_label.text() == T._KO.THRESH_PREVIEW_APPLY_FAIL
+    finally:
+        dlg.deleteLater()
+
+
+def test_rich_failure_clears_progress_text_and_notifies(styled_qapp, tmp_path, monkeypatch):
+    """B6 — RichSurface 읽기 실패(done 에 None)면 '내리기 준비 NN%' 글자를 지우고 알린다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    try:
+        dlg._rich_token = 3
+        dlg.rich_label.setText(T._KO.OVERKILL_RICH_PROGRESS.format(p=40))
+        dlg._on_rich(3, dlg._w.folder, None)
+        assert dlg.rich_label.text() == ""
+        assert dlg.notice_label.text() == T._KO.OVERKILL_RICH_FAIL
+    finally:
+        dlg.deleteLater()
+
+
 def test_apply_late_result_of_older_apply_is_dropped(styled_qapp, tmp_path, monkeypatch):
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     _capture_run(monkeypatch, T)

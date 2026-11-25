@@ -238,6 +238,7 @@ def test_entering_b_finishes_remaining_thumbs_at_full_speed_then_selects(styled_
 def test_cancel_during_b_wait_goes_straight_to_select(styled_qapp):
     MW, win = _window(lazy=True)
     win._stage = ""
+    win._extract_exporter = win._ocr_worker = win._openvino_worker = None
     MW.MainWindow._enter_cross_b(win)
     (full,) = win._pools
     MW.MainWindow._on_loading_cancel(win)
