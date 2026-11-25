@@ -58,7 +58,7 @@ _KO = i18n.KO
 _INNER_BAR = "border-radius: 6px; margin: 4px 12px 0 12px;"
 
 LOAD_WORKERS = 6            # 웨이퍼를 동시에 읽는 수(Overkill 튜닝과 같다 — NAS 왕복 지연을 겹친다)
-THUMB_WORKERS = 3
+THUMB_WORKERS = 6           # 목록 사진 동시 읽기 수 — 실측 66 LOT: 3→14.4, 6→20.0, 8→22.9 장/초(공유 NAS 라 6 에서 멈춤)
 SCAN_WAIT_MS = 150          # 고른 Defect 에 이만큼 머물면 Scan 을 찾는다(화살표로 지나가는 것은 건너뜀)
 PAGE_TILES = 60
 TILE_PX = 118
