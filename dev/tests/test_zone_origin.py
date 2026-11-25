@@ -318,9 +318,11 @@ def test_dialog_coord_filter_and_detail(dlg):
 
 
 def test_dialog_lot_groups_wafers(dlg):
-    """LOT 한 줄 + ▸/▾ 로 그 LOT 웨이퍼를 펴고 접는다(LOT 이 하나면 처음부터 펼침)."""
-    assert ("lot", "FLU-1122N") in dlg.facet_rows and dlg.lot_open("FLU-1122N")
-    assert any(k == "wafer" for k, _v in dlg.facet_rows)
+    """LOT 한 줄 + ▸/▾ 로 그 LOT 웨이퍼를 펴고 접는다(처음엔 접힘)."""
+    assert ("lot", "FLU-1122N") in dlg.facet_rows and not dlg.lot_open("FLU-1122N")
+    assert not any(k == "wafer" for k, _v in dlg.facet_rows)
+    dlg.toggle_lot("FLU-1122N")
+    assert dlg.lot_open("FLU-1122N") and any(k == "wafer" for k, _v in dlg.facet_rows)
     dlg.toggle_lot("FLU-1122N")
     assert not dlg.lot_open("FLU-1122N") and not any(k == "wafer" for k, _v in dlg.facet_rows)
     dlg.toggle("lot", "FLU-1122N")
@@ -659,3 +661,86 @@ def test_unknown_slot_reads_dash_not_question_mark(styled_qapp, tmp_path):
     finally:
         d.close()
         d.deleteLater()
+
+
+# ---------------------------------------------------------------- 폴더 많을 때 폭 · 왼쪽 줄 ✕ (2026-11-25)
+def _many(d, sample, n=25):
+    from dataclasses import replace
+    roots, data = [], {}
+    for i in range(n):
+        f = Path(f"/tmp/L{i}/GX{i}")
+        data[f] = [replace(sample, folder=f, wafer_id=f.name, slot=str(i + 1))]
+        roots.append(f)
+    d.set_wafers(roots, data)
+    return roots
+
+
+@pytest.fixture
+def dlg25(styled_qapp, sample):
+    from aoi_verification.app.ui.widgets.zone_origin_dialog import ZoneOriginDialog
+    d = ZoneOriginDialog()
+    d.resize(1400, 900)
+    _many(d, sample)
+    d.show()
+    yield d
+    d.close()
+    d.deleteLater()
+
+
+def test_many_folders_do_not_widen_dialog(dlg25):
+    assert dlg25.minimumSizeHint().width() <= 1200
+    assert dlg25.loaded_label.isVisibleTo(dlg25) and "불러온 폴더 25" in dlg25.loaded_label.text()
+    assert not hasattr(dlg25, "_chip_lay")                  # 폴더별 칩은 없다
+
+
+def test_many_selected_wafers_wrap_chips(dlg25):
+    dlg25.toggle_lot("FLU-1122N")
+    for i in range(12):
+        dlg25.toggle("wafer", i)
+    assert dlg25.minimumSizeHint().width() <= 1200
+    from PyQt6.QtWidgets import QApplication
+    for _ in range(3):                                     # 새 칩이 보이게 된 뒤에야 크기가 잡힌다
+        QApplication.processEvents()
+    assert dlg25._sel_lay.heightForWidth(600) > dlg25._sel_lay.heightForWidth(2400)
+
+
+def test_lot_group_first_and_collapsed(dlg):
+    from PyQt6.QtWidgets import QLabel
+    heads = [lab.text() for lab in dlg.side_scroll.widget().findChildren(QLabel)
+             if lab.property("role") == "ovGroupHead"]
+    assert heads[0] == dict(B.FACETS)["lot"]
+    assert not dlg.lot_open("FLU-1122N")
+
+
+def test_wafer_root_x_only_for_roots_and_does_not_select(dlg25):
+    dlg25.toggle_lot("FLU-1122N")
+    row = dlg25.facet_rows[("wafer", 2)]
+    assert row.x_btn is not None and not row.x_btn.isVisibleTo(row)
+    row.set_hover(True)
+    assert row.x_btn.isVisibleTo(row)
+    row.x_btn.click()
+    assert Path("/tmp/L2/GX2") not in dlg25._roots and len(dlg25._roots) == 24
+    assert dlg25._sel["wafer"] == set()
+
+
+def test_wafer_from_lot_folder_has_no_x(dlg):
+    """LOT 폴더 안 웨이퍼(고른 폴더 != 웨이퍼 폴더)는 ✕ 가 없다."""
+    root = Path("/tmp/LOTDIR")
+    w = dlg.wafer_of(0)
+    dlg._roots[0] = root
+    dlg._expand[root] = [w.folder]
+    assert dlg.wafer_root(0) is None
+    dlg.toggle_lot("FLU-1122N")
+    assert dlg.facet_rows[("wafer", 0)].x_btn is None
+
+
+def test_lot_x_removes_its_roots_and_one_undo_restores(dlg25):
+    lot = "FLU-1122N"                                      # 25 폴더가 모두 같은 LOT(샘플 복제)
+    before = list(dlg25._roots)
+    row = dlg25.facet_rows[("lot", lot)]
+    row.set_hover(True)
+    row.x_btn.click()
+    assert dlg25._roots == [] and dlg25.notice.isVisibleTo(dlg25)
+    dlg25._undo()
+    assert dlg25._roots == before
+
