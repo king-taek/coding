@@ -1,6 +1,6 @@
 """사진 마우스 규칙 한 벌 — 현택님 2026-11-24 결정(D1b·D1c·D1d·D1e).
 
-- **우클릭**: 사진이 있는 모든 화면이 같은 메뉴 3개 — [크게 보기] / [Defect 정보 조회] / [GL 히스토그램].
+- **우클릭**: 사진이 있는 모든 화면이 같은 메뉴 3개 — [크게 보기] / [Defect 정보] / [GL 히스토그램].
   화면마다 메뉴를 만들지 않고 ``widgets/photo_menu.ask`` 하나를 부른다.
 - **더블클릭**: 어느 사진이든 크게 본다(예전 '타일 더블클릭 없음' 규칙을 현택님 2026-11-24 결정으로 바꿈 —
   이 파일은 그 옛 규칙을 지키던 ``test_no_double_click_zoom.py`` 를 대신한다).  한 번 누르기가 선택 ·
@@ -68,7 +68,7 @@ def test_menu_has_the_three_items_in_order(styled_qapp):
     from aoi_verification.app.ui.widgets import photo_menu
     w = QWidget()
     menu, acts = photo_menu.build(w, Path("/tmp/a.jpg"))
-    assert [a.text() for a in menu.actions()] == ["크게 보기", "Defect 정보 조회", "GL 히스토그램"]
+    assert [a.text() for a in menu.actions()] == ["크게 보기", "Defect 정보", "GL 히스토그램"]
     assert all(a.isEnabled() for a in menu.actions())
     # 경로를 모르는 그림(Scan Crop)은 두 도구가 꺼진다 — 크게 보기는 남는다.
     menu2, acts2 = photo_menu.build(w, None)

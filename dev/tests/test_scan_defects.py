@@ -232,8 +232,10 @@ def test_dialog_steps_through_defects_in_scan(qapp, isolated_cache, tmp_path):
     _settle(iid)
     assert dlg._sheet is not None and len(dlg._sheet.hits) == 2
     assert not dlg.step_bar.isHidden() and dlg.step_label.text() == "Defect 1 / 2"
-    assert not dlg.scan_view.isHidden() and dlg._scan_crop is not None
-    assert dlg.scan_title.text() == i18n.KO.SCAN_DEFECT_TITLE_FMT.format(um=si.CROP_SIDE_UM)
+    # 아래 칸은 300 µm Crop 이 아니라 고른 Defect 의 Color 사진이다(Color 사진이 없으면 안내).
+    assert not dlg.scan_view.isHidden() and dlg._scan_crop is None
+    assert dlg.scan_title.text() == i18n.KO.SCAN_DEFECT_COLOR_TITLE
+    assert dlg.scan_view.text() == i18n.KO.SCAN_DEFECT_COLOR_MISSING
     assert "900.1960.c.2.jpeg" in dlg.as_text()          # 위쪽(v 작은) Defect 먼저
     first_box = dlg._scan_box
     dlg.next_btn.click()
@@ -242,6 +244,96 @@ def test_dialog_steps_through_defects_in_scan(qapp, isolated_cache, tmp_path):
     dlg.next_btn.click()                                  # 끝에서 처음으로
     assert dlg.step_label.text() == "Defect 1 / 2"
     assert dlg.gl_btn.isEnabled()                         # 흑백 사진 — GL 로 볼 수 있다
+    dlg.close()
+
+
+def test_dialog_bottom_shows_color_photo_of_selected_hit(qapp, isolated_cache, tmp_path,
+                                                          monkeypatch):
+    """Scan 사진을 열면 위 = 전체 Scan(네모), 아래 = 고른 Defect 의 Color 사진 — 넘기면 따라 바뀐다."""
+    iid = _dialog_mod()
+    scan = _two(tmp_path)
+    Image.new("RGB", (60, 40), (200, 30, 30)).save(scan.parent / "900.1960.c.2.jpeg")
+    # 둘째 Defect(1100.1990.c.1)는 Color 사진 파일이 없다
+    dlg = iid.ImageInfoDialog(image_path=str(scan))
+    dlg.resize(1100, 760)
+    dlg.show()
+    _settle(iid)
+    sheet = dlg._sheet
+    assert sheet.hits[0].path.name == "900.1960.c.2.jpeg"
+    assert sheet.color_ok == {0: True, 1: False}
+    assert sheet.full is not None and dlg._scan_full is not None
+    assert not dlg.scan_view.pixmap().isNull() and dlg.scan_view.text() == ""
+    opened = []
+    monkeypatch.setattr(iid.sheets, "run", lambda w, **k: opened.append(w))
+    dlg.scan_view.clicked.emit()                       # Color 사진을 크게
+    (viewer,) = opened
+    assert viewer._path == sheet.hits[0].path and viewer._overlay is None
+    viewer.close()
+    opened.clear()
+    dlg.preview.clicked.emit()                         # 위 Scan 은 고른 네모를 덧그려 크게
+    (viewer,) = opened
+    assert viewer._path == scan and viewer._overlay == dlg._scan_box
+    viewer.close()
+    dlg.next_btn.click()                               # 파일 없는 Defect — 안내, 누를 수 없다
+    assert dlg.scan_view.pixmap().isNull()
+    assert dlg.scan_view.text() == i18n.KO.SCAN_DEFECT_COLOR_MISSING
+    opened.clear()
+    dlg.scan_view.clicked.emit()
+    assert opened == []
+    dlg.close()
+
+
+def test_dialog_scan_photo_overlay_hides_before_full_scan_decodes(qapp, isolated_cache,
+                                                                  tmp_path, monkeypatch):
+    """느린 Scan 원본 디코드는 전체 화면 덮개를 붙잡지 않는다 — 표가 먼저 뜨고 칸에서만 '불러오는 중'."""
+    import threading
+    from PyQt6.QtWidgets import QApplication
+    iid = _dialog_mod()
+    scan = _two(tmp_path)
+    Image.new("RGB", (60, 40), (200, 30, 30)).save(scan.parent / "900.1960.c.2.jpeg")
+    monkeypatch.setattr(iid, "_async_info", lambda: True)
+    gate = threading.Event()
+    real = si.load_image
+    monkeypatch.setattr(si, "load_image", lambda p: (gate.wait(10), real(p))[1])
+    dlg = iid.ImageInfoDialog()
+    dlg.resize(1100, 760)
+    dlg.show()
+    dlg.show_image(scan)
+    assert dlg._loading.isVisible()
+    end = time.monotonic() + 8
+    while time.monotonic() < end and dlg._loading.isVisible():
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert not dlg._loading.isVisible()
+    assert dlg._groups and dlg._sheet is not None and dlg._sheet.full is None   # 표는 떴고 원본은 아직
+    while time.monotonic() < end and not dlg._scan_dots.isActive():
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert dlg.preview.text().startswith(i18n.KO.SCAN_IMAGE_LOADING)     # 위 칸이 '불러오는 중'
+    assert dlg._scan_dots.isActive()
+    gate.set()
+    while time.monotonic() < end and dlg._sheet.full is None:
+        QApplication.processEvents()
+        time.sleep(0.01)
+    _settle(iid)
+    assert dlg._sheet.full is not None and not dlg.preview.pixmap().isNull()
+    assert dlg.preview.text() == "" and not dlg._scan_dots.isActive()
+    dlg.close()
+
+
+def test_dialog_stale_scan_full_result_is_ignored(qapp, isolated_cache, tmp_path):
+    iid = _dialog_mod()
+    dlg = iid.ImageInfoDialog(image_path=str(_two(tmp_path)))
+    dlg.show()
+    _settle(iid)
+    from PyQt6.QtGui import QImage
+    dlg._scan_gen += 1
+    sheet = dlg._sheet
+    sheet.full = None
+    sheet.color_ok.clear()
+    dlg._on_scan_full(dlg._scan_gen - 1, QImage(4, 4, QImage.Format.Format_Grayscale8))
+    dlg._on_hit_color(dlg._scan_gen - 1, 0, False)
+    assert sheet.full is None and sheet.color_ok == {}
     dlg.close()
 
 
