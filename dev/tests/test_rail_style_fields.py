@@ -91,3 +91,8 @@ def test_browse_button_height_equals_input(styled_qapp):
         assert all(b.height() == page.ref_path_edit.height() for b in browse)
     finally:
         page.deleteLater()
+
+
+def test_image_info_rail_short_name_is_defect_info():
+    from aoi_verification.app import i18n
+    assert i18n.KO.RAIL_SHORT_NAMES["image_info"] == "Defect 정보"

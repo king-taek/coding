@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Sequence
 
 from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, QThread, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (QColor, QImage, QPainter, QPen, QPixmap, QShortcut,
@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
 
 from ... import i18n
 from .. import theme
+from ...coords import scan_image
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
@@ -224,12 +225,15 @@ class FullscreenViewer(QDialog):
     def __init__(self, image_path: Path, parent=None, *,
                  image: Optional[QImage] = None,
                  overlay: Optional[tuple[int, int, int, int]] = None,
+                 others: Sequence[tuple[int, int, int, int]] = (),
                  scan_slot: bool = False) -> None:
         """``scan_slot`` 이면 이 Defect 의 Scan 사진이 있는지 알리는 표시와 [Scan image 보기] 를 단다 —
         부모가 찾아 :meth:`set_scan_crop` 으로 알려 준다(없으면 표시만 '없음').
         ``image`` 를 주면 그 픽셀을 그대로 보여 준다(mid·원본 로드 생략).
         ``overlay`` = 그 이미지 픽셀 좌표의 (left, top, w, h) 사각형 — 사진에 굽지 않고
-        그릴 때마다 위에 덧그린다(Scan 원본 위 Crop 범위 표시)."""
+        그릴 때마다 위에 덧그린다(Scan 원본 위 Crop 범위 표시).  ``others`` = 같은 Scan 안의 다른 Defect
+        범위들 — 보조색 가는 선으로 함께 그린다(고른 ``overlay`` 가 노랑으로 맨 위).  표시는 둘 다
+        :func:`coords.scan_image.mark_box` 로 줄인 크기다."""
         super().__init__(parent)
         self.setWindowTitle(image_path.name)
         self.setModal(True)
@@ -252,6 +256,7 @@ class FullscreenViewer(QDialog):
         self._last_drag = None
         self._loader: Optional[_OriginalLoader] = None
         self._overlay = overlay
+        self._others = tuple(tuple(b) for b in others)
         # 복사는 항상 원본 픽셀로 한다 — 화면용 `_pix` 는 상한 때문에 줄어 있을 수 있다.
         self._orig: Optional[QImage] = image
         self._wait_orig = None            # 원본이 아직일 때 복사·자르기 — 도착하면 이어서 한다(UI 스레드에서 디코드하지 않는다)
@@ -640,20 +645,24 @@ class FullscreenViewer(QDialog):
                 self._scaled_cache = scaled
             p.drawPixmap(int(round(x)), int(round(y)), scaled)
         if self._overlay is not None and self._show_box:
-            left, top, ow, oh = self._overlay
-            rect = QRectF(x + left * sc, y + top * sc,
-                          max(1.0, ow * sc), max(1.0, oh * sc))
-            # 흑백 사진 위에서도 보이게 밝은 노랑 3px 선을 검은 테두리로 감싼다
-            # (선 두께는 확대 배율과 무관한 화면 픽셀).
+            # 다른 Defect 는 가는 보조색, 고른 Defect 는 굵은 노랑이 맨 위 — 흑백 사진 위에서도
+            # 보이게 검은 테두리로 감싼다(선 두께는 확대 배율과 무관한 화면 픽셀).
             p.setBrush(Qt.BrushStyle.NoBrush)
-            casing = QPen(QColor(0, 0, 0, 230))
-            casing.setWidth(_BOX_PX + 2)
-            p.setPen(casing)
-            p.drawRect(rect)
-            line = QPen(QColor(theme.VIEWER_BOX))
-            line.setWidth(_BOX_PX)
-            p.setPen(line)
-            p.drawRect(rect)
+            drawn = [(b, theme.VIEWER_ACCENT, _BOX_PX - 1) for b in self._others
+                     if tuple(b) != tuple(self._overlay)]
+            drawn.append((self._overlay, theme.VIEWER_BOX, _BOX_PX))
+            for box, color, width in drawn:
+                left, top, ow, oh = scan_image.mark_box(box)
+                rect = QRectF(x + left * sc, y + top * sc,
+                              max(1.0, ow * sc), max(1.0, oh * sc))
+                casing = QPen(QColor(0, 0, 0, 230))
+                casing.setWidth(width + 2)
+                p.setPen(casing)
+                p.drawRect(rect)
+                line = QPen(QColor(color))
+                line.setWidth(width)
+                p.setPen(line)
+                p.drawRect(rect)
         if self._crop_a is not None and self._crop_b is not None:
             r = QRect(self._crop_a, self._crop_b).normalized()
             p.setBrush(Qt.BrushStyle.NoBrush)

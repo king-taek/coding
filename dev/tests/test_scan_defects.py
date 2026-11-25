@@ -370,3 +370,55 @@ def test_dialog_switching_back_to_color_photo_restores_normal_mode(qapp, isolate
     assert i18n.KO.IMAGE_INFO_ROW_SCAN not in dlg.as_text()
     _settle(iid)
     dlg.close()
+
+
+def test_dialog_scan_photo_top_preview_is_the_crop(qapp, isolated_cache, tmp_path, monkeypatch):
+    """Scan 사진 위 미리보기는 늘 고른 Defect 의 300 µm Crop — 전체 Scan 이 아니다.  전체화면은 모든 Defect 를 그린다."""
+    iid = _dialog_mod()
+    scan = _two(tmp_path)
+    dlg = iid.ImageInfoDialog(image_path=str(scan))
+    dlg.resize(1100, 760)
+    dlg.show()
+    _settle(iid)
+    sheet = dlg._sheet
+    assert sheet.crops is not None and len(sheet.crops) == 2
+    for i, h in enumerate(sheet.hits):
+        assert (sheet.crops[i].width(), sheet.crops[i].height()) == tuple(h.box[2:])
+    pix = dlg.preview.pixmap()
+    cw, ch = sheet.hits[0].box[2:]
+    assert abs(pix.width() / pix.height() - cw / ch) < 0.05           # 전체 Scan(320x100)이 아니라 정사각 Crop
+    dlg.next_btn.click()
+    assert dlg.preview.pixmap().cacheKey() != pix.cacheKey()          # 넘기면 Crop 이 바뀐다
+    opened = []
+    monkeypatch.setattr(iid.sheets, "run", lambda w, **k: opened.append(w))
+    dlg.preview.clicked.emit()
+    (viewer,) = opened
+    assert viewer._overlay == dlg._scan_box
+    assert sorted(viewer._others) == sorted(tuple(h.box) for h in sheet.hits)
+    viewer.close()
+    dlg.close()
+
+
+def test_dialog_color_photo_full_scan_passes_all_defects(qapp, isolated_cache, tmp_path, monkeypatch):
+    """Color 사진에서 연 전체 Scan 도 같은 Scan 안 Defect 를 모두 넘긴다(워커가 계산)."""
+    iid = _dialog_mod()
+    scan = _two(tmp_path)
+    color = scan.parent / "900.1960.c.2.jpeg"
+    Image.new("RGB", (60, 40), (200, 30, 30)).save(color)
+    dlg = iid.ImageInfoDialog(image_path=str(color))
+    dlg.resize(1100, 760)
+    dlg.show()
+    _settle(iid)
+    end = time.monotonic() + 8
+    from PyQt6.QtWidgets import QApplication
+    while time.monotonic() < end and dlg._scan_full is None:
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert dlg._scan_full is not None and len(dlg._scan_others) == 2
+    opened = []
+    monkeypatch.setattr(iid.sheets, "run", lambda w, **k: opened.append(w))
+    dlg._open_full_scan()
+    (viewer,) = opened
+    assert sorted(viewer._others) == sorted(dlg._scan_others) and dlg._scan_box in viewer._others
+    viewer.close()
+    dlg.close()

@@ -1578,7 +1578,7 @@ class _FullScanLoad(QThread):
     사진 정보 화면(:mod:`image_info_dialog`)과 같은 :mod:`coords.scan_image` 가 계산한다.  못 읽으면 원본 · 범위 없이 알린다."""
 
     class _Signals(QObject):
-        done = pyqtSignal(object, object, object, str)      # Crop QImage · 원본 QImage | None · 범위 | None · 원본 경로
+        done = pyqtSignal(object, object, object, str, object)   # Crop QImage · 원본 QImage | None · 범위 | None · 원본 경로 · 같은 Scan 의 다른 Defect 범위들
 
     def __init__(self, crop: QImage, folder: Path, xy: tuple, src: str) -> None:
         super().__init__()
@@ -1590,6 +1590,7 @@ class _FullScanLoad(QThread):
     def run(self) -> None:      # type: ignore[override]
         full = box = None
         path = ""
+        others: list = []
         try:
             m = SI.resolve_xy(self._folder, self._xy)
             if m.ok:
@@ -1597,9 +1598,12 @@ class _FullScanLoad(QThread):
                 im = SI.load_full(cand)
                 if im is not None:
                     full, box, path = _to_qimage(im), tuple(cand.box), str(cand.path)
+                    d = SI.defects_in(cand.path)        # 크게 볼 때 이 Scan 의 Defect 를 모두 보이게 — 실패하면 하나만
+                    if d.ok:
+                        others = [tuple(h.box) for h in d.hits]
         except Exception:       # noqa: BLE001 — 못 읽으면 Crop 을 크게 보여 준다
             _LOG.exception("Overkill 튜닝 Scan 원본 읽기 실패")
-        self.signals.done.emit(self._crop, full, box, path)
+        self.signals.done.emit(self._crop, full, box, path, others)
 
 
 class _ScanProbe(QThread):
@@ -3878,12 +3882,12 @@ class ThresholdPreviewDialog(QDialog):
         self._full_scan = th
         th.start()
 
-    def _on_full_scan(self, crop: QImage, full, box, path: str) -> None:
+    def _on_full_scan(self, crop: QImage, full, box, path: str, others=()) -> None:
         """Scan 원본을 읽었다 — 원본 + 범위, 못 읽었으면 Crop 그 자체를 크게 본다."""
         self._full_scan = None
         from .zoom_window import FullscreenViewer
         if full is not None and box is not None:
-            viewer = FullscreenViewer(Path(path), self, image=full, overlay=box)
+            viewer = FullscreenViewer(Path(path), self, image=full, overlay=box, others=others)
         else:
             viewer = FullscreenViewer(Path(crop.text("src") or _KO.OVERKILL_SCAN_TAG), self, image=crop)
         sheets.run(viewer, full_bleed=True)

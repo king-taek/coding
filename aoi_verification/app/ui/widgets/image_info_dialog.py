@@ -33,8 +33,8 @@ Surface.flt)이다.  사진만 따로 복사한 폴더에서는 LIVE 형식 파�
 새 사진 아래에 붙지 않게 한다.  계산은 엑셀과 같은 :mod:`coords.scan_image` 다.
 
 **흑백 Scan 사진(``X.Y.t.N.jpeg``)만 넣으면** 거꾸로 간다(사용자 요청 2026-11-24) — 그 사진 안에 찍힌
-Defect 를 :func:`coords.scan_image.defects_in` 으로 찾아, 미리보기에는 Scan 전체에 Defect 자리를
-네모로, 아래 칸에는 고른 Defect 의 **Color 사진**을, 표에는 그 Defect 의 Color 사진과 **같은 정보**
+Defect 를 :func:`coords.scan_image.defects_in` 으로 찾아, 미리보기에는 고른 Defect 의 300 µm
+Crop(늘 Crop — 전체 Scan 은 크게 볼 때 노랑·파랑 네모로), 아래 칸에는 고른 Defect 의 **Color 사진**을, 표에는 그 Defect 의 Color 사진과 **같은 정보**
 (:func:`coords.single_info.describe_in_scan`)를 보인다.  여럿이면 ◀ ▶ 로 넘긴다.  이때는 Color→Scan
 로더를 돌리지 않는다(Scan 파일명의 두 수치는 절대좌표가 아니다).
 정보 표(빠름)는 덮개 아래에서 먼저 끝내 보이고, Scan 원본 디코드와 Color 사진 준비(느림, NAS)는
@@ -114,6 +114,7 @@ class _ScanLoader(QThread):
     class _Signals(QObject):
         found = pyqtSignal(int)                          # 세대 — Scan 있음 판정
         gl = pyqtSignal(int, bool)                       # 세대, GL 로 볼 수 있는 사진인가
+        others = pyqtSignal(int, object)                 # 세대, 같은 Scan 안 Defect 들의 Crop 범위 목록(전체화면 표시용)
         done = pyqtSignal(int, str, object, object, object, str)
         # (세대, 상태, Crop QImage, 전체 QImage, Crop 범위, Scan 파일명)
 
@@ -159,6 +160,11 @@ class _ScanLoader(QThread):
         if color:
             self.signals.gl.emit(self._gen, True)       # 뷰어가 이 Scan 으로 갈아탄다
         full = scan_image.load_full(cand)
+        try:                                            # 전체화면에서 같은 Scan 의 Defect 를 모두 보이게 — 실패하면 하나만
+            d = scan_image.defects_in(cand.path)
+            self.signals.others.emit(self._gen, [tuple(h.box) for h in d.hits] if d.ok else [])
+        except Exception:
+            self.signals.others.emit(self._gen, [])
         self.signals.done.emit(
             self._gen, scan_image.OK, pil_to_qimage(crop),
             pil_to_qimage(full) if full is not None else None,
@@ -172,13 +178,14 @@ class _ScanFullLoader(QThread):
     (GUI 전용) — Color 는 캐시 파일만 만들어 두고 메인 스레드가 읽는다."""
 
     class _Signals(QObject):
-        full = pyqtSignal(int, object)                   # (세대, 전체 Scan QImage | None)
+        full = pyqtSignal(int, object, object)           # (세대, 전체 Scan QImage | None, Defect 별 300 µm Crop QImage 목록 | None)
         color = pyqtSignal(int, int, bool)               # (세대, Defect 번호, Color 사진을 쓸 수 있나)
 
-    def __init__(self, path: Path, gen: int, color_paths: list) -> None:
+    def __init__(self, path: Path, gen: int, color_paths: list, boxes=()) -> None:
         super().__init__()                  # 부모 없음(위 주석)
         self._path, self._gen = path, gen
         self._colors = list(color_paths)
+        self._boxes = list(boxes)           # Defect 마다 Crop 범위 — 미리보기는 늘 이 Crop 이다
         self.signals = self._Signals()
 
     def _one_color(self, i: int) -> None:
@@ -197,13 +204,15 @@ class _ScanFullLoader(QThread):
             if self._colors:
                 self._one_color(0)          # 처음 보이는 Defect 의 Color 를 먼저
             im = scan_image.load_image(self._path)
-            self.signals.full.emit(self._gen, pil_to_qimage(im) if im is not None else None)
+            crops = ([pil_to_qimage(scan_image.cut(im, b)) for b in self._boxes]
+                     if im is not None else None)        # 자르기도 워커에서 — UI 스레드는 그리기만
+            self.signals.full.emit(self._gen, pil_to_qimage(im) if im is not None else None, crops)
             for i in range(1, len(self._colors)):
                 if self.isInterruptionRequested():
                     return
                 self._one_color(i)
         except Exception:                   # 예외로 끝나면 '불러오는 중' 이 영영 안 걷힌다
-            self.signals.full.emit(self._gen, None)
+            self.signals.full.emit(self._gen, None, None)
 
 
 class _InfoLoader(QThread):
@@ -414,6 +423,8 @@ class _ScanSheet:
         self.hits: tuple = ()
         self.groups: list = []          # Defect 마다 정보 덩이 목록
         self.full: QImage | None = None
+        self.crops: list | None = None  # Defect 별 300 µm Crop QImage(워커가 자른다) — 미리보기가 쓴다
+        self._crop_pix: dict[int, QPixmap] = {}
         self.full_failed = False        # 원본 디코드가 끝났는데 못 읽음
         self.color_ok: dict[int, bool] = {}   # Defect 번호 → Color 사진 사용 가능 여부(없으면 아직 모름)
         self._full_pix: QPixmap | None = None     # 메인 스레드에서 한 번만 만든다(넘길 때마다 바꾸지 않게)
@@ -424,6 +435,14 @@ class _ScanSheet:
         if self._full_pix is None:
             self._full_pix = QPixmap.fromImage(self.full)
         return self._full_pix
+
+    def crop_pix(self, i: int) -> Optional[QPixmap]:
+        """Defect ``i`` 의 Crop 픽스맵(없으면 None).  메인 스레드에서 한 번만 만든다."""
+        if not self.crops or not 0 <= i < len(self.crops) or self.crops[i] is None:
+            return None
+        if i not in self._crop_pix:
+            self._crop_pix[i] = QPixmap.fromImage(self.crops[i])
+        return self._crop_pix[i]
 
 
 def _describe_scan(path: Path) -> _ScanSheet:
@@ -618,6 +637,7 @@ class ImageInfoDialog(QDialog):
         self._scan_gen = 0
         self._info_gen = 0
         self._scan_crop: QImage | None = None
+        self._scan_others: list = []        # 같은 Scan 안 다른 Defect 의 Crop 범위 — 전체화면에 함께 그린다
         self._scan_full: QImage | None = None
         self._scan_box = None
         self._scan_name = ""
@@ -1157,6 +1177,7 @@ class ImageInfoDialog(QDialog):
             self._groups = sheet.groups[self._hit_i]
             self._scan_full = sheet.full
             self._scan_box, self._scan_name = tuple(hit.box), str(sheet.path)
+            self._scan_others = [tuple(h.box) for h in sheet.hits]
             self.step_label.setText(i18n.KO.SCAN_DEFECT_STEP_FMT.format(i=self._hit_i + 1, n=n))
             self._set_scan_visible(True)
         else:
@@ -1171,17 +1192,19 @@ class ImageInfoDialog(QDialog):
         sheet = self._sheet
         if sheet is None or not sheet.hits:
             return
-        ld = _ScanFullLoader(sheet.path, self._scan_gen, [h.path for h in sheet.hits])
+        ld = _ScanFullLoader(sheet.path, self._scan_gen, [h.path for h in sheet.hits],
+                             [h.box for h in sheet.hits])
         ld.signals.full.connect(self._on_scan_full)
         ld.signals.color.connect(self._on_hit_color)
         _LIVE_SCAN_LOADS.add(ld)
         ld.finished.connect(lambda: _LIVE_SCAN_LOADS.discard(ld))
         ld.start()
 
-    def _on_scan_full(self, gen: int, img) -> None:
+    def _on_scan_full(self, gen: int, img, crops=None) -> None:
         if gen != self._scan_gen or self._sheet is None:
             return                      # 이미 다른 사진으로 넘어갔다
         self._sheet.full = img
+        self._sheet.crops = crops
         self._sheet.full_failed = img is None
         self._scan_full = img
         self._refresh_preview()
@@ -1205,29 +1228,12 @@ class ImageInfoDialog(QDialog):
             self._show_hit(self._hit_i + d)
 
     def _scan_preview_pix(self, max_w: int, max_h: int) -> QPixmap:
-        """Scan 전체 + Defect 자리 네모(고른 것은 굵은 노랑) — 원본 픽셀 좌표를 축척만 바꿔 그린다."""
-        full = self._sheet.full
-        if full is None:
+        """고른 Defect 의 300 µm Crop(늘 Crop — 전체 Scan 은 크게 볼 때만).  Crop 이 아직이면 중간 크기 캐시."""
+        pix = self._sheet.crop_pix(self._hit_i)
+        if pix is None:
             return _io.load_thumb_qpixmap(self._path, max_w, kind="mid")
-        pix = self._sheet.full_pix().scaled(
-            max_w, max(1, max_h), Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation)
-        k = pix.width() / full.width()
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        order = [j for j in range(len(self._sheet.hits)) if j != self._hit_i] + \
-            ([self._hit_i] if self._sheet.hits else [])
-        for j in order:
-            left, top, cw, ch = self._sheet.hits[j].box
-            r = QRectF(left * k, top * k, max(4.0, cw * k), max(4.0, ch * k))
-            sel = j == self._hit_i
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.setPen(QPen(QColor("black"), 4 if sel else 2))
-            p.drawRect(r)
-            p.setPen(QPen(QColor(theme.VIEWER_BOX if sel else theme.VIEWER_ACCENT), 2 if sel else 1))
-            p.drawRect(r)
-        p.end()
-        return pix
+        return pix.scaled(max_w, max(1, max_h), Qt.AspectRatioMode.KeepAspectRatio,
+                          Qt.TransformationMode.SmoothTransformation)
 
     # ------------------------------------------------------------------
     # Scan image
@@ -1239,6 +1245,7 @@ class ImageInfoDialog(QDialog):
     def _clear_scan(self) -> None:
         """이전 사진의 Scan 칸 · Defect 넘기기를 치운다."""
         self._scan_crop = self._scan_full = self._scan_box = None
+        self._scan_others = []
         self._scan_name = ""
         self._scan_dots.stop()
         self._set_scan_visible(False)
@@ -1252,10 +1259,15 @@ class ImageInfoDialog(QDialog):
         ld = _ScanLoader(self._path, self._scan_gen)
         ld.signals.found.connect(self._on_scan_found)
         ld.signals.gl.connect(self._on_gl_known)
+        ld.signals.others.connect(self._on_scan_others)
         ld.signals.done.connect(self._on_scan_done)
         _LIVE_SCAN_LOADS.add(ld)
         ld.finished.connect(lambda: _LIVE_SCAN_LOADS.discard(ld))
         ld.start()
+
+    def _on_scan_others(self, gen: int, boxes) -> None:
+        if gen == self._scan_gen:
+            self._scan_others = list(boxes or [])
 
     def _on_gl_known(self, gen: int, ok: bool) -> None:
         if gen == self._scan_gen:
@@ -1410,7 +1422,8 @@ class ImageInfoDialog(QDialog):
             return
         from .zoom_window import FullscreenViewer
         viewer = FullscreenViewer(Path(self._scan_name), self,
-                                  image=self._scan_full, overlay=self._scan_box)
+                                  image=self._scan_full, overlay=self._scan_box,
+                                  others=self._scan_others)
         sheets.run(viewer, full_bleed=True)
 
     def resizeEvent(self, event):           # noqa: N802
