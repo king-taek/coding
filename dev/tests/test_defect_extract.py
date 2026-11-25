@@ -273,6 +273,7 @@ def test_setup_extract_mode_takes_one_folder(qapp, tmp_path):
     from aoi_verification.app import i18n
     from aoi_verification.app.ui.pages import setup_page as sp
 
+    (tmp_path / "a.jpg").write_bytes(b"x")            # 사진 없는 폴더는 통과하지 못한다(E2)
     page = sp.SetupPage()
     try:
         page.ref_path_edit.setText(str(tmp_path))
@@ -932,6 +933,7 @@ def test_lot_rows_folders_and_slots(qapp, tmp_path, monkeypatch):
     for lot in (a, b):
         for slot in ("S1", "S2", "S3"):
             (lot / slot).mkdir(parents=True)
+            (lot / slot / "p.jpg").write_bytes(b"x")     # 사진 없는 폴더는 통과 못 한다(E2)
     page = sp.SetupPage()
     try:
         page.set_extract_mode(True)

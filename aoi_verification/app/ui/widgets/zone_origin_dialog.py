@@ -366,7 +366,7 @@ class ZoneOriginDialog(QDialog):
         root.addWidget(self.notice)
         self._notice_timer = QTimer(self)
         self._notice_timer.setSingleShot(True)
-        self._notice_timer.timeout.connect(lambda: self.notice.setVisible(False))
+        self._notice_timer.timeout.connect(self._fade_notice)
 
         self.alert = QFrame(self)
         self.alert.setObjectName("alert")
@@ -582,8 +582,11 @@ class ZoneOriginDialog(QDialog):
     def _show_notice(self, text: str, undo: bool = False) -> None:
         self.notice_label.setText(text)
         self.undo_btn.setVisible(undo)
-        self.notice.setVisible(True)
+        motion.banner_in(self.notice)
         self._notice_timer.start(NOTICE_MS)
+
+    def _fade_notice(self) -> None:
+        motion.banner_out(self.notice)
 
     # ------------------------------------------------------------------ 읽기
     def _start_load(self) -> None:
@@ -1535,11 +1538,29 @@ class ZoneOriginDialog(QDialog):
         exporter = ex.ExcelExporter(result, dst, template_path=template if template.exists() else None,
                                     map_renderer=render_map_png, recipe_layout=choice)
         self._exporter = exporter
+        _LIVE.add(exporter)             # 창이 먼저 지워져도 저장 스레드가 끝날 때까지 산다
+        exporter.finished.connect(lambda: _LIVE.discard(exporter))
         self._loading.show_overlay(_KO.LOAD_EXPORT)
         exporter.signals.progress.connect(self._on_excel_progress)
         exporter.signals.done.connect(self._on_excel_done)
         exporter.signals.failed.connect(self._on_excel_failed)
         exporter.start()
+
+    def done(self, r: int) -> None:     # type: ignore[override]
+        """창을 닫으면 도는 엑셀 저장도 멈춘다 — 반쯤 쓴 파일이 남거나 닫힌 창이 저장 끝 안내를 띄우지 않게."""
+        self._stop_excel()
+        super().done(r)
+
+    def _stop_excel(self) -> None:
+        ex = self._exporter
+        if ex is None or not ex.isRunning():
+            return
+        for sig in (ex.signals.progress, ex.signals.done, ex.signals.failed):
+            try:
+                sig.disconnect()
+            except TypeError:
+                pass
+        ex.stop()
 
     def _on_excel_progress(self, done: int, total: int, msg: str) -> None:
         self._loading.set_progress(done, total, msg or _KO.LOAD_EXPORT)

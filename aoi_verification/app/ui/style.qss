@@ -188,6 +188,7 @@ QLabel[role="mutedSmall"] {
 QLabel[role="tileScore"] {
     color: $ink2;
     font-weight: 700;
+    font-size: 15px;
     padding: 2px;
 }
 
@@ -524,8 +525,8 @@ QPushButton:focus {
 
 QPushButton:disabled {
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
-    background-color: transparent;
+    border: 1px solid $disabled_fill;
+    background-color: $disabled_fill;
 }
 
 /* ★ QSS `min-height` 는 `setMinimumHeight()` 를 **덮어쓴다** — 일반 QPushButton 의
@@ -579,7 +580,7 @@ QPushButton[role="stepper"]:focus {
 }
 QPushButton[role="stepper"]:disabled {
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
 }
 QPushButton[role="primary"] {
     background-color: $accent;
@@ -600,9 +601,9 @@ QPushButton[role="primary"]:pressed {
    면은 비우고 글자·테두리를 비활성 토큰으로 — '비어 있다 = 못 누른다'로 읽힌다.
    ★ 주석에도 달러 토큰을 쓰지 마라 — Template.substitute 가 주석을 구분하지 않는다. */
 QPushButton[role="primary"]:disabled {
-    background-color: transparent;
+    background-color: $disabled_fill;
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
     font-weight: 600;
 }
 /* ★ 채운 버튼의 포커스 링은 페이지 배경이 아니라 **버튼 자기 면**과 대비해야 한다.
@@ -647,6 +648,20 @@ QPushButton[role="ghost"]:hover {
 QPushButton[grade="rail"] {
     text-align: left;
     padding-left: 16px;
+    background-color: transparent;
+    border: 1px solid transparent;  /* 높이를 그대로 두려 테두리 두께는 남긴다 */
+    color: $ink2;
+}
+/* 선택된 메뉴만 옅은 accent 바탕 + accent 글자, 나머지는 테두리 없는 줄. */
+QPushButton[grade="rail"]:hover {
+    background-color: $elev;
+    border: 1px solid transparent;  /* 높이를 그대로 두려 테두리 두께는 남긴다 */
+    color: $ink;
+}
+QPushButton[grade="rail"]:checked {
+    background-color: $accent_tint;
+    border: 1px solid transparent;  /* 높이를 그대로 두려 테두리 두께는 남긴다 */
+    color: $accent;
 }
 /* ※ 접힌 메뉴(52px)도 같은 규칙이다 — 왼쪽 16 + 아이콘 20 + 오른쪽 16 이라 아이콘이
    저절로 가운데에 온다.  가운데 정렬로 바꾸지 마라: 서랍이 움직이는 동안 아이콘이 튄다. */
@@ -667,6 +682,17 @@ QPushButton[role="warn"]:focus {
     border: $focus_w solid $focus;
     padding: $pad_control_focus;
 }
+/* 입력칸 옆 [폴더 선택…] — 입력칸과 같은 높이(같은 줄에서 위아래가 어긋나지 않게). */
+QPushButton[grade="field"] {
+    padding: $pad_input;
+    min-height: $input_h;
+}
+/* 왼쪽 메뉴는 테두리 없는 줄이다 — 클릭 뒤 남는 포커스가 테두리를 되살리지 않게(바탕색이 상태를 말한다). */
+QPushButton[grade="rail"]:focus {
+    border: 1px solid transparent;
+    padding: $pad_control;
+    padding-left: 16px;
+}
 
 /* ★ :disabled 도 마찬가지다 — `[role="ghost"] { color: $ink2 }` 가 일반
    `:disabled { color: $mute }` 를 특이도 동급·후순위로 덮어, 비활성 ± 버튼의 글리프가
@@ -675,8 +701,8 @@ QPushButton[role="ghost"]:disabled,
 QPushButton[role="danger"]:disabled,
 QPushButton[role="warn"]:disabled {
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
-    background: transparent;
+    border: 1px solid $disabled_fill;
+    background-color: $disabled_fill;
 }
 
 QPushButton:checked {
@@ -715,20 +741,19 @@ QPushButton[role="option"]:focus {
     padding: $pad_control_focus;
 }
 QPushButton[role="option"]:disabled {
-    background: transparent;
+    background-color: $disabled_fill;
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
 }
 QPushButton[role="option"]:checked:disabled {
     background-color: $accent_tint_soft;
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
 }
 
 /* 입력 오류 — 왜 [검증 시작] 을 누를 수 없는지 툴팁이 아니라 눈에 보이게. */
 QLineEdit[state="invalid"] {
     border: 1px solid $danger;
-    background-color: $danger_tint_soft;
 }
 QLineEdit[state="invalid"]:focus {
     border: $focus_w solid $danger;
@@ -871,14 +896,14 @@ QPushButton[role="segment"]:focus {
     padding: 3px 13px;          /* 보더가 굵어진 만큼 패딩을 줄여 높이 고정 */
 }
 QPushButton[role="segment"]:disabled {
-    background: transparent;
+    background-color: $disabled_fill;
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
 }
 QPushButton[role="segment"]:checked:disabled {
     background-color: $accent_tint_soft;
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
 }
 
 /* 차단 이유 문구 — '왜 지금 확인할 수 없는가'.  ★ `role="warn"` 은 QPushButton 에만
@@ -938,9 +963,9 @@ QPushButton[role="slotTile"]:checked {
     font-weight: 700;
 }
 QPushButton[role="slotTile"]:disabled {
-    background: transparent;
+    background-color: $disabled_fill;
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
 }
 
 QFrame[role="card"][bare="true"] {
@@ -1040,9 +1065,9 @@ QPushButton[role="rowAction"]:focus {
     padding: 2px 7px;
 }
 QPushButton[role="rowAction"]:disabled {
-    background: transparent;
+    background-color: $disabled_fill;
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
 }
 
 /* 링크형 버튼 — 반복되는 2차 액션(더 보기 ▾·접기 ▴)용. 테두리 없이 조용히.
@@ -1382,9 +1407,9 @@ QLabel[role="viewerHint"] {
     background: transparent;
     font-size: $font_caption_sz;
 }
-/* 좌우 비교 뷰어의 사진 칸 — 검정 바탕 + 면 경계 1px. */
+/* 좌우 비교 뷰어의 사진 칸 — 패널 바탕 + 면 경계 1px(사진 위아래 여백이 검게 남지 않게). */
 QLabel[role="viewerPane"] {
-    background-color: $viewer_bg;
+    background-color: $panel;
     border: 1px solid $line;
 }
 

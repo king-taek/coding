@@ -48,6 +48,8 @@ def _fill_valid_dirs(page, tmp_path) -> None:
     ref, val = tmp_path / "ref", tmp_path / "val"
     ref.mkdir(exist_ok=True)
     val.mkdir(exist_ok=True)
+    (ref / "a.jpg").write_bytes(b"x")       # 사진 없는 폴더는 통과 못 한다(E2)
+    (val / "a.jpg").write_bytes(b"x")
     page.ref_path_edit.setText(str(ref))
     page.val_path_edit.setText(str(val))
 

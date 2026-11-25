@@ -464,6 +464,9 @@ class ExcelExporter(QThread):
         #   `os.replace` 로 바꾼다(실패하면 이전 파일이 그대로 남는다).
         tmp = self._dst.with_name(self._dst.name + ".part")
         try:
+            # 마지막 실제 파일 쓰기 — 숫자는 그대로(단조 증가 계약)·문구만 바꿔 알린다.
+            self.signals.progress.emit(self._prog_done, self._prog_total,
+                                       i18n.KO.EXPORT_WRITING)
             t0 = time.perf_counter()
             wb.save(str(tmp))
             _LOG.info("저장 소요 [파일 쓰기] %.2f초 · 전체 %.2f초",

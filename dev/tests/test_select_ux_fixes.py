@@ -138,10 +138,10 @@ def test_confirm_removes_entry_and_advances(qapp, monkeypatch):
     qapp.processEvents()
 
     assert dlg.fail_list.count() == 3
-    # 목록 항목은 썸네일 아이콘 + `[슬롯]` + 파일명 2줄 — 같은 슬롯에 실패가 여러
+    # 목록 항목은 썸네일 아이콘 + 파일명 앞 6자 + 슬롯 2줄 — 같은 슬롯에 실패가 여러
     # 장일 때 항목들이 같은 이름으로 보이지 않게 파일명 줄을 함께 적는다.
     assert not dlg.fail_list.item(0).icon().isNull()
-    assert dlg.fail_list.item(0).text().split("\n")[0] == "[A1]"
+    assert dlg.fail_list.item(0).text().split("\n") == ["ref_A1…", "A1"]
 
     dlg._idx = 0
     dlg._render_current()

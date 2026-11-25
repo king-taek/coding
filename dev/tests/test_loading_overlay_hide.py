@@ -85,4 +85,4 @@ def test_cancel_button_has_no_baked_stylesheet(styled_qapp) -> None:
     host = QWidget()
     ov = LoadingOverlay(host)
     assert ov._cancel_btn.styleSheet() == ""
-    assert ov._cancel_btn.property("role") == "danger"
+    assert ov._cancel_btn.property("role") == "ghost"

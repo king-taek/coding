@@ -142,6 +142,7 @@ class MatcherWorker(QThread):
                     self._ref.slot, self._vals, cfg=self._cfg,
                 )
             except Exception:
+                _LOG.exception("슬롯 캐시 빌드 실패")
                 self._val_features = {}
 
         try:

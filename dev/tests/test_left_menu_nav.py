@@ -429,6 +429,28 @@ def test_fold_keeps_every_row_at_the_same_height(styled_qapp):
         page.close()
 
 
+def test_status_message_hides_credit_until_it_clears(qapp, no_sheets, monkeypatch):
+    """상태줄 알림(예: 차순위 후보 실패, B8)이 떠 있는 동안 크레딧이 같이 그려지면 글자가 겹친다 —
+    페이지가 바뀌어도 알림이 남아 있으면 크레딧을 숨기고, 알림이 사라지면 되돌린다."""
+    from aoi_verification.app.ui import main_window as mw
+    monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async", lambda self: None)
+    win = mw.MainWindow()
+    win.resize(1400, 900)
+    win.show()
+    try:
+        win._on_backend_loaded()
+        win._show_page(win._result_page, animate=False)
+        assert win._credit_label.isVisible()
+        win._status_bar.showMessage("알림", 6000)
+        win._show_page(win._result_page, animate=False)
+        assert not win._credit_label.isVisible()
+        win._status_bar.clearMessage()
+        assert win._credit_label.isVisible()
+    finally:
+        win._loading.hide_overlay()
+        win.close()
+
+
 def test_tool_screen_title_is_its_menu_name(styled_qapp, no_sheets):
     """도구 화면 제목 = 왼쪽 메뉴 이름(현택님 2026-11-24) — 'Defect 정보 조회' · 'Defect Map' …"""
     page = _page(styled_qapp)

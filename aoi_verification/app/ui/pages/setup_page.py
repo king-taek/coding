@@ -153,7 +153,7 @@ class _DirProbe(QThread):
         self._ref_text = ref_text
         self._val_text = val_text
         # Defect 추출 — 입력란에 폴더 여러 개(`;` 구분).  매칭은 경로 하나다.
-        self._state = SetupPage._dirs_state if multi else SetupPage._dir_state
+        self._state = SetupPage._dirs_input_state if multi else SetupPage._dir_input_state
         self.signals = self._Signals()
 
     def run(self) -> None:      # type: ignore[override]
@@ -319,9 +319,12 @@ class SetupPage(QWidget):
 
     def _focus_first_field(self) -> None:
         """탭 체인의 출발점을 첫 입력란으로 — 파괴적 컨트롤을 먼저 지나지 않게."""
-        edit = getattr(self, "ref_path_edit", None)
-        if edit is not None and edit.isVisible():
-            edit.setFocus(Qt.FocusReason.OtherFocusReason)
+        # 아무것도 고르지 않았는데 포커스 테두리가 떠 있지 않게 — 포커스는 테두리가 없는
+        # 페이지 자신이 갖는다(clearFocus 만 하면 Qt 가 접기 버튼 등 다른 위젯에 넘겨 그쪽에
+        # 테두리가 뜬다).  Tab 을 누르면 탭 체인 첫 입력란부터 간다.
+        if self.focusPolicy() == Qt.FocusPolicy.NoFocus:
+            self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
 
     # ==================================================================
     # 본문 빌더 — 각 조각은 위젯 하나를 만들어 돌려준다.  순서·열 구성은
@@ -616,6 +619,7 @@ class SetupPage(QWidget):
         edit.setPlaceholderText(i18n.KO.EXTRACT_FOLDER_PLACEHOLDER)
         edit.setAcceptDrops(False)          # 놓기는 페이지가 받는다(`dropEvent`)
         browse = NeonButton(i18n.KO.BTN_BROWSE, role="ghost")
+        browse.setProperty("grade", "field")
         slot_btn = NeonButton(i18n.KO.EXTRACT_SLOT_BTN_ALL, role="ghost")
         remove = NeonButton("✕", role="ghost")
         remove.setToolTip(i18n.KO.EXTRACT_LOT_REMOVE)
@@ -708,6 +712,7 @@ class SetupPage(QWidget):
         edit.setAcceptDrops(False)           # 놓기는 페이지가 받는다(`dropEvent`)
         edit.textEdited.connect(lambda t: self._normalize_pasted(edit, t))
         browse = NeonButton(i18n.KO.BTN_BROWSE, role="ghost")
+        browse.setProperty("grade", "field")
         machine_edit = QLineEdit(host)
         machine_edit.setAcceptDrops(False)   # 폴더를 놓아도 글자로 안 들어가게(페이지가 받는다)
         machine_edit.setPlaceholderText(i18n.KO.MULTI_VAL_MACHINE_PLACEHOLDER)
@@ -1504,6 +1509,21 @@ class SetupPage(QWidget):
             b.setIconSize(QSize(20, 20))
             b.setProperty("_railText", b.text())
             b.setProperty("_railTip", b.toolTip())
+        # 접힌 메뉴의 짧은 이름 — 버튼 맨 아래에 얹는다.  버튼 높이·아이콘 자리는 그대로(아이콘은
+        # 위아래 가운데, 이름은 그 아래 빈 자리)라 접힘·펼침에서 아이콘 y 가 달라지지 않는다.
+        for key, b in (*self._nav_buttons.items(), ("update", self.update_btn)):
+            lay = QVBoxLayout(b)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.addStretch(1)
+            lb = QLabel(i18n.KO.RAIL_SHORT_NAMES[key], b)
+            lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lb.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            lb.setMinimumWidth(1)
+            lb.setFixedHeight(12)
+            lb.hide()
+            lay.addWidget(lb)
+            b.setProperty("_railShort", lb)
+            b.toggled.connect(self._rail_style_short_names)
         col.addStretch(1)
         # 업데이트 확인 + 크레딧은 유틸리티라 도구 목록과 떨어진 메뉴 맨 아래.
         self.update_btn.setProperty("grade", "rail")
@@ -1661,6 +1681,9 @@ class SetupPage(QWidget):
         for b in (*self._nav_buttons.values(), self.update_btn):
             text, tip = b.property("_railText") or "", b.property("_railTip") or ""
             b.setText(text if on else "")
+            lb = b.property("_railShort")
+            if lb is not None:
+                lb.setVisible(not on)
             b.setToolTip(tip if on else (f"{text}\n{tip}" if tip else text))
 
     def tool_title(self) -> str:
@@ -1678,6 +1701,17 @@ class SetupPage(QWidget):
         cur = self.current_page()
         for key, b in self._nav_buttons.items():
             b.setChecked(key == cur)
+        self._rail_style_short_names()
+
+    def _rail_style_short_names(self) -> None:
+        """접힌 이름 색 — 선택된 메뉴는 accent, 나머지는 보조색(버튼 글자색과 같은 규칙)."""
+        C = theme.TOKENS
+        for b in (*self._nav_buttons.values(), self.update_btn):
+            lb = b.property("_railShort")
+            if lb is not None:
+                color = C["accent"] if b.isChecked() else C["ink2"]
+                lb.setStyleSheet(f"background: transparent; border: none; font-size: 10px; "
+                                 f"font-weight: 600; color: {color};")
 
     def show_page(self, key: str) -> None:
         """왼쪽 메뉴로 화면을 옮긴다.
@@ -1844,6 +1878,7 @@ class SetupPage(QWidget):
         path_edit.setAcceptDrops(False)      # 놓기는 페이지가 받는다(`dropEvent`)
         path_edit.textEdited.connect(lambda t: self._normalize_pasted(path_edit, t))
         browse = NeonButton(i18n.KO.BTN_BROWSE, role="ghost")
+        browse.setProperty("grade", "field")
         browse.clicked.connect(lambda: self._browse(path_edit))
         grid.addWidget(head, 0, 0)           # 목업: '기준' 이 폴더 줄의 라벨이다
         grid.addWidget(path_edit, 0, 1)
@@ -1897,6 +1932,17 @@ class SetupPage(QWidget):
             return "missing"                 # 접근 불가한 경로도 '없음' 취급
 
     @staticmethod
+    def _dir_input_state(text: str) -> str:
+        """'' | 'empty' | 'missing' | 'nophoto' — 폴더가 있고 **사진이 한 장이라도** 있어야 ''.
+
+        파일을 여는 일이라 확인 워커(`_DirProbe`)에서만 부른다(첫 사진에서 멈춤)."""
+        state = SetupPage._dir_state(text)
+        if state:
+            return state
+        from ...models.slot import has_any_image
+        return "" if has_any_image(Path(text.strip())) else "nophoto"
+
+    @staticmethod
     def split_roots(text: str) -> list[str]:
         """LOT 줄들을 이은 문자열(줄바꿈 구분) → 폴더 목록.  경로에 올 수 없는 글자다."""
         return [t.strip() for t in (text or "").split("\n") if t.strip()]
@@ -1909,13 +1955,24 @@ class SetupPage(QWidget):
             return "empty"
         return "" if all(SetupPage._dir_state(r) == "" for r in roots) else "missing"
 
+    @staticmethod
+    def _dirs_input_state(text: str) -> str:
+        """여러 폴더 판정 — 없는 폴더가 하나라도 있으면 ``missing``, 사진 없는 폴더가 있으면 ``nophoto``."""
+        roots = SetupPage.split_roots(text)
+        if not roots:
+            return "empty"
+        states = [SetupPage._dir_input_state(r) for r in roots]
+        if any(x == "missing" for x in states):
+            return "missing"
+        return "nophoto" if any(x == "nophoto" for x in states) else ""
+
     def _set_field_state(self, edit: QLineEdit, state: str) -> None:
         """동적 프로퍼티 + repolish(안 하면 QSS 가 다시 그려지지 않는다).
 
         P3A — 상태가 **실제로 바뀔 때만** 입력란을 140ms 겹쳐 바꾸고, 오류 문구는 6px
         아래에서 떠오른다.  고치면 옛 문구가 120ms 가속으로 빠진다.  `_validate` 가
         자주 부르므로 같은 상태면 아무 모션도 없다."""
-        new = "invalid" if state else ""
+        new = "invalid" if state in ("missing", "nophoto") else ""
         err = edit.property("_errLabel")
         changed = ((edit.property("state") or "") != new
                    and motion.enabled() and edit.isVisible())
@@ -1932,8 +1989,9 @@ class SetupPage(QWidget):
             #   않기 때문에(빈 상태에서 빨간 테두리로 겁주지 않으려는 의도) 도달할 수
             #   없고, 같은 말은 이미 버튼 옆 `_start_hint`(START_BLOCKED_HINT)가 한다.
             #   도달 불가 분기는 '처리되고 있다'는 착각만 남긴다.
-            if state == "missing":
-                err.setText(i18n.KO.SETUP_INVALID_FOLDER)
+            if state in ("missing", "nophoto"):      # 두 상태가 같은 모양(빨간 테두리 + 짧은 빨간 글)
+                err.setText(i18n.KO.SETUP_INVALID_FOLDER if state == "missing"
+                            else i18n.KO.SETUP_NO_PHOTOS)
                 if changed:
                     motion.rise_in(err, rise_px=motion.TOAST_RISE_PX,
                                    duration=motion.DUR_TOAST_IN)
@@ -2067,7 +2125,7 @@ class SetupPage(QWidget):
         # 추출 모드는 검증 폴더를 받지 않는다 — 기준 폴더를 한 번 더 보면 판정이 같다.
         val_text = ref_text if self._extract_mode else self.val_path_edit.text()
         if self._sync_probe:
-            judge = self._dirs_state if self._extract_mode else self._dir_state
+            judge = self._dirs_input_state if self._extract_mode else self._dir_input_state
             ref_state: Optional[str] = judge(ref_text)
             val_state: Optional[str] = judge(val_text)
         else:
@@ -2078,9 +2136,9 @@ class SetupPage(QWidget):
         # 비어 있는 초기 상태에서 빨간 테두리로 겁주지 않는다 — 문구만 조용히.
         # 확인 중(None)도 마찬가지다 — 아직 모르는 것을 틀렸다고 칠할 수는 없다.
         self._set_field_state(self.ref_path_edit,
-                              "missing" if ref_state == "missing" else "")
+                              ref_state if ref_state in ("missing", "nophoto") else "")
         self._set_field_state(self.val_path_edit,
-                              "missing" if val_state == "missing" else "")
+                              val_state if val_state in ("missing", "nophoto") else "")
         dirs_ok = ref_state == "" and val_state == ""
         ok = dirs_ok and self._backend_ready
         # P2B — 눌러도 되게 **된 순간만** 회색→파랑을 겹쳐 바꾼다(꺼질 때는 즉시).

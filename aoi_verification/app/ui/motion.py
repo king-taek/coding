@@ -93,6 +93,18 @@ DUR_SLOW = 400
 #   그대로 쓴다.  스케일이 필요한 자리는 여전히 `dur()` 를 쓴다.
 DUR_SHEET = 400          # 작은 화면 팝업(시트) 등장/퇴장 — 발원점을 모를 때의 폴백
 DUR_LOADING = 500        # 로딩 화면 팝업 등장
+LOADING_REVEAL_DELAY_MS = 150   # 로딩 덮개 그림 표시 지연 — 이 안에 끝나는 일은 아무것도 그리지 않는다(입력 차단은 즉시)
+# 로딩 덮개(`widgets/loading_overlay.py`)의 시간 값 — 값은 예전 하드코딩 그대로다(M8 정리).
+LOADING_PULSE_MS = 1600         # busy 물결 한 주기(모션 켜짐이면 dur() 를 타서 실제 1280ms)
+LOADING_RIPPLE_MS = 140         # busy 물결 — 반지름 1 당 지연(주기와의 비율로만 쓰여 스케일 없음)
+LOADING_DIE_FADE_MS = 200       # 다이 하나가 켜질 때 회색 → 파란색(스케일 없음)
+LOADING_GREY_FADE_MS = 200      # busy → 결정형 전환 때 파란색 → 회색(스케일 없음)
+LOADING_STRIPE_MS = 1100        # 막대 줄무늬 한 주기(실제 dur(1100)=880ms)
+LOADING_FADE_OUT_MS = 140       # 덮개 퇴장 — 실제 max(LOADING_FADE_OUT_MIN_MS, dur(140)) = 112ms
+LOADING_FADE_OUT_MIN_MS = 110   # 퇴장 하한('컷' 방지)
+LOADING_VAL_PER_PCT_MS = 10     # 채움 추격 — 1% 당(스케일 없음)
+LOADING_VAL_TWEEN_MIN_MS = 100  # 한 칸짜리 증가도 이만큼은 미끄러진다
+LOADING_VAL_TWEEN_MAX_MS = 600  # 마지막 보고 뒤 이 안에 반드시 닿는다(추격 상한)
 # 구조개편 21·23·25·26·27안이 **눈으로 정한** 지속시간 — 위 셋과 같이 dur() 를 타지
 # 않는다(시안이 밀리초로 명시한 값이라 스케일을 곱하면 지정과 실제가 갈라진다).
 DUR_RAIL_LEAD = 140      # 21안 — 여정 레일 눈금이 페이지보다 **먼저** 채워지는 시간
@@ -950,6 +962,38 @@ def fade_out(widget, *, duration: int = DUR_TOAST_OUT, on_done=None):
                             opacity_from=1.0, opacity_to=0.0,
                             duration=duration, delay_ms=0, on_done=on_done,
                             easing=EASE_EXIT)
+
+
+def banner_in(widget) -> None:
+    """알림 배너를 띄운다 — 높이가 0 에서 펼쳐지며 흐릿하게 나타난다(아래 목록이 부드럽게 내려온다).
+    이미 떠 있으면(글자만 바뀜) 움직이지 않는다.  헤드리스면 그냥 보인다."""
+    widget._motionBannerGen = getattr(widget, "_motionBannerGen", 0) + 1      # 접히던 중이면 취소
+    shown = widget.isVisible() and not getattr(widget, "_motionBannerOut", False)
+    widget._motionBannerOut = False
+    widget.setVisible(True)
+    if shown or not enabled():
+        return
+    h = max(widget.sizeHint().height(), 1)
+    animate_height(widget, 0, h, duration=DUR_ROW_RESIZE)
+    fade_in(widget, duration=DUR_ROW_RESIZE)
+
+
+def banner_out(widget) -> None:
+    """알림 배너를 지운다 — 흐려지며 높이가 접힌다(DUR_ROW_SHRINK, 가속).  헤드리스면 바로 숨긴다."""
+    if not widget.isVisible() or not enabled():
+        widget.setVisible(False)
+        return
+    gen = getattr(widget, "_motionBannerGen", 0) + 1
+    widget._motionBannerGen = gen
+    widget._motionBannerOut = True
+
+    def _done() -> None:
+        if getattr(widget, "_motionBannerGen", 0) == gen:
+            widget.setVisible(False)
+            widget._motionBannerOut = False
+
+    fade_out(widget, duration=DUR_ROW_SHRINK, on_done=_done)
+    animate_height(widget, widget.height(), 0, duration=DUR_ROW_SHRINK, easing=EASE_EXIT)
 
 
 class _ToastTick(QWidget):

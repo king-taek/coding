@@ -289,7 +289,7 @@ def test_legacy_hint_no_longer_claims_expanding_switches(qapp):
     from aoi_verification.app import i18n
     assert "펼치면" not in i18n.KO.LEGACY_MODE_HINT
     # 좌표 데이터 없음 안내는 켤 컨트롤을 지목해야 한다.
-    assert "유사도 엔진(구형) 사용" in i18n.KO.COORD_NO_DATA_MSG
+    assert "유사도 매치" in i18n.KO.COORD_NO_DATA_MSG
 
 
 # ── 유효성 게이트 · 상태를 컨트롤 안에 ──────────────────────────────────────
@@ -302,6 +302,10 @@ def test_start_disabled_until_folders_valid(qapp, tmp_path):
         (tmp_path / "v").mkdir()
         page.ref_path_edit.setText(str(tmp_path / "r"))
         page.val_path_edit.setText(str(tmp_path / "v"))
+        page._validate()
+        assert page.start_btn.isEnabled() is False       # 사진이 없다(E2)
+        (tmp_path / "r" / "a.jpg").write_bytes(b"x")
+        (tmp_path / "v" / "a.jpg").write_bytes(b"x")
         page._validate()
         assert page.start_btn.isEnabled() is True
         assert page._start_hint.text() == ""

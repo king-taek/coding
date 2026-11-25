@@ -103,11 +103,11 @@ def test_populate_list_inserts_separator_between_groups(qapp, spy_render):
     dlg = _dialog(entries)
     try:
         dlg._populate_list()
-        # 항목 라벨은 `[슬롯]` + 파일명 2줄이다 — 이 테스트가 보는 것은 **순서**이므로
-        # 첫 줄(슬롯 태그)만 비교한다.  파일명 줄은 아래 전용 테스트가 지킨다.
-        rows = [dlg.fail_list.item(r).text().split("\n")[0]
-                for r in range(dlg.fail_list.count())]
-        assert rows == ["[B]", i18n.KO.UNMATCHED_CANCELLED_SEPARATOR, "[A]"]
+        # 항목 라벨은 파일명(앞 6자) + 슬롯 2줄이다 — 이 테스트가 보는 것은 **순서**이므로
+        # 슬롯(둘째 줄)만 비교한다.  파일명 줄은 아래 전용 테스트가 지킨다.
+        rows = [t.split("\n")[-1] for t in
+                (dlg.fail_list.item(r).text() for r in range(dlg.fail_list.count()))]
+        assert rows == ["B", i18n.KO.UNMATCHED_CANCELLED_SEPARATOR, "A"]
         # 구분선은 선택 불가 — 클릭해도 사진이 바뀌면 안 된다.
         sep = dlg.fail_list.item(1)
         assert sep.flags() == Qt.ItemFlag.NoItemFlags
@@ -122,9 +122,9 @@ def test_no_separator_without_cancelled_entries(qapp, spy_render):
     dlg = _dialog([_entry("A", "normal1"), _entry("B", "normal2")])
     try:
         dlg._populate_list()
-        rows = [dlg.fail_list.item(r).text().split("\n")[0]
+        rows = [dlg.fail_list.item(r).text().split("\n")[1]
                 for r in range(dlg.fail_list.count())]
-        assert rows == ["[A]", "[B]"]
+        assert rows == ["A", "B"]
     finally:
         dlg.close()
 
@@ -137,11 +137,10 @@ def test_list_label_carries_the_filename(qapp, spy_render):
         dlg._populate_list()
         rows = [dlg.fail_list.item(r).text()
                 for r in range(dlg.fail_list.count())]
-        assert [r.split("\n")[0] for r in rows] == ["[A]", "[A]"]
-        # 두 줄짜리 라벨이고, 둘째 줄이 서로 달라야 목록이 둘을 구분한다.
-        seconds = [r.split("\n")[1] for r in rows]
-        assert all(s for s in seconds)
-        assert seconds[0] != seconds[1]
+        # W51 — 첫 줄 = 파일명 앞 6자(+…), 둘째 줄 = 슬롯.  앞 6자가 달라야 구분된다.
+        assert [r.split("\n")[1] for r in rows] == ["A", "A"]
+        firsts = [r.split("\n")[0] for r in rows]
+        assert firsts == ["shot_o…", "shot_t…"]
         # 전체 경로는 툴팁이 계속 보여 준다(줄임 표시로 잘려도 확인 가능).
         assert dlg.fail_list.item(0).toolTip().endswith("shot_one.png")
     finally:
@@ -206,3 +205,36 @@ def test_missing_note_attribute_is_survivable(qapp, spy_render):
         slot, side, path = "A", "ref", Path("/tmp/a.png")
 
     assert not ur.UnmatchedReviewDialog._is_cancelled(_NoNote())
+
+
+def test_candidate_tile_name_is_first_six_chars_with_tooltip(qapp):
+    """W51 — 후보 이름은 앞 6자 + '…', 전체 이름은 툴팁."""
+    item = ImageItem("A", Path("/tmp/255348.163019.c.1015838.2.jpeg"), "val")
+    tile = ur._CandidateTile(item, 0.233)
+    assert tile._cap.text() == "255348…"
+    assert tile._cap.toolTip() == item.filename
+    short = ur._CandidateTile(ImageItem("A", Path("/tmp/ab.jpg"), "val"), 0.1)
+    assert short._cap.text() == "ab.jpg"
+
+
+def test_candidates_use_three_columns_when_wide(qapp):
+    """W51 — 넓은 창에서 후보는 3열, 가로 스크롤 없음."""
+    dlg = ur.UnmatchedReviewDialog(
+        [_entry("A", "ref1")],
+        {"A": [ImageItem("A", Path(f"/tmp/v{i}.png"), "val") for i in range(6)]},
+        coord_mode=False, tolerance=500.0)
+    try:
+        dlg._lookup_or_compute_score = lambda r, v, allow_compute=True: 0.5
+        dlg.resize(1264, 844)
+        dlg.show()
+        qapp.processEvents()
+        dlg._idx = 0
+        dlg._render_current()
+        qapp.processEvents()
+        dlg._relayout_candidates()
+        cols = max(dlg._grid.getItemPosition(i)[1]
+                   for i in range(dlg._grid.count())) + 1
+        assert cols == 3
+        assert dlg._scroll.horizontalScrollBar().maximum() == 0
+    finally:
+        dlg.close()

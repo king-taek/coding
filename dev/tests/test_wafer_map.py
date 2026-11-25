@@ -735,6 +735,31 @@ def test_dialog_setup_mode_slot_folder(qt, tmp_path):
         dlg.deleteLater()
 
 
+def test_dialog_missing_folder_is_not_reported_as_no_photos(qt, tmp_path):
+    """E1 · W8 — 없는 폴더는 '사진 없음' 이 아니라 '폴더를 찾을 수 없습니다' + 경로 + 다른 폴더 버튼.
+    지도가 없으면 보기 옵션은 꺼져 있고, 지도가 생기면 켜진다."""
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
+    dlg = WaferMapDialog()
+    try:
+        opts = (dlg.fill_btn, dlg.notch_btn, dlg.full_btn, dlg.dot_slider)
+        assert not any(w.isEnabled() for w in opts)
+        gone = tmp_path / "gone"
+        dlg.show_folder(gone)
+        _wait_build(qt, dlg)
+        assert dlg.missing.isVisibleTo(dlg) and not dlg.empty.isVisibleTo(dlg)
+        assert dlg.missing_title.text() == i18n.KO.WAFER_MAP_FOLDER_MISSING
+        assert dlg.missing_path.text() == str(gone)
+        assert not any(w.isEnabled() for w in opts)
+        folder = _camtek_folder(tmp_path, [("a", CX, CY)])
+        dlg.show_folder(folder)
+        _wait_build(qt, dlg)
+        assert not dlg.missing.isVisibleTo(dlg)
+        assert all(w.isEnabled() for w in opts)
+    finally:
+        dlg.deleteLater()
+
+
 def test_dialog_build_exception_shows_error_not_empty_map(qt, tmp_path, monkeypatch, caplog):
     """L9 — 맵 계산이 예외로 죽으면 '사진 없음' 이 아니라 오류 안내가 뜨고 로그가 남는다."""
     import logging
