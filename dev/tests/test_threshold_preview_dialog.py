@@ -445,7 +445,7 @@ def test_chip_select_filters_tiles_but_not_counts(styled_qapp, tmp_path, monkeyp
 
 
 def test_remove_is_synchronous_and_undo_restores(styled_qapp, tmp_path, monkeypatch):
-    """✕ 는 읽지 않는다(스레드 · 덮개 없음) — 메모리에서 다시 합치고 '뺐습니다 · 꼭 잡기 n개도 빠짐' + [되돌리기].
+    """✕ 는 읽지 않는다(스레드 · 덮개 없음) — 메모리에서 다시 합치고 '뺌 · 꼭 잡기 n개도 빠짐' + [되돌리기].
     되돌리면 그 칩과 꼭 잡기가 돌아온다."""
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     a, lot = _lot_setup(tmp_path)
@@ -464,13 +464,45 @@ def test_remove_is_synchronous_and_undo_restores(styled_qapp, tmp_path, monkeypa
         assert dlg._thread is None and not dlg._overlay_on and not dlg.is_loading()
         assert dlg._roots == [a] and dlg._w.folders == (a,) and len(dlg._picked) == 1
         assert dlg.notice.isVisibleTo(dlg) and dlg.undo_btn.isVisibleTo(dlg)
-        assert dlg.notice_label.text() == "lot 를 뺐습니다 · 꼭 잡기 1개도 빠짐"
+        assert dlg.notice_label.text() == "lot 뺌 · 꼭 잡기 1개도 빠짐"
         assert dlg._view.get(lot)                                                # 칩 설정은 남는다
         dlg._undo()
         assert dlg._roots == [a, lot] and len(dlg._w.folders) == 3 and len(dlg._picked) == 2
         assert dlg._ov == ov and not dlg.notice.isVisibleTo(dlg) and dlg._thread is None
         dlg.remove_folder(a)                                                       # 첫 칩을 빼면 기준이 같아도 새 첫 칩이 된다
         assert dlg._roots == [lot] and dlg._w.folders[0].parent == lot
+    finally:
+        dlg.deleteLater()
+
+
+def test_z_undoes_folder_removal_and_pick_sheet_clears_it(styled_qapp, tmp_path, monkeypatch):
+    """'폴더 뺐다' 알림의 [되돌리기 (Z)] 는 Z 키로도 돈다(현택님: 되돌리기는 어디서나 Z).
+    [고르기] 시트를 열면 알림을 걷는다 — 뒤의 Z 와 시트의 Z 가 함께 살면 둘 다 죽는다."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    a, lot = _lot_setup(tmp_path)
+    _no_load(monkeypatch, T)
+    shown = _capture_run(monkeypatch, T)
+    dlg = T.ThresholdPreviewDialog()
+    dlg.resize(1280, 800)
+    try:
+        _prime(dlg, T, a, lot)
+        dlg.set_folders([a, lot])
+        dlg.set_mode("auto")
+        dlg.show()
+        dlg.activateWindow()
+        styled_qapp.processEvents()
+        dlg.remove_folder(lot)
+        styled_qapp.processEvents()
+        QTest.keyClick(dlg, Qt.Key.Key_Z)
+        styled_qapp.processEvents()
+        assert dlg._roots == [a, lot] and not dlg.notice.isVisibleTo(dlg)
+        dlg.remove_folder(lot)
+        assert dlg.undo_btn.isVisibleTo(dlg)
+        dlg.open_pick_dialog()
+        assert len(shown) == 1
+        assert not dlg.notice.isVisibleTo(dlg) and dlg._undo_snap is None
     finally:
         dlg.deleteLater()
 
@@ -912,7 +944,7 @@ def test_zone_rows_are_rows_not_boxes(styled_qapp, tmp_path):
 
 
 def test_left_column_stacks_folders_above_zones_without_chip_row(styled_qapp, tmp_path, monkeypatch):
-    """폴더 칩 줄은 없다 — 왼쪽 열 위가 폴더 목록, 아래가 Zone 이고, 윗줄에는 폴더 버튼이 없다.
+    """폴더 칩 줄은 없다 — 왼쪽 열 위가 폴더 목록, 아래가 Zone 이다.  [폴더 선택] 은 위 왼쪽 회색(현택님 2026-11-24).
     [컬러 | 스캔] 은 고른 폴더 줄에만 보이고, ✕ 는 줄마다 하나다."""
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     a, lot = _lot_setup(tmp_path)
@@ -927,8 +959,9 @@ def test_left_column_stacks_folders_above_zones_without_chip_row(styled_qapp, tm
         assert not hasattr(dlg, "_chips_host")
         rows = _chips(dlg, T)
         assert [r.info.root for r in rows] == [a, lot] and all(r.x_btn is not None for r in rows)
-        assert dlg.pick_btn.property("role") == "textAccent"              # 조용한 [+ 폴더]
-        assert dlg.pick_btn.mapTo(dlg, dlg.pick_btn.rect().topLeft()).x() < T.SIDE_W
+        assert dlg.pick_btn.property("role") == "ghost"                   # 위 왼쪽 회색 [폴더 선택]
+        tl = dlg.pick_btn.mapTo(dlg, dlg.pick_btn.rect().topLeft())
+        assert tl.x() < T.SIDE_W and tl.y() < rows[0].mapTo(dlg, rows[0].rect().topLeft()).y()
         assert rows[0].mapTo(dlg, rows[0].rect().topLeft()).y() < dlg.zone_btns[("Zones", 1)].mapTo(dlg, dlg.zone_btns[("Zones", 1)].rect().topLeft()).y()
         assert not any(r.seg_host.isVisibleTo(dlg) for r in rows)
         dlg.select_folder(lot)
@@ -983,7 +1016,7 @@ def test_tile_marks_pick_check_without_scan_mark_or_more_button(styled_qapp):
 
 def test_detail_opens_right_under_its_row_as_hairline_band(styled_qapp, tmp_path):
     """타일을 누르면 그 줄 바로 아래에 위아래 선만 있는 상세가 펼쳐진다(굵은 파란 상자 · 긴 경로 없음).
-    다시 누르거나 [닫기] 로 접는다.  자동 추천에서도 같다 — [꼭 잡기] 버튼은 없다(팝업에서 고른다)."""
+    다시 누르거나 [닫기] 로 접는다.  자동 추천에서도 같다."""
     from PyQt6.QtWidgets import QFrame, QPushButton
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     dlg = _shown_dlg(T, styled_qapp, tmp_path)
@@ -1010,8 +1043,9 @@ def test_detail_opens_right_under_its_row_as_hairline_band(styled_qapp, tmp_path
         dlg._toggle(k0)
         styled_qapp.processEvents()
         box = next(f for f in dlg.grid_host.findChildren(QFrame) if f.property("role") == "ovDetail" and f.isVisibleTo(dlg))
-        assert [b.text() for b in box.findChildren(QPushButton)] == [T._KO.OVERKILL_DETAIL_CLOSE]   # 자동 추천도 꼭 잡기 버튼 없음
-        assert dlg._picked == {} and dlg._open == k0
+        assert [b.text() for b in box.findChildren(QPushButton)] == [   # 바로 가르기 두 개 + 닫기(현택님 2026-11-24 안 D)
+            T._KO.OVERKILL_MARK_DEFECT, T._KO.OVERKILL_MARK_OVERKILL, T._KO.OVERKILL_DETAIL_CLOSE]
+        assert dlg._picked == {} and dlg._open == k0                       # 펼치기만으로는 고르지 않는다
     finally:
         dlg.deleteLater()
 
@@ -1168,8 +1202,9 @@ def test_rules_panel_is_boxless_with_distribution_aligned_to_slider(styled_qapp,
 
 
 # ------------------------------------------------------------------ 2026-11-17 디자인 검토 반영
-def test_empty_overkill_shows_one_line_and_add_button_and_disables_modes(styled_qapp):
-    """폴더가 없으면 본문 가운데 안내 + [+ 폴더](32px), 모드 버튼은 꺼지고 'Zone' 소제목은 숨는다."""
+def test_empty_overkill_shows_one_big_pick_button_and_disables_modes(styled_qapp):
+    """폴더가 없으면 화면 가운데 큰 파랑 [폴더 선택] 하나(현택님 2026-11-24 B1 안 B), 모드 버튼은 꺼지고
+    'Zone' 소제목은 숨는다."""
     from aoi_verification.app import i18n
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     dlg = T.ThresholdPreviewDialog()
@@ -1177,13 +1212,13 @@ def test_empty_overkill_shows_one_line_and_add_button_and_disables_modes(styled_
         dlg.resize(1280, 800)
         dlg.show()
         styled_qapp.processEvents()
-        assert dlg.empty_state.isVisibleTo(dlg)
-        assert dlg.empty_hint.text() == i18n.KO.OVERKILL_EMPTY
-        assert dlg.empty_pick_btn.text() == i18n.KO.OVERKILL_ADD_FOLDER
-        assert dlg.empty_pick_btn.property("role") == "ghost" and dlg.empty_pick_btn.height() == 32
+        eo = dlg._empty_open
+        assert eo.isVisibleTo(dlg) and eo.geometry() == dlg.rect()
+        assert eo.btn.text() == i18n.KO.OVERKILL_ADD_FOLDER and eo.btn.property("role") == "primary"
+        c = eo.btn.mapTo(dlg, eo.btn.rect().center())
+        assert abs(c.x() - dlg.width() // 2) <= 2 and abs(c.y() - dlg.height() // 2) <= 40
         assert not any(b.isEnabled() for b in dlg.mode_btns.values())
         assert not dlg._zone_head.isVisibleTo(dlg) and not dlg.summary.isVisibleTo(dlg)
-        assert dlg.empty_hint.geometry().center().x() > dlg.width() // 3        # 본문 가운데쪽
     finally:
         dlg.deleteLater()
 
@@ -1192,7 +1227,7 @@ def test_empty_state_goes_away_with_a_wafer(styled_qapp, tmp_path):
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     dlg = _shown_dlg(T, styled_qapp, tmp_path)
     try:
-        assert not dlg.empty_state.isVisibleTo(dlg)
+        assert not dlg.empty_state.isVisibleTo(dlg) and not dlg._empty_open.isVisibleTo(dlg)
         assert all(b.isEnabled() for b in dlg.mode_btns.values())
         assert dlg._zone_head.isVisibleTo(dlg) and dlg.summary.isVisibleTo(dlg)
     finally:
@@ -1369,7 +1404,13 @@ def _ask_first_action(monkeypatch, T, seen):
     def fake_exec(self, *a, **k):
         seen.extend(x.text() for x in self.actions())
         return self.actions()[0]
-    monkeypatch.setattr(T.QMenu, "exec", fake_exec)
+    from PyQt6.QtWidgets import QMenu
+    monkeypatch.setattr(QMenu, "exec", fake_exec)
+
+
+def _menu3(T):
+    """모든 사진의 우클릭 메뉴 세 항목(``photo_menu``, 현택님 2026-11-24)."""
+    return [T._KO.CTX_VIEW_LARGER, T._KO.CTX_PHOTO_INFO, T._KO.CTX_PHOTO_GL]
 
 
 def test_right_click_on_color_tile_and_big_photo_offers_enlarge(styled_qapp, tmp_path, monkeypatch):
@@ -1384,7 +1425,7 @@ def test_right_click_on_color_tile_and_big_photo_offers_enlarge(styled_qapp, tmp
         k = next(iter(dlg.tiles))
         tile = dlg.tiles[k]
         tile.customContextMenuRequested.emit(QPoint(5, 5))                 # 우클릭
-        assert seen == [T._KO.CTX_VIEW_LARGER] and shown == [dlg._pic(dlg._tile_defects[k])]
+        assert seen == _menu3(T) and shown == [dlg._pic(dlg._tile_defects[k])]
         assert dlg._open is None and not dlg._picked                       # 선택 · 꼭 잡기는 건드리지 않는다
         dlg._toggle(k)
         big = dlg._band.findChildren(T._BigPhoto)[0]
@@ -1418,7 +1459,7 @@ def test_right_click_on_scan_tile_opens_full_scan_with_overlay_or_falls_back_to_
         monkeypatch.setattr(Z, "FullscreenViewer", _V)
         monkeypatch.setattr(T.sheets, "run", lambda viewer, **k: None)
         dlg.tiles[T.key_of(target)].customContextMenuRequested.emit(QPoint(5, 5))
-        assert seen == [T._KO.CTX_VIEW_LARGER]
+        assert seen == _menu3(T)
         th = dlg._full_scan
         assert th is not None
         th.wait(20000)
@@ -2019,5 +2060,207 @@ def test_enlarged_photo_without_scan_list_says_none_at_once(styled_qapp, tmp_pat
         d = dlg._w.defects[0]
         v = _enlarged_viewer(dlg, T, monkeypatch, styled_qapp, d)
         assert v._scan_tag.text() == T._KO.VIEWER_SCAN_NONE and v._btn_scan.isHidden()
+    finally:
+        dlg.deleteLater()
+
+
+def test_band_marks_defect_or_overkill_at_once_and_z_undoes(styled_qapp, tmp_path, monkeypatch):
+    """값 띠 [Defect] · [Overkill] — 누르면 바로 가르고 기준을 다시 계산한다.  띠는 열린 채, Z 는 하나씩 되돌린다(현택님 2026-11-24 안 D)."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QKeyEvent
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    try:
+        k = next(iter(dlg.tiles))
+        d = dlg._tile_defects[k]
+        dlg._toggle(k)
+        assert set(dlg.mark_btns) == {"defect", "overkill"}
+        assert not any(b.isChecked() for b in dlg.mark_btns.values())
+        dlg.mark_btns["defect"].click()
+        _wait_apply(dlg, styled_qapp)
+        assert set(dlg._picked) == {k} and dlg._overkill == {}
+        assert dlg._ov == P.recommend([d], dlg._w.zones, dlg._snap)[0]
+        assert dlg._open == k and dlg._band is not None                   # 띠는 닫히지 않는다
+        assert dlg.mark_btns["defect"].isChecked() and not dlg.mark_btns["overkill"].isChecked()
+        dlg.mark_btns["overkill"].click()                                 # 다른 쪽으로 옮긴다
+        _wait_apply(dlg, styled_qapp)
+        assert dlg._picked == {} and set(dlg._overkill) == {k}
+        dlg.setFocus()
+        z = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Z, Qt.KeyboardModifier.NoModifier, "z")
+        dlg.keyPressEvent(z)                                              # Z — 한 단계 전(꼭 잡기)
+        assert set(dlg._picked) == {k} and dlg._overkill == {}
+        dlg.keyPressEvent(z)                                              # 처음으로
+        assert dlg._picked == {} and dlg._overkill == {} and dlg._ov == {}
+        assert dlg._mark_undo == []
+    finally:
+        dlg.deleteLater()
+
+
+def test_band_mark_same_button_again_unmarks(styled_qapp, tmp_path, monkeypatch):
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        k = T.key_of(dlg._in_zone()[0])                                   # 직접 조정 첫 화면은 빠진 사진이 없다
+        dlg.mark(k, "overkill")
+        _wait_apply(dlg, styled_qapp)
+        assert set(dlg._overkill) == {k}
+        dlg.mark(k, "overkill")
+        _wait_apply(dlg, styled_qapp)
+        assert dlg._overkill == {}
+        dlg.reset()                                                       # 되돌리기(레시피 값)는 Z 기록도 비운다
+        assert dlg._mark_undo == []
+    finally:
+        dlg.deleteLater()
+
+
+def test_classify_rows_default_good_to_overkill_and_others_to_defect(tmp_path):
+    """사람이 바꾼 분류만 — Good 종류(Accept)는 Overkill, 그 밖(Foreign Material)은 꼭 잡기, 손대지 않은 것은 안 씀."""
+    from aoi_verification.app.threshold import classify as CL
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    w = T.load_wafer(_wafer_with_photos(tmp_path))
+    rows = CL.class_rows(w.defects, w.classes)
+    assert [(r.name, len(r.defects), r.default) for r in rows] == [
+        ("Accept", 11, CL.OVERKILL), ("Foreign Material", 3, CL.DEFECT)]      # 장비 Defects.csv 의 Accept 와 같은 수
+    picked, over = CL.split(rows, {}, T.key_of)
+    assert len(picked) == 3 and len(over) == 11 and not set(picked) & set(over)
+    picked, over = CL.split(rows, {0: CL.SKIP, 31: CL.OVERKILL}, T.key_of)
+    assert picked == {} and len(over) == 3
+
+
+def test_classify_import_fills_picks_and_overkill_and_z_undoes(styled_qapp, tmp_path, monkeypatch):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QKeyEvent
+    from aoi_verification.app.threshold import classify as CL
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    shown = _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        assert not dlg.classify_btn.isVisibleTo(dlg)                     # 자동 추천에서만
+        dlg.set_mode("auto")
+        assert dlg.classify_btn.isVisibleTo(dlg) and dlg.classify_btn.isEnabled()
+        dlg.classify_btn.click()
+        pop = shown[-1]
+        assert pop.apply_btn.text() == T._KO.OVERKILL_CLASSIFY_APPLY_FMT.format(d="3", o="11")
+        pop.groups[(0, CL.SKIP)].click()                                   # Accept 는 안 씀
+        assert pop.apply_btn.text() == T._KO.OVERKILL_CLASSIFY_APPLY_FMT.format(d="3", o="0")
+        pop.apply_btn.click()
+        _wait_apply(dlg, styled_qapp)
+        rows = CL.class_rows(dlg._w.defects, dlg._w.classes)
+        fm = next(r for r in rows if r.cls == 31)
+        assert set(dlg._picked) == {T.key_of(d) for d in fm.defects} and dlg._overkill == {}
+        assert dlg._ov == P.recommend(list(fm.defects), dlg._w.zones, dlg._snap)[0]
+        dlg.setFocus()
+        dlg.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Z, Qt.KeyboardModifier.NoModifier, "z"))
+        assert dlg._picked == {} and dlg._ov == {}
+    finally:
+        dlg.deleteLater()
+
+
+def test_classify_button_off_without_changed_classes(styled_qapp, tmp_path, monkeypatch):
+    import dataclasses
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    _capture_run(monkeypatch, T)
+    w = T.load_wafer(_wafer_with_photos(tmp_path))
+    w.defects = tuple(dataclasses.replace(d, cls=d.bin) for d in w.defects)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(w)
+        dlg.set_mode("auto")
+        assert not dlg.classify_btn.isEnabled()
+    finally:
+        dlg.deleteLater()
+
+
+def test_pick_list_csv_round_trip_reselects_same_defects(styled_qapp, tmp_path, monkeypatch):
+    """선택 목록 CSV — 저장하고 새 화면에서 열면 같은 Defect 가 같은 쪽으로 골라진다(현택님 2026-11-24 안 B)."""
+    import csv
+    from aoi_verification.app.threshold import pick_list as PL
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    out = tmp_path / "list.csv"
+    try:
+        assert dlg.list_btn.isVisibleTo(dlg) and not dlg.list_save_act.isEnabled() and dlg.list_open_act.isEnabled()
+        ds = dlg._in_zone()
+        dlg.mark(T.key_of(ds[0]), "defect")
+        _wait_apply(dlg, styled_qapp)
+        dlg.mark(T.key_of(ds[1]), "overkill")
+        _wait_apply(dlg, styled_qapp)
+        assert dlg.list_save_act.isEnabled()
+        dlg.save_list(str(out))
+        rows = list(csv.reader(out.open(encoding="utf-8-sig")))
+        assert tuple(rows[0]) == PL.HEAD and [r[0] for r in rows[1:]] == [PL.DEFECT, PL.OVERKILL]
+        assert rows[1][2] == "27125535EWA5" and rows[1][1].endswith(".jpeg")
+        want = (set(dlg._picked), set(dlg._overkill))
+    finally:
+        dlg.deleteLater()
+    dlg2 = T.ThresholdPreviewDialog()
+    try:
+        dlg2.set_wafer(T.load_wafer(tmp_path / "27125535EWA5"))
+        dlg2.set_mode("auto")
+        dlg2.open_list(str(out))
+        _wait_apply(dlg2, styled_qapp)
+        assert (set(dlg2._picked), set(dlg2._overkill)) == want
+        assert dlg2.notice_label.text() == T._KO.OVERKILL_LIST_LOADED.format(n=2, k=2)
+    finally:
+        dlg2.deleteLater()
+
+
+def test_pick_list_skips_rows_whose_xy_does_not_match(tmp_path):
+    """폴더 이름 · 번호가 같아도 좌표가 다르면(다른 스캔) 고르지 않는다."""
+    from types import SimpleNamespace as NS
+    from aoi_verification.app.threshold import pick_list as PL
+    p = tmp_path / "l.csv"
+    PL.write_csv(p, [(PL.DEFECT, "a.jpg", "W1", "", "", "Z", 3, "100.000", "200.000", "", "", "", ""),
+                     (PL.OVERKILL, "b.jpg", "W1", "", "", "Z", 4, "500.000", "600.000", "", "", "", ""),
+                     ("?", "c.jpg", "W1", "", "", "Z", 5, "1", "1", "", "", "", "")])
+    entries = PL.read_csv(p)
+    assert len(entries) == 2
+    ds = [NS(index=3, x=100.4, y=200.0), NS(index=4, x=530.0, y=600.0)]
+    picked, over = PL.match(entries, ds, lambda d: "W1")
+    assert picked == [ds[0]] and over == []
+
+
+def test_live_report_has_every_defect_as_dot_and_photos_by_options(styled_qapp, tmp_path):
+    """보고서 — Defect 는 전부 점, 사진은 고른 것 + 고른 견본만(현택님 2026-11-24 안 8).  고른 목록 열은 선택 목록 CSV 와 같다."""
+    from aoi_verification.app.threshold import pick_list as PL
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    from aoi_verification.app.ui.widgets.report_options_dialog import ReportOptions
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(T.load_wafer(_wafer_with_photos(tmp_path)))
+        dlg.set_value(14, R.FEATURE_AREA, 40.0)
+        ds = dlg._in_zone()
+        dlg._picked = {T.key_of(ds[0]): ds[0]}
+        dlg._overkill = {T.key_of(ds[1]): ds[1]}
+        full = dlg._live_payload(ReportOptions())
+        assert len(full["defects"]) == len(dlg._w.defects) == 14
+        assert sum(d["r"] for d in full["defects"]) == 7                    # 빠짐 7 = 화면과 같다
+        assert sorted(d["m"] for d in full["defects"] if d["m"]) == [1, 2]
+        assert full["head"] == list(PL.HEAD) and full["wafers"][0]["name"] == "27125535EWA5"
+        only = dlg._live_payload(ReportOptions(drop_samples=False, keep_samples=False))
+        with_p = [d for d in only["defects"] if d["p"] >= 0]
+        assert len(only["photos"]) == len(with_p) == 2 and all(d["m"] for d in with_p)   # 고른 것만
+        assert len(full["photos"]) > len(only["photos"])
+        out = tmp_path / "r.html"
+        dlg.export_html(out, ReportOptions(map=False))
+        text = out.read_text(encoding="utf-8")
+        assert "id='live-data'" in text and "id='map'" not in text
+    finally:
+        dlg.deleteLater()
+
+
+def test_report_options_dialog_defaults_and_choice(styled_qapp):
+    from aoi_verification.app.ui.widgets.report_options_dialog import ReportOptions, ReportOptionsDialog
+    opts = ReportOptions()
+    assert (opts.drop_samples, opts.keep_samples, opts.scan, opts.map, opts.px) == (True, True, True, True, 400)
+    dlg = ReportOptionsDialog(opts)
+    try:
+        dlg.checks["scan"].setChecked(False)
+        dlg.size_btns[800].click()
+        dlg.save_btn.click()
+        assert opts.scan is False and opts.px == 800 and dlg.result() == dlg.DialogCode.Accepted
     finally:
         dlg.deleteLater()

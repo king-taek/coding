@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QDialog, QHBoxLayout, QLabel,
 from ... import i18n
 from .. import theme
 from .neon_button import NeonButton
+from . import popup_layout
 
 # KLA 헤더(OCR 구간) 미리보기 — 좁게(가로·세로 축소).
 _CROP_W = 180
@@ -38,17 +39,19 @@ _KLA_METHODS = ("ocr", "unread", "info")
 _GAP = 26                                   # 묶은 쌍 두 사진 사이 간격
 
 # 선택(클릭) 시 파란 테두리가 또렷하게.  미선택 항목에도 투명 테두리를 미리 둬서
-# 선택 시 레이아웃이 흔들리지 않게 한다.
+# 선택 시 레이아웃이 흔들리지 않게 한다.  고른 사진 표시는 다중 선택 타일
+# (`bulk_select_dialog._SelectTile`)과 같은 '강조색 2px 테두리 + 옅은 배경 · 모서리 8'
+# 이다(E1a — 여기만 포커스색·모서리 4 로 달랐다).
 # ★ 모듈 상수로 굽지 마라 — f-string 은 **import 시점**에 팔레트를 박아 넣는다.
 #   호출 시점에 평가하는 함수로 둔다.
 #   배경도 팔레트에 없던 파랑 리터럴 대신 강조 틴트를 쓴다.
 def _list_sel_qss() -> str:
     return (
-        "QListWidget::item { border: 2px solid transparent; border-radius: 4px;"
+        "QListWidget::item { border: 2px solid transparent; border-radius: 8px;"
         " padding: 2px; margin: 1px; }"
-        f"QListWidget::item:selected {{ border: 2px solid {theme.FOCUS};"
-        f" background: {theme.ACCENT_TINT}; color: {theme.INK}; }}"
-        f"QListWidget::item:selected:active {{ border: 2px solid {theme.FOCUS}; }}"
+        f"QListWidget::item:selected {{ border: 2px solid {theme.ACCENT};"
+        f" background: {theme.ACCENT_TINT_SOFT}; color: {theme.INK}; }}"
+        f"QListWidget::item:selected:active {{ border: 2px solid {theme.ACCENT}; }}"
     )
 
 _METHOD_LABEL = {
@@ -208,11 +211,6 @@ class SlotMappingDialog(QDialog):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(10)
 
-        hint = QLabel(i18n.KO.SLOT_MAP_HINT, self)
-        hint.setProperty("role", "muted")
-        hint.setWordWrap(True)
-        root.addWidget(hint)
-
         lists_row = QHBoxLayout()
         lists_row.setSpacing(10)
         # 기준 측
@@ -260,15 +258,12 @@ class SlotMappingDialog(QDialog):
         self._pairs_list.itemDoubleClicked.connect(self._on_pair_double_clicked)
         root.addWidget(self._pairs_list, stretch=1)
 
-        bar = QHBoxLayout()
-        bar.addStretch(1)
         cancel = NeonButton(i18n.KO.BTN_CANCEL, role="ghost")
         cancel.clicked.connect(self.reject)
         ok = NeonButton(i18n.KO.BTN_OK, role="primary")
         ok.clicked.connect(self.accept)
-        bar.addWidget(cancel)
-        bar.addWidget(ok)
-        root.addLayout(bar)
+        root.addLayout(popup_layout.dialog_row(
+            QHBoxLayout(), cancels=[cancel], primaries=[ok]))
 
         self._auto_suggest()
 

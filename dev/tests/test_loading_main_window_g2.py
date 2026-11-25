@@ -201,11 +201,11 @@ def test_read_kla_info_without_jobs_is_synchronous(styled_qapp):
 # ── 문구 ─────────────────────────────────────────────────────────────────
 def test_wording():
     k = i18n.KO
-    assert k.LOAD_KLA_INFO == "KLA 정보파일 읽는 중…"
-    assert k.LOAD_KLA_OCR == "KLA 웨이퍼 번호 읽는 중…"
+    assert k.LOAD_KLA_INFO == "KLA 정보파일 읽는 중"
+    assert k.LOAD_KLA_OCR == "KLA 웨이퍼 번호 읽는 중"
     assert k.SIZE_TIER_NOTICE_FMT.format(thumb=1, q=2) == "사진이 많아 미리보기 화질을 낮췄습니다"
     assert "pip" not in k.UPDATE_DEPS_CHANGED and "git" not in k.UPDATE_DEPS_CHANGED
     assert "관리자에게 새 배포본을 요청하세요" in k.UPDATE_DEPS_CHANGED
     assert k.UPDATE_CONNECT_FAILED == "업데이트 서버에 연결하지 못했습니다. 인터넷·프록시를 확인하세요."
     assert k.WHATS_NEW_OK == "확인" and k.WHATS_NEW_KICKER_FMT.startswith("업데이트 · ")
-    assert k.OPENVINO_INSTALL_PROGRESS == "Intel GPU 가속 구성 요소 설치 중…"
+    assert k.OPENVINO_INSTALL_PROGRESS == "OpenVINO 설치 중"

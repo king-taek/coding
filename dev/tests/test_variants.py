@@ -94,7 +94,7 @@ def test_profile_pins_datum_baseline():
     assert (p.thumb_default_px, p.control_h, p.control_h_lg) == (118, 32, 44)
     # 밀집 컨트롤(체크박스 행·? 버튼·슬라이더)도 WCAG 2.5.8(AA, 24px)을 넘는다.
     assert (p.target_min, p.input_h, p.check_sz) == (26, 38, 18)
-    assert (p.chip_w, p.chip_h, p.toggle_w, p.toggle_h) == (88, 20, 52, 30)
+    assert (p.chip_w, p.chip_h) == (88, 20)
     assert (p.page_margin, p.section_gap) == (32, 28)
     # 모서리는 중간 라운드(8~10px) — '너무 각지다'는 지적 반영.
     assert (p.radius, p.radius_sm, p.chip_radius) == (9, 6, 8)

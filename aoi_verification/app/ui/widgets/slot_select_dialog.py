@@ -46,6 +46,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QGridLayout, QHBoxLayout,
 from ... import i18n
 from .. import theme
 from .neon_button import NeonButton
+from . import popup_layout
 from .option_group import reflow_into_grid
 
 # 타일 최소 폭 — 실제 폭은 열 수 계산이 늘려 준다.  슬롯명은 'PI_Opening_A1' 처럼
@@ -217,6 +218,9 @@ class _SlotTile(NeonButton):
 class SlotSelectDialog(QDialog):
     """검색 + 밀집 그리드로 진행할 슬롯을 고른다."""
 
+    #: 작은 팝업 — 시트 제목줄 ✕ 를 뺀다(자기 [취소] 가 있다, `sheet_host.POPUP_SMALL_ATTR`).
+    POPUP_SMALL = True
+
     selection_changed = pyqtSignal(int)          # 선택 개수 (테스트·확장용)
 
     def __init__(self,
@@ -239,7 +243,7 @@ class SlotSelectDialog(QDialog):
         같은 창으로 고를 때 쓴다."""
         super().__init__(parent)
         self.setWindowTitle(title or i18n.KO.SLOT_SELECT_TITLE)
-        self._hint_text = hint or i18n.KO.SLOT_SELECT_HINT
+        self._hint_text = hint or ""
         self._search_text = search_placeholder or i18n.KO.SLOT_SELECT_SEARCH_PLACEHOLDER
         self._is_slots = title is None          # 슬롯이 아니면 '모든 슬롯' 문구를 쓰지 않는다
         self._slot_names = sorted(set(slot_names))
@@ -360,10 +364,11 @@ class SlotSelectDialog(QDialog):
         self._head.setProperty("role", "title")
         root.addWidget(self._head)
 
-        hint = QLabel(self._hint_text, self)
-        hint.setProperty("role", "muted")
-        hint.setWordWrap(True)
-        root.addWidget(hint)
+        if self._hint_text:              # 기본은 안내 없음(설명문 금지) — 엑셀 시트 고르기만 준다
+            hint = QLabel(self._hint_text, self)
+            hint.setProperty("role", "muted")
+            hint.setWordWrap(True)
+            root.addWidget(hint)
 
         # ── 검색 — 이름을 아는 사용자에게 가장 빠른 길.  열자마자 여기 포커스가 간다.
         self._search = QLineEdit(self)
@@ -438,18 +443,12 @@ class SlotSelectDialog(QDialog):
         # ── 바닥: 취소·확인(우).
         # ★ 키 안내 문구는 없앴다 — 타일 키보드 이동을 없앴으므로 안내할 키가
         #   남지 않았다.  지키지 못할 약속을 화면에 적어 두지 않는다.
-        bar = QHBoxLayout()
-        bar.setSpacing(8)
-        bar.addStretch(1)
         cancel = NeonButton(i18n.KO.BTN_CANCEL, role="ghost")
-        cancel.setMinimumHeight(theme.PROFILE.control_h_lg)
         cancel.clicked.connect(self.reject)
         self._ok = NeonButton(i18n.KO.BTN_OK, role="primary")
-        self._ok.setMinimumHeight(theme.PROFILE.control_h_lg)
         self._ok.clicked.connect(self._on_ok)
-        bar.addWidget(cancel)
-        bar.addWidget(self._ok)
-        root.addLayout(bar)
+        root.addLayout(popup_layout.dialog_row(
+            QHBoxLayout(), cancels=[cancel], primaries=[self._ok]))
 
         # ★ Ctrl+A / Ctrl+D 단축키는 없앴다(사용자 결정) — [전체]/[해제] 버튼이
         #   같은 일을 하고 화면에 보인다.  숨은 키는 남기지 않는다.

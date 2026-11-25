@@ -45,6 +45,7 @@ from ..workers import thumb_plan      # 순수 로직(Qt·numpy 없음) — 무�
 from .pages.setup_page import SetupInput, SetupPage
 from .widgets.journey_rail import JourneyRail
 from .widgets.loading_overlay import LoadingOverlay
+from .widgets import kla_side_dialog
 from .widgets import sheet_host as sheets
 from .widgets.sheet_host import SheetHost
 from .widgets.window_controls import add_fullscreen_shortcut
@@ -1019,21 +1020,16 @@ class MainWindow(MultiValFlow, QMainWindow):
     def _ask_kla_side(self) -> Optional[str]:
         """매칭 실패 폴더가 있을 때 'KLA 가 어느 쪽인가?' 를 묻는다.
 
-        반환 "ref"/"val"/"both" 또는 None(KLA 아님 → 파일명/OCR 자동 매칭 건너뜀)."""
+        반환 "ref"/"val"/"both", None(KLA 아님 → 파일명/OCR 자동 매칭 건너뜀),
+        또는 ``kla_side_dialog.CANCEL``([취소]·Esc → 검증 시작을 멈춘다)."""
         # ★ 네 경우(기준/검증/둘다/KLA 아님)를 모두 유지한다 — 한쪽만 추가하지 말 것
-        #   (CLAUDE.md 규칙).  강조 문장은 인라인 HTML 대신 시트의 warn 라벨이 담당한다
-        #   (색을 f-string 으로 굽지 않는다).
-        # ★ `tiles=True` — 넷은 **대등한 선택지**다.  예전엔 '기준' 만 파란 주 버튼이라
-        #   "왜 저것만 강조돼 있지?" 로 읽혔다(사용자 지적).  정답이 정해져 있지 않으면
-        #   기본값을 세우지도 않는다(`default` 없음).  순서는 읽는 순서대로.
-        return sheets.choose(
-            self, i18n.KO.KLA_ASK_TITLE, i18n.KO.KLA_ASK_SIDE_BODY,
-            [("ref", i18n.KO.KLA_SIDE_REF, "option"),
-             ("val", i18n.KO.KLA_SIDE_VAL, "option"),
-             ("both", i18n.KO.KLA_SIDE_BOTH, "option"),
-             (None, i18n.KO.KLA_SIDE_NONE, "option")],
-            heading=i18n.KO.KLA_ASK_SIDE_HEADING, tiles=True,
-        )
+        #   (CLAUDE.md 규칙).  그림 카드 넷, 한 번 눌러 확정(현택님 2026-11-24, K1 A안).
+        dlg = kla_side_dialog.KlaSideDialog(self)
+        try:
+            sheets.run(dlg)
+            return dlg.answer
+        finally:
+            dlg.deleteLater()
 
     def _resolve_and_merge_kla(self, sr: ScanResult, kla_side: str,
                                on_done) -> None:
@@ -1438,7 +1434,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._stage = ""
         self._loading.hide_overlay()
         _LOG.warning("폴더 스캔 실패: %s", message)
-        sheets.warn(self, i18n.KO.APP_TITLE,
+        sheets.warn(self, i18n.KO.SCAN_FAIL_TITLE,
                     self._leg_message(
                         i18n.KO.WARN_SCAN_FAILED_FMT.format(detail=message)))
         if self._multi() and self._leg_idx > 0:
@@ -1483,6 +1479,10 @@ class MainWindow(MultiValFlow, QMainWindow):
             side = self._kla_machine_side(inp)
             if side is None:
                 side = self._ask_kla_side()
+                if side == kla_side_dialog.CANCEL:
+                    # [취소]·Esc — 'KLA 아님' 과 달리 진행하지 않고 설정 화면으로.
+                    self._cancel_scan()
+                    return
             if side:
                 # OCR 은 백그라운드 워커에서 → 끝나면 on_done 으로 다음 단계 진행.
                 self._resolve_and_merge_kla(
@@ -1509,7 +1509,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         common = sr.common_slot_names
         if not common:
             self._loading.hide_overlay()
-            sheets.warn(self, i18n.KO.APP_TITLE,
+            sheets.warn(self, i18n.KO.NO_SLOTS_TITLE,
                         self._leg_message(i18n.KO.WARN_NO_SLOTS))
             if self._multi() and self._leg_idx > 0:
                 self._multi_after_match_empty()      # 이 장비만 빼고 이어 간다
@@ -1821,7 +1821,7 @@ class MainWindow(MultiValFlow, QMainWindow):
             queue.extend(slot.ref_images)
         if not queue:
             wakelock.release()
-            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
+            sheets.warn(self, i18n.KO.NO_IMAGES_TITLE, i18n.KO.WARN_NO_IMAGES)
             return
         pool = self._build_val_pool_by_slot()
         self._calibrate_then(queue, pool, auto_mode=True)
@@ -2104,7 +2104,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         #   그걸 덮어써 **텅 빈 Stage 2** 에 사용자를 세워 둔다.
         if not queue:
             wakelock.release()
-            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
+            sheets.warn(self, i18n.KO.NO_IMAGES_TITLE, i18n.KO.WARN_NO_IMAGES)
             return
 
         # 매칭 대상 풀 = 같은 Slot 의 검증(val) 쪽 모든 사진
@@ -2225,7 +2225,11 @@ class MainWindow(MultiValFlow, QMainWindow):
         if self._input is None or self._scan is None or self._calib_next is None:
             return
         ref_dir, val_dir, auto_args = self._notch_guess
-        self._ask_notch(ref_dir, val_dir, res, auto_args)
+        if not self._ask_notch(ref_dir, val_dir, res, auto_args):
+            # [취소]·Esc·✕ — 매칭을 시작하지 않고 설정 화면으로(매칭 [중지] 와 같은 정리).
+            self._calib_next = None
+            self._on_match_cancelled()
+            return
         self._after_notch()
 
     @staticmethod
@@ -2237,8 +2241,11 @@ class MainWindow(MultiValFlow, QMainWindow):
         return not (notch.is_none(ref_dir) and res is not None
                     and res.direction is not None and notch.is_none(res.direction))
 
-    def _ask_notch(self, ref_dir: str, val_dir: str, res, auto_args=None) -> None:
-        """감지 결과로 `_notch_dirs`(매칭 전용)를 정한다 — 둘 다 아래가 아니면 창으로 확인받는다."""
+    def _ask_notch(self, ref_dir: str, val_dir: str, res, auto_args=None) -> bool:
+        """감지 결과로 `_notch_dirs`(매칭 전용)를 정한다 — 둘 다 아래가 아니면 창으로 확인받는다.
+
+        창에서 [취소]·Esc·✕ 면 False — 부르는 쪽이 매칭 시작을 접는다(예전엔 닫기 = 확인이었다)."""
+        from PyQt6.QtWidgets import QDialog
         from ..coords import notch
         from .widgets.notch_dialog import NotchDialog
         self._notch_dirs = ()
@@ -2246,7 +2253,9 @@ class MainWindow(MultiValFlow, QMainWindow):
             dlg = NotchDialog(self._input.ref_machine, self._input.val_machine,
                               ref_dir, val_dir, parent=self,
                               auto_args=auto_args, auto_result=res)
-            sheets.run(dlg)
+            if sheets.run(dlg) != QDialog.DialogCode.Accepted:
+                _LOG.info("Notch 방향 창 취소 — 매칭을 시작하지 않음")
+                return False
             dirs = dlg.dirs
         else:
             dirs = (notch.DEFAULT, notch.DEFAULT)
@@ -2255,6 +2264,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         if any(not notch.is_none(d) for _r, d in pairs):
             self._notch_dirs = pairs
             _LOG.info(i18n.KO.NOTCH_LOG_FMT.format(dirs=", ".join(f"{r}={d}" for r, d in pairs)))
+        return True
 
     def _on_calib_progress(self, done: int, total: int) -> None:
         self._loading.set_progress(done, total, i18n.KO.COORD_CAL_LOADING)
@@ -2549,7 +2559,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         if not sr.slots:
             self._loading.hide_overlay()
             wakelock.release()
-            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.EXTRACT_NONE_FOUND)
+            sheets.warn(self, i18n.KO.EXTRACT_SUMMARY_TITLE, i18n.KO.EXTRACT_NONE_FOUND)
             return
         # KLA 여부는 **묻지 않는다**(사용자 지적: "KLA인지 확인하는거 왜뜨냐").  매칭은
         # 짝이 안 맞을 때만 묻지만 예전 추출은 Camtek 폴더에도 매번 물었다.  호기가 K-n
@@ -2647,30 +2657,24 @@ class MainWindow(MultiValFlow, QMainWindow):
         from ..workers import exporter as ex
 
         from_select = self._stack.currentWidget() is self._select_page
-        # 저장 방식(Recipe 나누기)을 여기서 고른다(사용자 결정) — 마지막 선택이 기본.
+        # 저장 방식(Recipe 나누기)을 여기서 고른다(사용자 결정) — 방식마다 그림 한 줄,
+        # 강조 없이 대등하게(현택님 2026-11-24, K2 B안).
         layouts = [(ex.RECIPE_LAYOUT_SINGLE, i18n.KO.EXTRACT_SAVE_SINGLE),
                    (ex.RECIPE_LAYOUT_SHEETS, i18n.KO.EXTRACT_SAVE_SHEETS),
                    (ex.RECIPE_LAYOUT_COLUMNS, i18n.KO.EXTRACT_SAVE_COLUMNS)]
-        last = getattr(_prefs.load(), "extract_recipe_layout", ex.RECIPE_LAYOUT_SINGLE)
-        if last not in dict(layouts):
-            last = ex.RECIPE_LAYOUT_SINGLE
-        choice = sheets.choose(
-            self, i18n.KO.EXTRACT_SUMMARY_TITLE,
-            i18n.KO.EXTRACT_SUMMARY_FMT.format(wafers=len(result.slot_images),
-                                               n=len(result.unmatched_refs))
-            + "\n\n" + i18n.KO.EXTRACT_SUMMARY_LAYOUT_HINT,
-            [(key, label, "primary" if key == last else "ghost")
-             for key, label in layouts]
-            + [("back", i18n.KO.EXTRACT_SUMMARY_BACK if from_select
-                else i18n.KO.EXTRACT_SUMMARY_CANCEL, "ghost")],
-            default=last)
+        from .widgets import extract_save_dialog
+        dlg = extract_save_dialog.ExtractSaveDialog(
+            layouts, len(result.slot_images), len(result.unmatched_refs), parent=self)
+        try:
+            sheets.run(dlg)
+            choice = dlg.choice
+        finally:
+            dlg.deleteLater()
         dst = None
         if choice in dict(layouts) and self._working_xlsx is not None:
-            _prefs.patch(extract_recipe_layout=choice)
             from .widgets.save_name_dialog import SaveNameDialog
             dlg = SaveNameDialog(self._working_xlsx.name, self._working_xlsx.parent,
-                                 parent=self, body=i18n.KO.EXTRACT_SAVE_NAME_BODY,
-                                 fields=self._title_fields_now)
+                                 parent=self, fields=self._title_fields_now)
             if sheets.run(dlg) and dlg.chosen is not None:
                 dst = self._working_xlsx.with_name(dlg.chosen)
         if dst is None:
@@ -2731,7 +2735,7 @@ class MainWindow(MultiValFlow, QMainWindow):
 
         path = self._extract_saved
         choice = sheets.choose(
-            self, i18n.KO.APP_TITLE, i18n.KO.SAVE_SUCCESS_FMT.format(path=path),
+            self, i18n.KO.SAVE_SUCCESS_TITLE, i18n.KO.SAVE_SUCCESS_FMT.format(path=path),
             [("open_file", i18n.KO.BTN_OPEN_SAVED_FILE, "primary"),
              ("open_dir", i18n.KO.BTN_OPEN_SAVED_FOLDER, "ghost"),
              ("close", i18n.KO.MSG_BTN_CLOSE, "ghost")],
@@ -2749,7 +2753,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         body = (i18n.KO.SAVE_FAIL_LOCKED_FMT.format(error=msg) if locked
                 else i18n.KO.SAVE_FAIL_FMT.format(error=msg))
         choice = sheets.choose(
-            self, i18n.KO.APP_TITLE, body,
+            self, i18n.KO.SAVE_FAIL_TITLE, body,
             [("retry", i18n.KO.BTN_RETRY_SAVE, "primary"),
              ("close", i18n.KO.MSG_BTN_CLOSE, "ghost")],
             default="retry")

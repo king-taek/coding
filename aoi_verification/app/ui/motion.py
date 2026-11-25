@@ -145,7 +145,6 @@ DUR_PRESS_IN = 80        # 14 — 버튼이 눌려 들어가는 시간
 DUR_PRESS_OUT = 160      # 14 — 떼었을 때 돌아오는 시간
 PRESS_SCALE = 0.97
 PRESS_DARKEN = 0.10      # 14 — 눌렸을 때 덧칠하는 검정의 불투명도
-KNOB_STRETCH_PX = 9      # 15 — 노브가 움직이는 도중 길어지는 최대 길이
 DUR_TILE_TOGGLE = 140    # 16 — 슬롯 타일의 옛 모습이 새 모습으로 바뀌는 시간
 DUR_CHECK_POP = 180      # 16 — 체크 표시가 톡 나타남
 DUR_CHECK_OUT = 120      # 16 — 체크 표시가 들어감(가속)

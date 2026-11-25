@@ -28,8 +28,10 @@ from .. import theme
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
+from . import popup_layout
 from .no_wheel_slider import NoWheelSlider
 from .option_group import columns_for_width
+from . import photo_menu
 from . import sheet_host as sheets
 
 
@@ -149,9 +151,20 @@ class _SelectTile(QFrame):
                 motion.crossfade_from(self, before)
             self.toggled.emit(self.item, self._selected)
         elif event.button() == Qt.MouseButton.RightButton:
-            # 우클릭 → 크게 보기 (선택 상태는 건드리지 않음).
-            self.zoom_requested.emit(self.item)
+            # 우클릭 → 모든 사진과 같은 메뉴(``photo_menu``).  선택 상태는 건드리지 않는다.
+            if photo_menu.ask(self, event.globalPosition().toPoint(), self.item.path):
+                self.zoom_requested.emit(self.item)
+            event.accept()
+            return
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        # 더블클릭 = 크게 보기(현택님 2026-11-24).  첫 누름이 이미 선택을 토글했다 — 그대로 둔다.
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.zoom_requested.emit(self.item)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def set_selected(self, selected: bool) -> None:
         if selected == self._selected:
@@ -262,12 +275,6 @@ class BulkSelectDialog(QDialog):
         # ★ 제목을 본문에 그리지 않는다 — `setWindowTitle` 을 sheet_host 가 시트
         #   상단 chrome 에 이미 그리므로, 여기 또 그리면 같은 문장이 상하로 두 번
         #   보인다(image_info_dialog 가 같은 이유로 내부 표제를 안 그린다).
-        hint = QLabel(i18n.KO.BULK_SELECT_HINT, self)
-        hint.setProperty("role", "subtitle")
-        hint.setWordWrap(True)
-        hint.setStyleSheet(f"color: {theme.MUTE};")
-        root.addWidget(hint)
-
         # 상단 바: 선택 요약 + 사진 크기 슬라이더 -----------------------
         top = QHBoxLayout()
         top.setSpacing(10)
@@ -336,19 +343,15 @@ class BulkSelectDialog(QDialog):
             page_bar.addStretch(1)
             root.addLayout(page_bar)
 
-        # 하단 액션 바
-        bar = QHBoxLayout()
-        bar.setSpacing(8)
+        # 하단 액션 바 — 보조 버튼은 왼쪽, 오른쪽 아래는 [취소][…][주 액션]
+        # (현택님 2026-11-24, P6 A안).
         # 전체 선택 / 해제 보조 버튼 — 가독성 위해 대비 높은 role.
         # ★ 한 화면에 채운 강조 버튼은 하나뿐이어야 한다 — 주 액션(우측)과 시선이
         #   갈리지 않게 보조 버튼 둘 다 ghost 로 둔다(role="default" 는 QSS 에 없는 등급).
         self.btn_select_all = NeonButton(i18n.KO.BULK_SELECT_ALL, role="ghost")
         self.btn_select_all.clicked.connect(self._select_all)
-        bar.addWidget(self.btn_select_all)
         self.btn_clear = NeonButton(i18n.KO.BULK_DESELECT_ALL, role="ghost")
         self.btn_clear.clicked.connect(self._clear_selection)
-        bar.addWidget(self.btn_clear)
-        bar.addStretch(1)
 
         # 액션 버튼들 — sizeHint 보다 작게 줄어들지 않도록 최소 폭을 명시.
         self._action_buttons: list[NeonButton] = []
@@ -358,14 +361,17 @@ class BulkSelectDialog(QDialog):
                 lambda _c=False, a=action_id: self._fire(a)
             )
             btn.setMinimumWidth(max(btn.sizeHint().width(), 160))
-            bar.addWidget(btn)
             self._action_buttons.append(btn)
 
         # 닫기
         btn_close = NeonButton(i18n.KO.BTN_CANCEL, role="ghost")
         btn_close.clicked.connect(self.reject)
-        bar.addWidget(btn_close)
-        root.addLayout(bar)
+        acts = self._action_buttons
+        root.addLayout(popup_layout.dialog_row(
+            QHBoxLayout(), left=[self.btn_select_all, self.btn_clear],
+            cancels=[btn_close],
+            others=[b for b in acts if b.property("role") != "primary"],
+            primaries=[b for b in acts if b.property("role") == "primary"]))
 
     # ------------------------------------------------------------------
     def _render_page(self) -> None:

@@ -25,7 +25,6 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QDoubleSpinBox,  # noqa: E
 from aoi_verification.app.ui import theme                       # noqa: E402
 from aoi_verification.app.ui.widgets.neon_button import NeonButton  # noqa: E402
 from aoi_verification.app.ui.widgets.option_group import OptionGroup  # noqa: E402
-from aoi_verification.app.ui.widgets.switch_row import SwitchRow      # noqa: E402
 from aoi_verification.app.ui.pages.setup_page import SetupPage        # noqa: E402
 
 _QSS = (Path(__file__).resolve().parents[2] / "aoi_verification" / "app" / "ui"
@@ -187,15 +186,6 @@ def test_slider_and_help_button_targets(qapp):
         tb.deleteLater()
 
 
-def test_switch_row_target(qapp):
-    row = SwitchRow("구형 모드", checked=False)
-    try:
-        # 행 전체가 클릭영역이므로 행 높이가 실제 타깃이다.
-        assert _sized(row, qapp)[0] >= MIN_TARGET
-    finally:
-        row.deleteLater()
-
-
 # ── 2.4.7 포커스 가시성 — 선언이 아니라 **렌더된 픽셀**로 증명 ─────────────
 def _focus_pixels(qapp, make, pick=None, ring: str = "focus") -> bool:
     """포커스 색 픽셀이 실제로 그려졌는지 — QSS 에 링을 '선언'한 것만으로는 증명이 안 된다.
@@ -255,15 +245,6 @@ def test_focus_ring_actually_renders(qapp, make, label, ring):
     `QPushButton:focus` 를 덮어쓰고 있었다."""
     assert _focus_pixels(qapp, make, ring=ring), \
         f"{label}: 포커스 링({ring})이 실제로 렌더되지 않았다"
-
-
-def test_toggle_switch_focus_ring_renders(qapp):
-    """커스텀 페인트 위젯 — QSS 가 아니라 paintEvent 가 링을 그린다."""
-    assert _focus_pixels(
-        qapp,
-        lambda p: SwitchRow("구형 모드", checked=False, parent=p),
-        pick=lambda row: row.switch, ring="on_accent",
-    ), "스위치 포커스 링 미렌더"
 
 
 def test_slider_focus_ring_renders(qapp):
@@ -406,28 +387,6 @@ def test_warn_is_a_distinct_channel_from_body_ink():
         assert r >= 5.0, f"warn on {surface} = {r:.2f}"
 
 
-def test_toggle_switch_focus_ring_contrasts_with_its_track():
-    """★ 커스텀 페인트 스위치 — ON 이면 트랙이 `accent` 라 `focus` 링이 1.23:1 로 묻힌다.
-
-    채운 primary 버튼에서 고친 것과 **같은 함정**이 여기 남아 있었고, 픽셀 테스트가
-    `checked=False` 만 검사해 통과했다.  두 상태를 모두 검사한다."""
-    c = theme.COLORS
-    # OFF 트랙 = line_strong, ON 트랙 = accent.  각 상태의 링 색이 그 위에서 보여야 한다.
-    # 링은 트랙 위에 그려진다 — 하나의 링 색(on_accent)이 **두 트랙 색** 모두와
-    # 대비되어야 한다.
-    assert _ratio(c["on_accent"], c["line_strong"]) >= 3.0, "OFF 링이 트랙에 묻힌다"
-    assert _ratio(c["on_accent"], c["accent"]) >= 3.0, "ON 링이 트랙에 묻힌다"
-
-
-def test_toggle_switch_focus_ring_renders_when_on(qapp):
-    """ON 상태에서도 링이 실제로 렌더되는지 — 이전 테스트는 OFF 만 봤다."""
-    assert _focus_pixels(
-        qapp,
-        lambda p: SwitchRow("구형 모드", checked=True, parent=p),
-        pick=lambda row: row.switch, ring="on_accent",
-    ), "ON 스위치 포커스 링 미렌더"
-
-
 def test_action_grade_controls_actually_render_at_44(qapp):
     """★ QSS `min-height` 는 `setMinimumHeight()` 를 덮어쓴다.
 
@@ -505,3 +464,12 @@ def test_segment_has_its_own_focus_and_disabled_rules():
     for state in (":focus", ":disabled", ":checked", ":hover"):
         sel = f'QPushButton[role="segment"]{state}'
         assert sel in _QSS, f"{sel} 규칙이 없다"
+
+
+def test_setup_checkbox_target(qapp):
+    """켜기/끄기는 체크박스(F10) — 상자 + 글자 줄이 클릭영역이라 줄 높이가 타깃이다."""
+    box = QCheckBox("구형 모드")
+    try:
+        assert _sized(box, qapp)[0] >= MIN_TARGET
+    finally:
+        box.deleteLater()

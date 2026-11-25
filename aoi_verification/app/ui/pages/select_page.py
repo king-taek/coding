@@ -33,6 +33,7 @@ from ... import config, i18n
 from .. import theme
 from ..deferred import call_later
 from ..teardown import tolerate_teardown
+from ..undo_keys import bind_undo
 from ...models.slot import ImageItem
 from ...utils import prefs as _prefs
 from .progress_row import ProgressRowMixin
@@ -76,7 +77,6 @@ class _SidePanel(QFrame):
 
     def __init__(self, name: str, title: str,
                  *, vertical_scroll: bool = True,
-                 title_tooltip: str = "",
                  actions: Optional[list[tuple[str, str, str]]] = None,
                  columns: int = 4,
                  tile_px: Optional[int] = None,
@@ -102,16 +102,13 @@ class _SidePanel(QFrame):
         ttl = QLabel(title, self)
         ttl.setProperty("role", "paneTitle")
         self._title_label = ttl
-        self._empty_hint: Optional[str] = None     # None = i18n 기본(PANEL_*_EMPTY)
         # ★ `role=paneTitle` 은 wordWrap 도 elide 도 없어 **말줄임표 없이 하드 클립**된다 —
         #   1024 폭에서 옛 제목("검증 대상 (검증하기로 한 사진들)")이 189px 을 요구하는데
         #   자리는 135px 이라 "검증 대상 (검증하기로 " 까지만 보였다.  제목을 짧게 줄이고
-        #   (i18n) 부연은 툴팁으로 내렸다.  **여기에 elide 를 넣어 덮지 않는다** — 넣으면
+        #   (i18n) 부연은 지웠다(설명문 금지, 2026-11-24).  **여기에 elide 를 넣어 덮지 않는다** — 넣으면
         #   실측 하네스도 테스트도 '잘림 없음' 으로 읽혀 다음에 제목이 길어져도 아무도
         #   모른다.  대신 회귀 가드가 1024·1280 에서 **온전한 제목**이 들어가는지 잰다
         #   (`dev/tests/test_pane_title_fits.py`).
-        if title_tooltip:
-            ttl.setToolTip(title_tooltip)
         head.addWidget(ttl)
         head.addStretch(1)
 
@@ -210,7 +207,6 @@ class _SidePanel(QFrame):
             self._sections[slot] = sec
             self._host_layout.addWidget(sec)
         self._host_layout.addStretch(1)
-        self._refresh_empty_hint()
         self._refresh_inline_buttons()
 
     # ------------------------------------------------------------------
@@ -228,7 +224,6 @@ class _SidePanel(QFrame):
             if sec is not None:
                 self._host_layout.removeWidget(sec)
                 sec.deleteLater()
-            self._refresh_empty_hint()
             return
 
         self._cached[slot] = items
@@ -261,36 +256,11 @@ class _SidePanel(QFrame):
         ordered = sorted(self._sections.keys())
         idx = ordered.index(slot)
         self._host_layout.insertWidget(idx, sec)
-        self._refresh_empty_hint()
 
     def cached(self) -> dict[str, list[ImageItem]]:
         return {k: list(v) for k, v in self._cached.items()}
 
     # ------------------------------------------------------------------
-    def _refresh_empty_hint(self) -> None:
-        """비어 있을 때 이 칸의 용도를 한 줄로 알려 준다.
-
-        ★ 라벨을 멤버로 들고 있으면 `update_data` 가 `_host_layout` 을 통째로 비울 때
-        함께 파괴돼 죽은 참조가 남는다 — 매번 찾아 쓰고, 없으면 새로 만든다."""
-        hint_text = (self._empty_hint if self._empty_hint is not None
-                     else getattr(i18n.KO, f"PANEL_{self._name.upper()}_EMPTY", ""))
-        if not hint_text:
-            return
-        # ★ `deleteLater` 로 지운 위젯은 이벤트 루프가 돌기 전까지 `findChildren` 에
-        #   계속 잡힌다 — 안내가 두 장 겹쳐 보였다.  즉시 부모에서 떼어 낸다.
-        for w in list(self._host_layout.parentWidget().findChildren(QLabel)):
-            if w.property("role") == "emptyHint":
-                self._host_layout.removeWidget(w)
-                w.setParent(None)
-                w.deleteLater()
-        if self._sections:
-            return
-        lab = QLabel(hint_text, self._host_layout.parentWidget())
-        lab.setProperty("role", "emptyHint")
-        lab.setWordWrap(True)
-        lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._host_layout.insertWidget(0, lab)
-
     def remove_item(self, slot: str, item: ImageItem) -> bool:
         """사진 **한 장**만 패널에서 지운다 — 슬롯 전체를 다시 그리지 않는다.
 
@@ -311,7 +281,6 @@ class _SidePanel(QFrame):
             self._sections.pop(slot, None)
             self._host_layout.removeWidget(sec)
             sec.deleteLater()
-            self._refresh_empty_hint()
         self._refresh_inline_buttons()
         return True
 
@@ -335,15 +304,13 @@ class _SidePanel(QFrame):
         """선택 표시를 지운다 — 액션 실행 뒤/화면을 떠날 때 스테일 테두리 방지."""
         self._set_all_inline(False)
 
-    def set_texts(self, title: str, tooltip: str,
-                  labels: dict[str, str], empty_hint: Optional[str]) -> None:
-        """제목·액션 라벨·빈 칸 안내를 바꿔 끼운다(Defect 추출 ↔ 매칭).
+    def set_texts(self, title: str, labels: dict[str, str]) -> None:
+        """제목·액션 라벨을 바꿔 끼운다(Defect 추출 ↔ 매칭).
 
         ``labels`` 는 action_id → 라벨(일괄 선택 팝업)과 ``"inline:<action_id>"`` →
         개수 서식(인라인 버튼)이다.  없는 키는 그대로 둔다."""
         self._title = title
         self._title_label.setText(title)
-        self._title_label.setToolTip(tooltip)
         self._actions = [(a, labels.get(a, lab), role)
                          for a, lab, role in self._actions]
         for btn in self._inline_buttons:
@@ -351,8 +318,6 @@ class _SidePanel(QFrame):
             if fmt:
                 btn.setProperty("labelFmt", fmt)
         self._refresh_inline_buttons()
-        self._empty_hint = empty_hint
-        self._refresh_empty_hint()
 
     def _refresh_inline_buttons(self) -> None:
         n = len(self.inline_selected_items())
@@ -489,7 +454,6 @@ class SelectPage(ProgressRowMixin, QWidget):
         side_tile = config.Sizing.SIDE_TILE_PX      # 사이드 패널 타일(=120, D2)
         self.left_panel = _SidePanel(
             self.PANEL_LEFT, i18n.KO.PANEL_LEFT_CANDIDATES,
-            title_tooltip=i18n.KO.PANEL_LEFT_CANDIDATES_TOOLTIP,
             actions=[
                 # 가운데 버튼 줄과 **같은 순서**(제외 왼쪽 · 검증 오른쪽)로 둔다 —
                 # 한 화면에서 두 곳의 순서가 다르면 손이 헷갈린다.
@@ -499,12 +463,12 @@ class SelectPage(ProgressRowMixin, QWidget):
             # 타일 절반 크기 → 같은 폭에 3 열 그리드 깔리도록.
             columns=3,
             tile_px=side_tile,
-            inline_select=True,        # 타일 클릭=선택 / 더블클릭=해제 (Ctrl+A=전체)
+            inline_select=True,        # 타일 클릭=선택 / 더블클릭=크게 보기 (Ctrl+A=전체)
         )
         self.left_panel.selection_action.connect(self._on_batch_action)
         self.left_panel.tile_clicked.connect(self._on_tile_click)
         self.left_panel.plus_clicked.connect(self._on_plus_click)
-        # 후보 패널은 확대(줌) 모드를 두지 않는다 — 더블클릭은 선택 해제용.
+        # 후보 패널은 확대(줌) 모드를 두지 않는다 — 크게 보기는 더블클릭 · 우클릭 메뉴.
         # 3 col × (120 thumb + 14 padding) + spacing + 패널 padding 을 담을 최소
         # 너비.  좁은 창에선 세로 스택으로 reflow 되어 무관.
         self.left_panel.setMinimumWidth(220)
@@ -556,21 +520,22 @@ class SelectPage(ProgressRowMixin, QWidget):
         size_row.addSpacing(12)
         crop_label = QLabel(i18n.KO.CENTER_CROP_LABEL, center_card)
         crop_label.setProperty("role", "muted")
-        crop_label.setToolTip(i18n.KO.CENTER_CROP_TOOLTIP)
         _crop_now = str(getattr(_prefs.load(), "select_center_crop", "100"))
         self.crop_group = OptionGroup(
             [("100", i18n.KO.CENTER_CROP_FULL), ("50", "50%"), ("30", "30%")],
             current=_crop_now if _crop_now in ("100", "50", "30") else "100",
             role="segment", min_tile_w=56, fixed_cols=3, activate_on_arrow=False,
             parent=center_card)
-        self.crop_group.setToolTip(i18n.KO.CENTER_CROP_TOOLTIP)
         self.crop_group.selection_changed.connect(self._on_crop_changed)
         size_row.addWidget(crop_label)
         size_row.addWidget(self.crop_group)
 
         # 이미지 (스크롤 영역) -----------------------------------------
         self.center_img = ScalableImage(center_card)
-        self.center_img.installEventFilter(self)   # 사진이 그려졌는지 = 입력 잠금 해제
+        self.center_img.installEventFilter(self)   # 사진이 그려졌는지 = 입력 잠금 해제 · 누르면 크게
+        self.center_img.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.center_img.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.center_img.customContextMenuRequested.connect(self._on_center_menu)
         self.center_img.set_center_crop(int(self.crop_group.current_key() or "100") / 100)
         self._img_scroll = QScrollArea(center_card)
         self._img_scroll.setWidgetResizable(False)
@@ -613,7 +578,6 @@ class SelectPage(ProgressRowMixin, QWidget):
         # RIGHT — 좌측과 동일한 절반 타일 크기 + 3열 그리드 (사용자 요청).
         self.right_panel = _SidePanel(
             self.PANEL_RIGHT, i18n.KO.PANEL_RIGHT_TARGETS,
-            title_tooltip=i18n.KO.PANEL_RIGHT_TARGETS_TOOLTIP,
             actions=[
                 ("to_exclude", i18n.KO.BTN_MOVE_TO_EXCLUDE, "warn"),
                 ("recenter", i18n.KO.BTN_BACK_TO_CENTER, "ghost"),
@@ -648,8 +612,7 @@ class SelectPage(ProgressRowMixin, QWidget):
             sc = QShortcut(QKeySequence(key), self,
                            activated=lambda a=action: self._decide_input(a))
             sc.setAutoRepeat(False)
-        QShortcut(QKeySequence("Z"), self, activated=self._undo)
-        QShortcut(QKeySequence.StandardKey.Undo, self, activated=self._undo)   # Ctrl+Z
+        bind_undo(self, self._undo)                                        # Z · Ctrl+Z
         # Ctrl+A — 좌측 후보 패널 전체 선택 (#2).
         QShortcut(QKeySequence.StandardKey.SelectAll, self,
                   activated=self._select_all_candidates)
@@ -671,7 +634,6 @@ class SelectPage(ProgressRowMixin, QWidget):
         label = QLabel(i18n.KO.SLOT_JUMP_LABEL, host)
         label.setProperty("role", "muted")
         self.slot_jump = QComboBox(host)
-        self.slot_jump.setToolTip(i18n.KO.SLOT_JUMP_TOOLTIP)
         self.slot_jump.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.slot_jump.setMinimumContentsLength(8)
@@ -816,13 +778,11 @@ class SelectPage(ProgressRowMixin, QWidget):
         self._extract = bool(on)
         t = self._tx
         self.left_panel.set_texts(
-            t("PANEL_LEFT_CANDIDATES"), t("PANEL_LEFT_CANDIDATES_TOOLTIP"),
+            t("PANEL_LEFT_CANDIDATES"),
             {"batch_exclude": t("BTN_BATCH_EXCLUDE"),
              "batch_verify": t("BTN_BATCH_VERIFY"),
-             "inline:batch_verify": t("BTN_INLINE_VERIFY_FMT")}, None)
-        self.right_panel.set_texts(
-            t("PANEL_RIGHT_TARGETS"), t("PANEL_RIGHT_TARGETS_TOOLTIP"), {},
-            t("PANEL_RIGHT_EMPTY"))
+             "inline:batch_verify": t("BTN_INLINE_VERIFY_FMT")})
+        self.right_panel.set_texts(t("PANEL_RIGHT_TARGETS"), {})
         self._center_title.setText(t("PANEL_CENTER_DECIDE"))
         self.btn_verify.setText("✓  " + t("BTN_VERIFY"))
         for b in (self.btn_verify, self.btn_exclude, self.btn_undo):
@@ -1063,7 +1023,26 @@ class SelectPage(ProgressRowMixin, QWidget):
     def eventFilter(self, obj, event):                  # noqa: N802
         if obj is self.center_img and event.type() == QEvent.Type.Paint:
             self._mark_shown()
+        elif (obj is self.center_img
+              and event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick)
+              and event.button() == Qt.MouseButton.LeftButton and self._current is not None):
+            self._open_center_large()       # 사진을 누르면(더블클릭도) 크게(현택님) — 결정은 버튼·방향키만
+            return True
         return super().eventFilter(obj, event)
+
+    def _on_center_menu(self, pos) -> None:
+        """가운데 사진 우클릭 — 모든 사진과 같은 메뉴(``photo_menu``)."""
+        if self._current is None:
+            return
+        from ..widgets import photo_menu
+        if photo_menu.ask(self.center_img, self.center_img.mapToGlobal(pos), self._current.path):
+            self._open_center_large()
+
+    def _open_center_large(self) -> None:
+        from ..widgets.zoom_window import FullscreenViewer
+        viewer = FullscreenViewer(self._current.path, self)
+        sheets.run(viewer, full_bleed=True)
+        viewer.deleteLater()
 
     def _decide_input(self, action: str) -> None:
         """사용자 입력(→/←·검증/제외 버튼)에서 오는 결정 — 사진이 보인 뒤에만 받는다."""

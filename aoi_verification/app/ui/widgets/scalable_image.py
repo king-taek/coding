@@ -69,6 +69,30 @@ class ScalableImage(QLabel):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+    def enable_photo_mouse(self) -> None:
+        """더블클릭 = 크게 보기 · 우클릭 = 모든 사진과 같은 메뉴(``photo_menu``, 현택님 2026-11-24).
+
+        눌러서 하는 일이 따로 있는 자리(후보 선별 가운데 사진)는 켜지 않고 자기가 처리한다."""
+        self._photo_mouse = True
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_photo_menu)
+
+    def _on_photo_menu(self, pos) -> None:
+        if self._path is None:
+            return
+        from . import photo_menu
+        if photo_menu.ask(self, self.mapToGlobal(pos), self._path):
+            photo_menu.open_large(self, self._path)
+
+    def mouseDoubleClickEvent(self, e):  # noqa: N802
+        if (getattr(self, "_photo_mouse", False) and self._path is not None
+                and e.button() == Qt.MouseButton.LeftButton):
+            from . import photo_menu
+            e.accept()
+            photo_menu.open_large(self, self._path)
+            return
+        super().mouseDoubleClickEvent(e)
+
     def set_center_crop(self, frac: float) -> None:
         """사진 가운데 ``frac``(0~1) 만 잘라 보인다 — 결함은 사진 정중앙에 있다.
 

@@ -379,10 +379,10 @@ class ExcelExporter(QThread):
         # row 2 의 ‘AOI-N’ 헤더를 실제 호기 번호로 교체 (#3).
         ref_label = _machine_label(self._result.ref_machine)
         val_label = _machine_label(self._result.val_machine)
-        if ref_label:
-            ws[f"{COL_REF}{HEADER_AOI_ROW}"] = ref_label
-        if val_label:
-            ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = val_label
+        # 호기를 비워 두면 양식의 자리표시('AOI-17' · 'AOI-23')를 남기지 않고 비운다 —
+        # 남기면 다른 장비 번호가 결과에 찍히고, 이전 결과 엑셀 읽기가 그 번호를 호기로 가져온다.
+        ws[f"{COL_REF}{HEADER_AOI_ROW}"] = ref_label or None
+        ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = val_label or None
         if self._extract:
             # 추출은 장비가 하나다 — D열은 두 번째 장비가 아니라 C열 사진의 정보 칸.
             ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = i18n.KO.EXTRACT_INFO_HEADER
@@ -500,7 +500,7 @@ class ExcelExporter(QThread):
         name = name.strip().strip("'").strip() or "결과"   # 앞뒤 ' 는 시트명으로 못 쓴다
         if name.casefold() == SHEET_FULL_NAME.casefold():   # 2번째 시트와 충돌 방지(대소문자 무관)
             name = name + " "
-        return name[:31]
+        return _fit_sheet_title(name, (self._result.ref_machine, self._result.val_machine))
 
     def _build_summary_sheet(self, wb, rows_input: list, *, index: int = 0) -> None:
         """요약 시트 — A~D 열만, 전체 데이터."""
@@ -1078,7 +1078,7 @@ class ExcelExporter(QThread):
                 self._write_info_cell(ws, info_col, row, u.path,
                                       unmatched_note=not self._extract,
                                       note=(i18n.KO.NOTE_ONLY_VAL if on_val
-                                            else "미매칭"))
+                                            else i18n.KO.NOTE_UNMATCHED))
                 # 미매칭·추출 행의 Scan 은 **그 사진의 것**만, 그 장비의 Scan 열에 둔다
                 # (열이 없는 쪽 — KLA 등 — 은 건너뛴다).  짝 사진 칸은 비워 둔다.
                 side = "val" if on_val else "ref"
@@ -1297,7 +1297,7 @@ class ExcelExporter(QThread):
         self._prog_done = base + placed
 
     def _write_info_cell(self, ws, col: str, row: int, path, *,
-                         unmatched_note: bool, note: str = "미매칭") -> None:
+                         unmatched_note: bool, note: str = "") -> None:
         """미매칭 행의 정보 칸 — 파일명 + 계측·좌표 줄을 **보이는 글자**로.
 
         Defect 추출의 D열(정보)과 Recipe 나란히 배치의 정보 열도 같은 모양이다
@@ -1335,7 +1335,7 @@ class ExcelExporter(QThread):
             horizontal="center", vertical="center", wrap_text=True,
         )
         if unmatched_note:
-            cell_val.comment = Comment(note, "AOI")
+            cell_val.comment = Comment(note or i18n.KO.NOTE_UNMATCHED, "AOI")
 
     # ------------------------------------------------------------------
     def _write_caption(self, ws, col: str, row: int, src) -> None:
@@ -1529,6 +1529,22 @@ class ExcelExporter(QThread):
             ws.cell(row=r, column=1, value="검증 전용")
             ws.cell(row=r, column=2, value=s)
             r += 1
+        # 다른 시트와 같은 모양(현택님 2026-11-25 Q4): 남색 머리 · 흰 굵은 글자 · 가는 격자 ·
+        # 가운데 정렬 · 열 너비 15 · 머리 줄 고정.  값은 그대로다.
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+        center = Alignment(horizontal="center", vertical="center")
+        side = Side(style="thin", color=BODY_GRID_COLOR)
+        box = Border(left=side, right=side, top=side, bottom=side)
+        for row in ws.iter_rows(min_row=1, max_row=r - 1, max_col=2):
+            for cell in row:
+                cell.alignment = center
+                cell.border = box
+                if cell.row == 1:
+                    cell.font = Font(name=TEMPLATE_FONT, bold=True, color="FFFFFFFF")
+                    cell.fill = PatternFill("solid", fgColor=HEADER_NAVY)
+        for col in "AB":
+            ws.column_dimensions[col].width = COL_WIDTHS["B"]
+        ws.freeze_panes = "A2"
 
 
 # ---------------------------------------------------------------------------
@@ -1655,6 +1671,42 @@ def _replace_result(tmp: Path, dst: Path) -> None:
         os.replace(tmp, dst)
     except PermissionError as exc:
         raise PermissionError(errno.EACCES, "Permission denied", str(dst)) from exc
+
+
+_SHEET_MAX = 31                                    # 엑셀 시트 이름 길이 상한
+_RE_SHEET_DATE = re.compile(r"\d{6,}")            # 날짜 · 시각 토큰(20261124 · 153012)
+
+
+def _fit_sheet_title(name: str, machines=()) -> str:
+    """긴 이름을 31자에 맞춘다 — **토큰 경계에서만** 자르고, 호기 · 날짜 토큰은 남긴다(SM-E2d).
+
+    예전엔 앞 31자를 그대로 잘라 ``…검증(AOI-2`` 처럼 호기 번호가 반쯤 잘렸다.
+    토큰 = 공백 · ``_`` 로 나뉜 조각.  호기(``machines`` 의 이름이 들어 있는 토큰)와 날짜 ·
+    시각(숫자 6자리 이상)이 아닌 토큰을 **앞에서부터** 하나씩 빼서 호기 · 날짜가 앞으로
+    오게 한다.  그래도 길면 남은 토큰도 앞에서부터 빼고, 토큰 하나가 31자를 넘을 때만 자른다.
+    파일 이름은 바꾸지 않는다 — 시트 이름만이다."""
+    if len(name) <= _SHEET_MAX:
+        return name
+    keys = [m.strip().casefold() for m in machines if m and m.strip()]
+    parts = re.split(r"([\s_]+)", name)             # [토큰, 구분자, 토큰, …]
+    toks = parts[0::2]
+    seps = parts[1::2] + [""]
+
+    def is_key(t: str) -> bool:
+        return bool(_RE_SHEET_DATE.search(t)) or any(k in t.casefold() for k in keys)
+
+    def joined(idx) -> str:
+        idx = list(idx)
+        return "".join(toks[i] + (seps[i] if i != idx[-1] else "") for i in idx).strip(" _'")
+
+    alive = [i for i, t in enumerate(toks) if t]
+    for keep_keys in (True, False):
+        while len(alive) > 1 and len(joined(alive)) > _SHEET_MAX:
+            drop = next((i for i in alive if not (keep_keys and is_key(toks[i]))), None)
+            if drop is None:
+                break
+            alive.remove(drop)
+    return joined(alive)[:_SHEET_MAX].rstrip(" _'")
 
 
 def _safe_sheet_title(name: str, taken: set) -> str:

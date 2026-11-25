@@ -107,16 +107,19 @@ def test_setup_extract_label(page):
     assert ov.text == K.DROP_PILL_ADD_FOLDER and ov._target is page.ref_group and ov.ok
 
 
-def test_image_info_rejects_folder_accepts_image(styled_qapp):
+def test_image_info_accepts_photos_and_folders_only(styled_qapp):
+    """사진 정보는 사진 · 폴더(넘겨 보기)를 받고 그 밖의 파일은 거절한다(현택님 2026-11-24)."""
     from aoi_verification.app.ui.widgets.image_info_dialog import ImageInfoDialog
     d = ImageInfoDialog()
     d.resize(900, 600)
     d.show()
     QApplication.processEvents()
-    ev, _m = _send(d, "move", ["/nope/LOT_A"])
+    ev, _m = _send(d, "move", ["/nope/a.txt"])
     ov = _ov(d)
-    assert ov.isVisible() and not ov.ok and ov.text == K.DROP_PILL_ONLY_IMAGE
+    assert ov.isVisible() and not ov.ok and ov.text == K.DROP_PILL_ONLY_FOLDER_PHOTO
     assert not ev.isAccepted()
+    ev, _m = _send(d, "move", ["/nope/LOT_A"])
+    assert ov.ok and ov.text == K.DROP_PILL_OPEN_IMAGE and ev.isAccepted()
     ev, _m = _send(d, "move", ["/nope/a.jpg"])
     assert ov.ok and ov.text == K.DROP_PILL_OPEN_IMAGE and ev.isAccepted()
     _send(d, "leave", [])

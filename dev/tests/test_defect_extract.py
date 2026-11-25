@@ -384,18 +384,25 @@ def test_end_to_end_select_then_save(qapp, tmp_path, monkeypatch):
         keys = [o[0] for o in options]
         choices.append((title, text, keys))
         assert "kla" not in keys              # KLA 여부는 묻지 않는다
-        if "single" in keys:
-            return "single"                   # 요약 창 — 한 시트로 저장
         return "close"                        # 저장 완료 → 닫기
 
     monkeypatch.setattr(mw.sheets, "choose", fake_choose)
+    summaries: list = []
 
     class _Dlg:
         def __init__(self, name, _folder, parent=None, **_kw):
             self.chosen = name
 
     monkeypatch.setattr(save_name_dialog, "SaveNameDialog", _Dlg)
-    monkeypatch.setattr(mw.sheets, "run", lambda dlg, **k: True)
+
+    def fake_run(dlg, **_k):
+        from aoi_verification.app.ui.widgets.extract_save_dialog import ExtractSaveDialog
+        if isinstance(dlg, ExtractSaveDialog):    # 요약 창 — 한 시트로 저장
+            summaries.append(_label_texts(dlg))
+            dlg.rows["single"].click()
+        return True
+
+    monkeypatch.setattr(mw.sheets, "run", fake_run)
     win.show()                                # 선별은 보이는 화면에서만 결정을 받는다
     try:
         win._on_start(SetupInput(mode="single", ref_root=lot, val_root=lot,
@@ -410,8 +417,7 @@ def test_end_to_end_select_then_save(qapp, tmp_path, monkeypatch):
             assert _pump_until(lambda: page._current is not cur
                                or not page.get_state().queue, 5)
         assert _pump_until(lambda: win._stack.currentWidget() is win._setup_page)
-        summary = [c for c in choices if "single" in c[2]]
-        assert summary and "2" in summary[0][1]       # defect 2건
+        assert summaries and any("2" in t for t in summaries[0])   # defect 2건
         saved = list(results.glob("*추출*.xlsx"))
         assert len(saved) == 1
         ws = load_workbook(str(saved[0]))[saved[0].stem[:31]]
@@ -574,27 +580,38 @@ def test_export_logs_stage_times(qapp, tmp_path, caplog):
     assert "저장 소요 [시트" in text and "저장 소요 [파일 쓰기]" in text
 
 
-def test_summary_offers_layouts_and_remembers(qapp, tmp_path, monkeypatch):
-    """요약 창에서 방식을 고르고, 마지막 선택이 다음 기본이 된다."""
+def _label_texts(w):
+    from PyQt6.QtWidgets import QLabel
+    return [lb.text() for lb in w.findChildren(QLabel) if lb.text()]
+
+
+def test_summary_offers_layouts_as_picture_rows(qapp, tmp_path, monkeypatch):
+    """요약 창(K2 B안): 방식마다 그림 줄 셋, 강조 없음, 설명문 없음, 왼쪽 아래 [돌아가기]."""
+    from aoi_verification.app import i18n
     from aoi_verification.app.ui import main_window as mw
     from aoi_verification.app.ui.pages.setup_page import SetupInput
+    from aoi_verification.app.ui.widgets import extract_save_dialog as esd
     from aoi_verification.app.ui.widgets import save_name_dialog
-    from aoi_verification.app.utils import prefs
     from aoi_verification.app.workers import exporter as ex
 
     monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async",
                         lambda self: None)
     win = mw.MainWindow()
     seen, started = [], []
-    monkeypatch.setattr(mw.sheets, "choose",
-                        lambda *a, **k: (seen.append((a[3], k.get("default"))),
-                                         ex.RECIPE_LAYOUT_COLUMNS)[1])
 
     class _Dlg:
         def __init__(self, name, _folder, parent=None, **_kw):
             self.chosen = name
     monkeypatch.setattr(save_name_dialog, "SaveNameDialog", _Dlg)
-    monkeypatch.setattr(mw.sheets, "run", lambda dlg, **k: True)
+
+    def fake_run(dlg, **_k):
+        if isinstance(dlg, esd.ExtractSaveDialog):
+            seen.append((list(dlg.rows), [r.property("role") for r in dlg.rows.values()],
+                         _label_texts(dlg)))
+            dlg.rows[ex.RECIPE_LAYOUT_COLUMNS].click()
+        return True
+
+    monkeypatch.setattr(mw.sheets, "run", fake_run)
     monkeypatch.setattr(mw.MainWindow, "_start_extract_export",
                         lambda self, r, d, layout: started.append(layout))
     try:
@@ -604,16 +621,66 @@ def test_summary_offers_layouts_and_remembers(qapp, tmp_path, monkeypatch):
         win._working_xlsx = tmp_path / "x.xlsx"
         item = mw.ImageItem("S1", _touch_jpeg(tmp_path / "S1" / "a.jpg"), "ref")
         win._finish_extract({"S1": [item]})
-        keys = [o[0] for o in seen[0][0]]
-        assert keys[:3] == [ex.RECIPE_LAYOUT_SINGLE, ex.RECIPE_LAYOUT_SHEETS,
-                            ex.RECIPE_LAYOUT_COLUMNS]
-        assert seen[0][1] == ex.RECIPE_LAYOUT_SINGLE          # 처음엔 한 시트
+        keys, roles, texts = seen[0]
+        assert keys == [ex.RECIPE_LAYOUT_SINGLE, ex.RECIPE_LAYOUT_SHEETS,
+                        ex.RECIPE_LAYOUT_COLUMNS]
+        assert set(roles) == {"option"}, "한 줄만 파랗게 강조됐다"
+        assert texts == [i18n.KO.EXTRACT_SUMMARY_TITLE,
+                         i18n.KO.EXTRACT_SUMMARY_FMT.format(wafers=1, n=1)]
         assert started == [ex.RECIPE_LAYOUT_COLUMNS]
-        assert prefs.load().extract_recipe_layout == ex.RECIPE_LAYOUT_COLUMNS
-        win._finish_extract({"S1": [item]})
-        assert seen[1][1] == ex.RECIPE_LAYOUT_COLUMNS         # 마지막 선택이 기본
     finally:
         win.close()
+
+
+@pytest.mark.parametrize("how", ["back", "esc", "enter"])
+def test_extract_save_dialog_back_esc_enter(qapp, how):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QDialog
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui import theme
+    from aoi_verification.app.ui.widgets import extract_save_dialog as esd
+
+    K = i18n.KO
+    d = esd.ExtractSaveDialog([("single", K.EXTRACT_SAVE_SINGLE),
+                               ("sheets", K.EXTRACT_SAVE_SHEETS),
+                               ("columns", K.EXTRACT_SAVE_COLUMNS)], 3, 12)
+    try:
+        d.resize(460, 340)
+        d.show()
+        qapp.processEvents()
+        back = d.back_btn
+        assert back.text() == K.EXTRACT_SUMMARY_BACK
+        assert back.height() == theme.PROFILE.control_h_lg
+        first = d.rows["single"]
+        assert back.x() <= first.x() + 2 and back.y() > d.rows["columns"].y(), \
+            "[돌아가기] 가 왼쪽 아래가 아니다"
+        assert not any(r.autoDefault() or r.isDefault() for r in d.rows.values())
+        if how == "back":
+            back.click()
+        elif how == "esc":
+            QTest.keyClick(d, Qt.Key.Key_Escape)
+        else:
+            first.setFocus()
+            QTest.keyClick(first, Qt.Key.Key_Return)
+            QTest.keyClick(d, Qt.Key.Key_Enter)
+            assert d.isVisible() and d.choice == esd.BACK, "Enter 가 줄을 눌렀다"
+            return
+        assert d.choice == esd.BACK
+        assert d.result() == QDialog.DialogCode.Rejected
+    finally:
+        d.hide()
+        d.deleteLater()
+
+
+def test_extract_save_rows_pick_once(qapp):
+    from aoi_verification.app.ui.widgets import extract_save_dialog as esd
+    d = esd.ExtractSaveDialog([("single", "a"), ("sheets", "b"), ("columns", "c")], 1, 1)
+    try:
+        d.rows["sheets"].click()
+        assert d.choice == "sheets"
+    finally:
+        d.deleteLater()
 
 
 # ── Recipe 나란히: 같은 결함(150µm 미만)은 같은 행, 위쪽으로 ─────────────────
@@ -699,7 +766,7 @@ def test_choice_buttons_wrap_instead_of_clipping(styled_qapp):
     many = [("s", K.EXTRACT_SAVE_SINGLE, "primary"),
             ("h", K.EXTRACT_SAVE_SHEETS, "ghost"),
             ("c", K.EXTRACT_SAVE_COLUMNS, "ghost"),
-            ("b", K.EXTRACT_SUMMARY_BACK, "ghost")]
+            ("b", "선별 화면으로 돌아가기", "ghost")]   # 한 줄에 안 들어가는 길이
     d = sh._ChoiceSheet("t", "body", many, default="s")
     try:
         d.show()

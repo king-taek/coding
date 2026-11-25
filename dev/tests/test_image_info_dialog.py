@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -24,7 +25,7 @@ pytest.importorskip("PyQt6.QtWidgets")
 pytest.importorskip("numpy")
 
 from PyQt6.QtCore import QMimeData, Qt, QUrl                # noqa: E402
-from PyQt6.QtWidgets import QApplication, QLabel            # noqa: E402
+from PyQt6.QtWidgets import QApplication, QFrame, QLabel    # noqa: E402
 
 from aoi_verification.app import i18n                       # noqa: E402
 from aoi_verification.app.ui.widgets.image_info_dialog import (  # noqa: E402
@@ -113,7 +114,9 @@ def test_numeric_rows_are_mono_and_status_is_a_stamp(qapp, isolated_cache,
     chips = [w.property("chip") for w in host.findChildren(QLabel)
              if w.property("chip")]
     assert "mono" in roles, "좌표·계측 값이 모노로 찍혀야 한다"
-    assert "colHead" in roles, "그룹마다 타이틀블록 컬럼 머리가 있어야 한다"
+    assert "infoGroupTitle" in roles, "그룹마다 제목이 있어야 한다"
+    boxes = [f for f in host.findChildren(QFrame) if f.property("role") == "infoBox"]
+    assert len(boxes) == roles.count("infoGroupTitle"), "그룹마다 음영 상자 하나"
     assert chips == ["none"], "측정정보 미지원은 스탬프 하나로"
     dlg.deleteLater()
 
@@ -177,7 +180,8 @@ def test_renders_kla_defect_rows(qapp, isolated_cache, tmp_path):
     dlg.deleteLater()
 
 
-def test_drop_accepts_only_image_files(qapp, isolated_cache, tmp_path):
+def test_drop_opens_photos_and_folders_only(qapp, isolated_cache, tmp_path, monkeypatch):
+    """드롭은 사진 · 폴더만 받는다 — 여러 개면 전부 넘겨 보기 목록으로."""
     img = tmp_path / "a.jpeg"
     img.write_bytes(b"x")
     other = tmp_path / "a.txt"
@@ -186,17 +190,36 @@ def test_drop_accepts_only_image_files(qapp, isolated_cache, tmp_path):
     class _Evt:
         def __init__(self, md):
             self._md = md
+            self.accepted = None
 
         def mimeData(self):
             return self._md
 
-    md_img = QMimeData()
-    md_img.setUrls([QUrl.fromLocalFile(str(other)), QUrl.fromLocalFile(str(img))])
-    assert ImageInfoDialog._dropped_image(_Evt(md_img)) == img
+        def acceptProposedAction(self):
+            self.accepted = True
 
-    md_none = QMimeData()
-    md_none.setUrls([QUrl.fromLocalFile(str(other))])
-    assert ImageInfoDialog._dropped_image(_Evt(md_none)) is None
+        def ignore(self):
+            self.accepted = False
+
+    dlg = ImageInfoDialog()
+    opened = []
+    monkeypatch.setattr(dlg, "open_many", opened.append)
+    try:
+        md_img = QMimeData()
+        md_img.setUrls([QUrl.fromLocalFile(str(other)), QUrl.fromLocalFile(str(img)),
+                        QUrl.fromLocalFile(str(tmp_path))])
+        evt = _Evt(md_img)
+        dlg.dropEvent(evt)
+        assert evt.accepted is True
+        assert [Path(p) for p in opened[0]] == [other, img, tmp_path]
+
+        md_none = QMimeData()
+        md_none.setUrls([QUrl.fromLocalFile(str(other))])
+        evt = _Evt(md_none)
+        dlg.dropEvent(evt)
+        assert evt.accepted is False and len(opened) == 1
+    finally:
+        dlg.deleteLater()
 
 
 def test_setup_page_opens_this_dialog(qapp, isolated_cache):
@@ -300,24 +323,69 @@ def test_paste_opens_image_and_flashes_notices(qapp, isolated_cache, tmp_path, m
     img.write_bytes(b"x")
     dlg = ImageInfoDialog()
     shown, flashed = [], []
-    monkeypatch.setattr(dlg, "show_image", lambda p: shown.append(p))
+    monkeypatch.setattr(dlg, "_load_photo", shown.append)
     monkeypatch.setattr(dlg, "_flash", flashed.append)
     try:
         dlg._on_paste_paths([str(img)])
         assert shown == [img] and not flashed
-        dlg._on_paste_paths([str(tmp_path / "a.txt")])
-        dlg._on_paste_paths([str(tmp_path / "nope.jpeg")])
-        dlg._on_paste_paths([str(tmp_path / "a.txt"), str(img)])   # 첫 사진을 연다
+        dlg._on_paste_paths([str(tmp_path / "a.txt"), str(img)])   # 사진만 추린다
         assert shown == [img, img]
         shown.clear()
-        flashed.clear()
         dlg._on_paste_paths([str(tmp_path / "a.txt")])
         dlg._on_paste_paths([str(tmp_path / "nope.jpeg")])
         dlg._on_paste_no_path(True)
         dlg._on_paste_no_path(False)
         assert shown == []
-        assert flashed == [i18n.KO.DROP_WRONG_KIND_IMAGE, i18n.KO.DROP_NOT_FOUND,
+        assert flashed == [i18n.KO.DROP_WRONG_KIND_IMAGE, i18n.KO.IMAGE_INFO_NO_PHOTOS,
                            i18n.KO.DROP_NO_PATH_IMAGE, i18n.KO.DROP_NOTHING_TO_PASTE]
+    finally:
+        dlg.deleteLater()
+
+
+def test_list_photos_reads_folders_and_files(tmp_path):
+    """폴더는 바로 안 사진만 이름순, 사진 아닌 것 · 없는 것은 빼고, 같은 파일은 한 번만."""
+    from aoi_verification.app.ui.widgets.image_info_dialog import list_photos
+    d = tmp_path / "slot"
+    (d / "sub").mkdir(parents=True)
+    for name in ("b.jpg", "A.jpeg", "note.txt"):
+        (d / name).write_bytes(b"x")
+    (d / "sub" / "c.jpg").write_bytes(b"x")
+    loose = tmp_path / "z.jpg"
+    loose.write_bytes(b"x")
+    got = list_photos([str(d), str(loose), str(d / "b.jpg"), str(tmp_path / "nope.jpg"),
+                       str(d / "note.txt")])
+    assert [p.name for p in got] == ["A.jpeg", "b.jpg", "z.jpg"]
+
+
+def test_many_photos_step_through_with_a_strip(qapp, isolated_cache, tmp_path, monkeypatch):
+    """여러 장 — 띠가 보이고 ◀ ▶ · 칸 클릭으로 넘긴다(끝에서 멈춘다).  한 장을 열면 띠가 사라진다."""
+    for i in range(20):
+        (tmp_path / f"p{i:02d}.jpg").write_bytes(b"x")
+    dlg = ImageInfoDialog()
+    shown = []
+    monkeypatch.setattr(dlg, "_load_photo", lambda p: (shown.append(p.name),
+                                                       setattr(dlg, "_path", p)))
+    try:
+        dlg.open_many([str(tmp_path)])
+        assert shown == ["p00.jpg"]
+        assert not dlg.strip_bar.isHidden()
+        assert dlg.photo_pos.text() == i18n.KO.IMAGE_INFO_PHOTO_POS_FMT.format(i=1, n=20)
+        assert not dlg.photo_prev.isEnabled() and dlg.photo_next.isEnabled()
+        dlg.step_photo(-1)                      # 맨 앞 — 멈춘다
+        assert shown == ["p00.jpg"]
+        dlg.photo_next.click()
+        dlg.go_photo(19)
+        dlg.step_photo(1)                       # 맨 뒤 — 멈춘다
+        assert shown == ["p00.jpg", "p01.jpg", "p19.jpg"]
+        assert not dlg.photo_next.isEnabled()
+        # 띠는 지금 사진 앞뒤만 — 위젯 수가 사진 수와 무관하다.
+        assert len(dlg._strip_map) <= 13
+        assert str(tmp_path / "p19.jpg") in dlg._strip_map
+        tile = dlg._strip_map[str(tmp_path / "p15.jpg")]
+        tile.clicked.emit()
+        assert shown[-1] == "p15.jpg"
+        dlg.show_image(tmp_path / "p03.jpg")
+        assert dlg.strip_bar.isHidden() and dlg._paths == [tmp_path / "p03.jpg"]
     finally:
         dlg.deleteLater()
 
@@ -338,7 +406,7 @@ def test_dividers_only_between_clusters(qapp, isolated_cache, tmp_path):
     frames = [f for f in dlg._scroll.widget().findChildren(QFrame)
               if f.property("role") == "row"]
     assert [f.property("rule") == "none" for f in frames] == \
-        [True, False, True, False, False, False]
+        [True, False, True, False, False, True]   # 마지막 행은 상자 테두리가 대신한다
     dlg.deleteLater()
 
 

@@ -70,8 +70,6 @@ class Profile:
     check_sz: int = 18
     chip_w: int = 88
     chip_h: int = 20
-    toggle_w: int = 52
-    toggle_h: int = 30
     thumb_default_px: int = 118
     focus_ring_px: int = 2
     motion_scale: float = 0.8       # 제도 시트답게 담백한 모션

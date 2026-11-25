@@ -20,7 +20,7 @@ from typing import Callable, Optional
 import numpy as np
 from PyQt6.QtCore import QObject, QPointF, QRectF, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
-from PyQt6.QtWidgets import (QComboBox, QDialog, QFileDialog,
+from PyQt6.QtWidgets import (QComboBox, QDialog,
                              QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel,
                              QMenu, QPushButton, QSpinBox, QSplitter, QToolButton, QVBoxLayout,
                              QWidget)
@@ -34,11 +34,14 @@ from .. import motion, theme
 from ..deferred import call_later
 from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import guess_kinds, install_paste, local_paths
+from ..folder_picker import FilePicker, SavePicker
 from . import sheet_host as sheets
 from .gl_canvas import TOOLS, GlCanvas
 from .gl_charts import ALL_ROW, HistogramChart
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
+from . import popup_layout
+from .tool_open_save import EmptyOpen, SavedLine
 from .option_group import OptionGroup
 
 _LOG = logging.getLogger("aoi.gl")
@@ -138,6 +141,9 @@ class _Worker(QThread):
 class _RawDialog(QDialog):
     """RAW 사진은 크기를 파일에서 알 수 없어 직접 받는다(파일 크기로 정사각형을 추정해 채운다)."""
 
+    #: 작은 팝업 — 시트 제목줄 ✕ 를 뺀다(자기 [취소] 가 있다, `sheet_host.POPUP_SMALL_ATTR`).
+    POPUP_SMALL = True
+
     def __init__(self, path: Path, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(_KO.GL_RAW_TITLE)
@@ -162,15 +168,12 @@ class _RawDialog(QDialog):
         form.addRow(_KO.GL_RAW_BITS, self.bits)
         form.addRow(_KO.GL_RAW_ENDIAN, self.endian)
         form.addRow(_KO.GL_RAW_HEADER, self.header)
-        row = QHBoxLayout()
         ok = NeonButton(_KO.GL_RAW_OK, role="primary")
         cancel = NeonButton(_KO.GL_RAW_CANCEL, role="ghost")
         ok.clicked.connect(self.accept)
         cancel.clicked.connect(self.reject)
-        row.addStretch(1)
-        row.addWidget(cancel)
-        row.addWidget(ok)
-        form.addRow(row)
+        form.addRow(popup_layout.dialog_row(
+            QHBoxLayout(), cancels=[cancel], primaries=[ok]))
 
     def settings(self) -> dict:
         return {"width": self.width_.value(), "height": self.height_.value(),
@@ -206,6 +209,16 @@ class GlViewerDialog(QDialog):
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.setInterval(0)
         self._refresh_timer.timeout.connect(self._refresh)
+        # OS 파일 창은 전부 비동기(`ui/folder_picker.py`) — `exec()` 는 Windows 에서
+        # UI 스레드를 세운다.  열기 · 비교는 같은 사진 폴더를, 저장 둘은 같은 저장 폴더를 기억한다.
+        self._open_picker = FilePicker(self, purpose="gl_open")
+        self._open_picker.picked.connect(lambda paths: self.open_path(Path(paths[0])))
+        self._cmp_picker = FilePicker(self, purpose="gl_open")
+        self._cmp_picker.picked.connect(self._on_cmp_picked)
+        self._xlsx_picker = SavePicker(self, purpose="gl_save")
+        self._xlsx_picker.picked.connect(self._on_xlsx_picked)
+        self._png_picker = SavePicker(self, purpose="gl_save")
+        self._png_picker.picked.connect(self._on_png_picked)
         self._build()
         if image_path:
             self.open_path(Path(image_path))
@@ -227,19 +240,20 @@ class GlViewerDialog(QDialog):
         body.addWidget(self._build_right())
         root.addLayout(body, 1)
         root.addWidget(self._build_status())
+        self._empty_open = EmptyOpen(self, _KO.GL_OPEN, self._on_pick, _KO.EMPTY_DROP_HINT)
         self._sync_empty_state()
 
     def _build_head(self) -> QHBoxLayout:
-        """머리줄 — 남색 채움은 '엑셀 저장' 하나, PNG 는 외곽선, 나머지는 글자 버튼."""
+        """머리줄 — 위 왼쪽 회색 [사진 선택] · 오른쪽 위 파랑 [그림으로 저장] [엑셀로 저장](현택님 2026-11-24)."""
         bar = QHBoxLayout()
         bar.setContentsMargins(16, 12, 16, 12)
         bar.setSpacing(8)
         self.file_label = QLabel("", self)
-        self.open_btn = NeonButton(_KO.GL_OPEN, role="textAccent")
+        self.open_btn = NeonButton(_KO.GL_OPEN, role="ghost")
         self.open_btn.clicked.connect(self._on_pick)
         self.xlsx_btn = NeonButton(_KO.GL_SAVE_XLSX, role="primary")
         self.xlsx_btn.clicked.connect(self._on_save_xlsx)
-        self.png_btn = NeonButton(_KO.GL_SAVE_PNG_SHORT, role="ghost")
+        self.png_btn = NeonButton(_KO.GL_SAVE_PNG_SHORT, role="primary")
         menu = QMenu(self.png_btn)
         menu.addAction(_KO.GL_SAVE_PNG, self._on_save_png)
         menu.addSeparator()
@@ -253,11 +267,17 @@ class GlViewerDialog(QDialog):
         self.toast.setProperty("role", "muted")
         for b in (self.open_btn, self.compare_btn, self.png_btn, self.xlsx_btn):
             b.setProperty("grade", "panel")             # 머리줄 버튼은 모두 32 px
-        bar.addWidget(self.file_label)
         bar.addWidget(self.open_btn)
+        bar.addWidget(self.file_label)
         bar.addStretch(1)
-        bar.addWidget(self.toast)
+        # ★ 긴 안내가 한 줄로 서면 그 폭이 창 최소 폭이 돼 1100px 창에 가로 스크롤이 생겼다
+        #   (최소 1332px, 실측 2026-11-24) — 줄을 바꿔 남는 폭 안에 담는다.
+        self.toast.setWordWrap(True)
+        self.toast.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        bar.addWidget(self.toast, 1)
         bar.addWidget(self.compare_btn)
+        self.saved_line = SavedLine(self)
+        bar.addWidget(self.saved_line)
         bar.addWidget(self.png_btn)
         bar.addWidget(self.xlsx_btn)
         return bar
@@ -285,10 +305,9 @@ class GlViewerDialog(QDialog):
         btn.style().polish(btn)
 
     def _sync_empty_state(self) -> None:
-        """사진이 없으면 '사진 열기' 만 남색 채움이고 사진이 필요한 것은 모두 꺼 둔다."""
+        """사진이 없으면 가운데 큰 [사진 선택] 만 보이고(``EmptyOpen``) 사진이 필요한 것은 모두 꺼 둔다."""
         has = self._gl is not None
-        self._set_role(self.open_btn, "textAccent" if has else "primary")
-        self._set_role(self.xlsx_btn, "primary" if has else "ghost")
+        self._empty_open.set_empty(not has)
         for b in (self.xlsx_btn, self.png_btn, self.compare_btn, self.clear_btn):
             b.setEnabled(has)
         for b in self._tool_btns.values():
@@ -340,7 +359,7 @@ class GlViewerDialog(QDialog):
         col.addWidget(sep)
         col.addSpacing(2)
         self.undo_btn = self._tool_button(_KO.GL_UNDO, lambda: self.canvas.undo(), icon="undo",
-                                          tip=f"{_KO.GL_UNDO} (Ctrl+Z)")
+                                          tip=_KO.GL_UNDO)
         col.addWidget(self.undo_btn)
         self.clear_btn = self._tool_button(_KO.GL_CLEAR, self._clear_rois, icon="clear")
         col.addWidget(self.clear_btn)
@@ -430,7 +449,10 @@ class GlViewerDialog(QDialog):
         self.note = QLabel("", bar)
         self.note.setProperty("role", "mutedSmall")
         self.note.setVisible(False)
-        row.addWidget(self.note)
+        # 긴 안내(Scan 못 찾음 · 밝기 분석 …)는 줄을 바꾼다 — 한 줄이면 창 최소 폭을 키운다.
+        self.note.setWordWrap(True)
+        self.note.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(self.note, 1)
         self.zoom_status = QLabel("", bar)
         self.zoom_status.setProperty("role", "mono")
         row.addSpacing(16)
@@ -598,10 +620,8 @@ class GlViewerDialog(QDialog):
     def _on_pick(self) -> None:
         patterns = " ".join(f"*{e}" for e in sorted(_view_exts()))
         start = str(Path(self._gl.path).parent) if self._gl and self._gl.path else ""
-        path, _ = QFileDialog.getOpenFileName(self, _KO.GL_OPEN, start,
-                                              _KO.GL_OPEN_FILTER_FMT.format(patterns=patterns))
-        if path:
-            self.open_path(Path(path))
+        self._open_picker.open(_KO.GL_OPEN, start,
+                               _KO.GL_OPEN_FILTER_FMT.format(patterns=patterns))
 
     def open_path(self, path: Path, *, raw: Optional[dict] = None) -> None:
         """사진을 연다(백그라운드).  RAW 는 설정을 묻는다."""
@@ -686,10 +706,12 @@ class GlViewerDialog(QDialog):
         start = str(Path(self._gl.path).parent) if self._gl.path else ""
         patterns = " ".join(f"*{e}" for e in sorted(set(CONFIG.image_extensions)
                                                     | {".tif", ".tiff", ".png", ".bmp"}))
-        path, _ = QFileDialog.getOpenFileName(self, _KO.GL_CMP_PICK, start,
-                                              _KO.GL_OPEN_FILTER_FMT.format(patterns=patterns))
-        if path:
-            self.open_path_b(Path(path))
+        self._cmp_picker.open(_KO.GL_CMP_PICK, start,
+                              _KO.GL_OPEN_FILTER_FMT.format(patterns=patterns))
+
+    def _on_cmp_picked(self, paths: list) -> None:
+        if self._gl is not None and self._gl_b is None:     # 고르는 사이 상태가 바뀌었으면 무시
+            self.open_path_b(Path(paths[0]))
 
     def open_path_b(self, path: Path) -> None:
         """B 사진을 연다(백그라운드).  A 와 같은 크기·같은 비트여야 ROI 를 그대로 겹칠 수 있다."""
@@ -990,18 +1012,26 @@ class GlViewerDialog(QDialog):
     # 저장
     # ------------------------------------------------------------------
     def _default_name(self, suffix: str) -> str:
+        """기본 저장 이름 — 다른 도구와 같은 규칙 ``<도구>_<대상>_<YYYYMMDD_HHMM>``, 폴더도 같은
+        결과 폴더(``paths.results_dir``).  예전엔 사진이 있는 NAS 폴더에 ``<사진>_GL`` 로 썼다."""
+        from datetime import datetime
+
+        from ...utils import paths
+
         base = Path(self._view.source_path if self._view and self._view.source_path
                     else (self._gl.path if self._gl else "gl")).stem
-        folder = Path(self._gl.path).parent if self._gl and self._gl.path else Path.home()
-        return str(folder / f"{base}_GL{suffix}")
+        # 기본 폴더는 다른 저장과 같은 결과 폴더(현택님 2026-11-25 Q3 A안).
+        return str(paths.results_dir() / f"GL_{base}_{datetime.now():%Y%m%d_%H%M}{suffix}")
 
     def _on_save_xlsx(self) -> None:
         if self._gl is None:
             self._toast(_KO.GL_NO_IMAGE, error=True)
             return
-        path, _ = QFileDialog.getSaveFileName(self, _KO.GL_SAVE_XLSX_TITLE,
-                                              self._default_name(".xlsx"), "Excel (*.xlsx)")
-        if not path:
+        self._xlsx_picker.open(_KO.GL_SAVE_XLSX_TITLE, self._default_name(".xlsx"),
+                               "Excel (*.xlsx)", "xlsx")
+
+    def _on_xlsx_picked(self, path: str) -> None:
+        if not path or self._gl is None:
             return
         try:
             self.save_xlsx(Path(path))
@@ -1009,7 +1039,7 @@ class GlViewerDialog(QDialog):
             _LOG.exception("GL 엑셀 저장 실패")
             self._toast(_KO.GL_SAVE_FAILED_FMT.format(why=exc), error=True)
             return
-        self._toast(_KO.GL_SAVED_FMT.format(name=Path(path).name))
+        self.saved_line.show_saved(path)
 
     def save_xlsx(self, path: Path) -> None:
         """통계·히스토그램을 엑셀 한 장으로 저장한다(헤드리스 호출 가능)."""
@@ -1047,9 +1077,11 @@ class GlViewerDialog(QDialog):
         if self._gl is None:
             self._toast(_KO.GL_NO_IMAGE, error=True)
             return
-        path, _ = QFileDialog.getSaveFileName(self, _KO.GL_SAVE_PNG_TITLE,
-                                              self._default_name(".png"), "PNG (*.png)")
-        if not path:
+        self._png_picker.open(_KO.GL_SAVE_PNG_TITLE, self._default_name(".png"),
+                              "PNG (*.png)", "png")
+
+    def _on_png_picked(self, path: str) -> None:
+        if not path or self._gl is None:
             return
         try:
             self.save_png(Path(path), with_rois=self.png_rois.isChecked())
@@ -1057,7 +1089,7 @@ class GlViewerDialog(QDialog):
             _LOG.exception("GL PNG 저장 실패")
             self._toast(_KO.GL_SAVE_FAILED_FMT.format(why=exc), error=True)
             return
-        self._toast(_KO.GL_SAVED_FMT.format(name=Path(path).name))
+        self.saved_line.show_saved(path)
 
     def render_overlay(self, with_rois: bool, gl: Optional[loader.GlImage] = None) -> QImage:
         """색 칠한 사진을 **원본 해상도**로 그린다(선·이름은 선택)."""

@@ -321,6 +321,29 @@ def _parse_sections(ini: Path, _mtime_ns: int, _size: int) -> tuple:
     return tuple(out)
 
 
+def load_name_folder(folder: Path) -> dict[str, str]:
+    """폴더의 INI → ``{stem(소문자) → 섹션 이름(원래 대소문자·확장자 그대로)}``.
+
+    다른 맵은 키를 ``stem`` 으로만 들고 있어 원래 파일 이름을 되살릴 수 없다 — Scan 사진에서
+    Defect 를 찾을 때(:func:`~.scan_image.defects_in`) 그 Defect 의 사진 경로를 만드는 데 쓴다."""
+    ini = _find_ini(Path(folder))
+    if ini is None:
+        return {}
+    try:
+        st = ini.stat()
+        return dict(_section_names(ini, st.st_mtime_ns, st.st_size))
+    except Exception:
+        _LOG.warning("Camtek INI 섹션 이름 읽기 실패: %s", folder, exc_info=True)
+        return {}
+
+
+@lru_cache(maxsize=32)
+def _section_names(ini: Path, _mtime_ns: int, _size: int) -> tuple:
+    text = read_ini_text(ini) or ""
+    return tuple((Path(n.strip()).stem.lower(), n.strip())
+                 for n in _SECTION_PAT.findall(text))
+
+
 @lru_cache(maxsize=256)
 def load_raw_folder(folder: Path) -> dict[str, tuple[float, float, int, int]]:
     """폴더의 INI → ``{stem(소문자) → (X, Y, Col, Row)}`` 원시값.

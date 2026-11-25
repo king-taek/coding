@@ -10,23 +10,22 @@ APP_TITLE = "AOI 레시피 검증"
 CREDIT = "Developed by 임현택"
 
 # ── 시작 스플래시(로고 + 로딩) ────────────────────────────────────────────
-SPLASH_MODULES = "구성 요소를 불러오는 중…"
-SPLASH_PAGES = "화면을 준비하는 중…"
-SPLASH_UPDATE_CHECK = "업데이트를 확인하는 중…"
+SPLASH_MODULES = "구성 요소를 불러오는 중"
+SPLASH_PAGES = "화면을 준비하는 중"
+SPLASH_UPDATE_CHECK = "업데이트를 확인하는 중"
 SPLASH_READY = "준비 완료"
 
 # ── OpenVINO 자동 설치 안내 ───────────────────────────────────────────────
 OPENVINO_OFFER_TITLE = "Intel GPU 가속 활성화"
 OPENVINO_OFFER_BODY = (
-    "Intel CPU 가 감지되었습니다.\n"
-    "OpenVINO 를 설치하면 고효율 모드의 후보 생성이 Intel GPU (Iris Xe / Arc) 로 "
-    "빨라집니다. 좌표·기본 모드에는 영향이 없습니다.\n\n"
+    "OpenVINO 를 설치하면 고효율 모드가 Intel GPU 로 빨라집니다.\n"
+    "\n"
     "지금 설치할까요? (약 200 MB)"
 )
 OPENVINO_OFFER_BTN_INSTALL = "지금 설치"
 OPENVINO_OFFER_BTN_LATER = "다음에"
 OPENVINO_OFFER_BTN_NEVER = "다시 보지 않기"
-OPENVINO_INSTALL_PROGRESS = "Intel GPU 가속 구성 요소 설치 중…"
+OPENVINO_INSTALL_PROGRESS = "OpenVINO 설치 중"
 OPENVINO_INSTALL_DONE = (
     "OpenVINO 설치 완료!\n프로그램을 다시 시작하면 고효율 모드에서 Intel GPU 가속을 쓸 수 있습니다."
 )
@@ -60,19 +59,13 @@ DURATION_HOUR_FMT = "{h}시간 {m}분"
 BTN_START = "검증 시작"
 # 시작 직후 — 무거운 구성 요소(영상 처리·가속)를 백그라운드에서 불러오는 동안의 표기.
 # 창은 먼저 뜨고, 준비가 끝나면 원래 이름(BTN_START)으로 돌아오며 활성화된다.
-BTN_START_PREPARING = "준비 중…"
+BTN_START_PREPARING = "준비 중"
 BTN_BROWSE = "폴더 선택…"
 BTN_VERIFY = "검증"
 BTN_EXCLUDE = "제외"
-BTN_UNDO = "되돌리기(Z)"
-# 단축키를 라벨에 적는다 — 선별 화면은 "되돌리기(Z)" 라 여기서 Z 를 눌러 보게 된다.
-#   매칭 화면은 Z 가 선별 화면과 충돌해 Ctrl+Z 만 받는다(match_page 주석).
-BTN_MATCH_UNDO = "되돌리기(Ctrl+Z)"
-# ★ 예전 문구는 "직전 매칭/매칭없음 결정을 취소합니다" 였다.  그 '매칭없음' 을 만들던
-#   [매칭 없음] 버튼과 `N` 단축키는 제거됐으므로(2단계는 언제나 자동 — 그 사이 눌리면
-#   처리 중이던 사진이 조용히 미탐으로 확정됐다), 사람이 만들 수 없는 결정 종류를
-#   되돌리기 툴팁이 계속 약속하고 있었다.  남은 결정은 '매치' 하나다.
-MATCH_UNDO_TOOLTIP = "직전 매치 결정을 취소합니다 (Ctrl+Z)"
+# 되돌리기 키는 앱 어디서나 Z(Ctrl+Z 도 받음, `ui/undo_keys.py`) — 라벨에도 같은 꼴로 적는다
+#   (현택님 결정 2026-11-24).  선별·매칭·Overkill·Zone 이 이 라벨을 함께 쓴다.
+BTN_UNDO = "되돌리기 (Z)"
 # ⚠ 도달 불가 — SKIPPED_SECTION_DEFER_FMT 주석 참조(보류 풀이 항상 비어 버튼이 숨는다).
 BTN_RETRY_SKIP = "보류 재시도"
 BTN_SELECT_MODE = "여러 장 고르기"
@@ -84,10 +77,6 @@ BTN_INLINE_EXCLUDE_FMT = "선택 {n}장 제외"
 
 # ── 다중 선택 다이얼로그 (Stage 1 선택 모드) ─────────────────────────────
 BULK_SELECT_TITLE_FMT = "{panel} — 다중 선택"
-BULK_SELECT_HINT = (
-    "사진을 클릭하거나 빈 곳에서 드래그해 여러 장을 선택/해제하세요. "
-    "선택된 사진들에 아래 액션이 적용됩니다."
-)
 BULK_SELECT_SUMMARY_FMT = "선택됨: {n}장"
 # ★ 페이지네이션 중에는 선택이 페이지를 넘어 유지되므로, 이 페이지에 보이는 것보다
 #   훨씬 많은 사진이 함께 처리될 수 있다.  실행 직전에 그 간극을 화면이 말한다.
@@ -100,7 +89,7 @@ BULK_SIZE_LABEL = "사진 크기"
 BULK_PAGE_PREV = "◀ 이전"
 BULK_PAGE_NEXT = "다음 ▶"
 BULK_PAGE_LABEL_FMT = "페이지 {page} / {total}"
-BULK_TILE_ZOOM_TOOLTIP = "우클릭하여 크게 보기"
+BULK_TILE_ZOOM_TOOLTIP = "더블클릭: 크게 보기"
 BTN_MOVE_TO_EXCLUDE = "제외로 이동"
 BTN_MOVE_TO_TARGET = "검증 대상으로 이동"
 BTN_BACK_TO_CENTER = "다시 결정"
@@ -114,8 +103,9 @@ MATCH_CANCEL_CONFIRM_TITLE = "매칭 중단"
 # ★ 중단은 '잠깐 멈춤' 이 아니다 — 정확도 사고를 막기 위해 계산 결과를 전부 버린다
 #   (남기면 설정을 바꿔 다시 돌려도 1회차 결과가 재사용된다).  그 사실을 말해 준다.
 MATCH_CANCEL_CONFIRM_FMT = (
-    "진행 중인 매칭을 중단할까요?  ({done} / {total} 까지 진행)\n\n"
-    "지금까지 계산한 결과는 저장되지 않고, 다시 시작하면 처음부터 계산합니다."
+    "진행 중인 매칭을 중단할까요?  ({done} / {total})\n"
+    "\n"
+    "계산한 결과는 저장되지 않습니다."
 )
 SELECT_BACK_CONFIRM_TITLE = "설정으로 돌아가기"
 SELECT_BACK_CONFIRM_FMT = (
@@ -177,26 +167,25 @@ SETUP_MACHINE_PLACEHOLDER = "호기"
 STAGE1_TITLE = "후보 선별"
 STAGE2_TITLE = "매칭 · 유사도 기반"
 STAGE2_TITLE_COORD = "매칭 · 좌표 기반"
-STAGE2_COORD_OFFSET_FMT = "  ·  보정 가로 {dx:+.0f} · 세로 {dy:+.0f} µm"
+STAGE2_COORD_OFFSET_FMT = " · 보정 가로 {dx:+.0f} · 세로 {dy:+.0f} µm"
 RESULT_TITLE = "결과"
 # 결과 요약 — 핵심 수치는 타일로, 나머지는 문장으로.
 RESULT_MACHINES_FMT = "기준 장비: {ref}    검증 장비: {val}"
 # 입력한 폴더 주소 — 숫자 타일 아래, 기준·검증 한 줄씩.
 RESULT_REF_ROOT_FMT = "기준  {path}"
 RESULT_VAL_ROOT_FMT = "검증  {path}"
-RESULT_SLOT_ONLY_REF_FMT = "슬롯 불일치  ·  기준 전용: {names}"
-RESULT_SLOT_ONLY_VAL_FMT = "슬롯 불일치  ·  검증 전용: {names}"
+RESULT_SLOT_ONLY_REF_FMT = "슬롯 불일치(기준): {names}"
+RESULT_SLOT_ONLY_VAL_FMT = "슬롯 불일치(검증): {names}"
 VALUE_NONE = "없음"
-# ★ '매치 성공' 이다(‘매칭 성공’ 아님) — 형제 타일이 '매치 없음'·'매치 실패' 라
-#   같은 한 건을 세는 자리에서 낱말이 갈리면 다른 것을 세는 것처럼 읽힌다.
-#   낱말 규약: **매칭 = 과정/기능**(설정·중단·엔진), **매치 = 결과 한 건**(검토·확정·성공).
-STAT_MATCHED = "매치 성공"
-STAT_OVER_TOLERANCE = "허용 초과"
+# ★ 결과 타일은 '매치' / '매치 없음' 둘만 쓴다(현택님 2026-11-24 — '일치'·'미매칭' 안 씀).
+#   검토가 끝난 뒤에는 '허용 초과' 도 사람이 남긴 매치라 '매치' 에 들어 있다 — 따로 세지 않는다.
+#   낱말 규약: **매칭 = 과정/기능**(설정·중단·엔진), **매치 = 결과 한 건**(검토·확정).
+STAT_MATCHED = "매치"
 STAT_NO_MATCH = "매치 없음"
 STAT_SLOT_MISMATCH = "슬롯 불일치"
 # 교차검증(양방향) — '매치 없음' 을 어느 장비에만 있었는지로 나눈다.
-STAT_ONLY_REF = "기준에만 있음"
-STAT_ONLY_VAL = "검증에만 있음"
+STAT_ONLY_REF = "매치 없음(기준)"
+STAT_ONLY_VAL = "매치 없음(검증)"
 MATCH_REVIEW_TITLE = "매치 검토"
 
 # ★ 패널 제목에 괄호 부연을 넣지 않는다.  이 제목은 `role=paneTitle` QLabel 이고
@@ -205,12 +194,8 @@ MATCH_REVIEW_TITLE = "매치 검토"
 #   "검증 대상 (검증하기로 " 까지만 보였다(1280 에서도 여유 0~1px).  부연은 툴팁으로
 #   내리고 제목은 짧게 둔다.  회귀 가드: `dev/tests/test_pane_title_fits.py`.
 PANEL_LEFT_CANDIDATES = "검증 후보"
-PANEL_LEFT_CANDIDATES_TOOLTIP = "아직 검증/제외를 결정하지 않은 남은 사진들"
 PANEL_CENTER_DECIDE = "검증 결정할 사진"
 PANEL_RIGHT_TARGETS = "검증 대상"
-PANEL_RIGHT_TARGETS_TOOLTIP = "검증하기로 결정한 사진들"
-# 우측 패널이 비었을 때의 안내 — 처음 쓰는 사람이 이 칸의 용도를 알 수 있게.
-PANEL_RIGHT_EMPTY = "→ 또는 [✓ 검증] 으로 보낸 사진이 여기에 쌓입니다."
 
 PANEL_MATCH_REF = "기준 사진"
 PANEL_MATCH_CANDIDATES = "검증 장비 후보"
@@ -242,29 +227,20 @@ SKIPPED_DIALOG_EMPTY = "매치 없음 사진이 없습니다."
 BTN_REVIEW_UNMATCHED = "매치 없음 사진 검토"
 UNMATCHED_REVIEW_TITLE = "매치 없음 사진 검토 — {n}장"
 UNMATCHED_REVIEW_PROGRESS_FMT = "{idx} / {total} — {slot}"
-UNMATCHED_REVIEW_HINT = (
-    "매치 없음인 기준 사진을 하나씩 검토합니다. 같은 슬롯의 검증 장비 후보를"
-    " 보여줍니다. 맞는 사진을 클릭해 선택(파란 테두리)한 뒤"
-    " [매치 확정] 을 누르세요. 후보를 우클릭하면 크게 비교할 수 있습니다."
-)
+# 이 창에서 뜨는 안내·질문 시트의 제목(앱 이름 대신, 현택님 2026-11-24).
+UNMATCHED_SHEET_TITLE = BTN_REVIEW_UNMATCHED
 # 좌표로 매칭한 세션에서 이 화면만 유사도로 줄을 세운다는 사실을 알린다 (U-18).
 #   좌표 모드로 검증했는데 후보 순서가 좌표와 무관해 보여 혼란을 준 지점이다.
-UNMATCHED_REVIEW_COORD_NOTE = (
-    "이 검증은 좌표 기준으로 매칭했지만, 이 화면의 후보 순서는 좌표 거리가 아니라"
-    " 사진 유사도입니다. 좌표로 짝을 찾지 못한 사진들이라 유사도로 다시 줄을 세웁니다."
-)
+UNMATCHED_REVIEW_COORD_NOTE = "후보 순서는 좌표 거리가 아니라 사진 유사도입니다"
 UNMATCHED_REVIEW_NO_CANDIDATES = "이 슬롯에는 검증 장비 후보가 없습니다."
-UNMATCHED_REVIEW_DONE_FMT = "{n} 건의 신규 매칭을 확정했습니다."
+UNMATCHED_REVIEW_DONE_FMT = "Defect {n}개의 신규 매치를 확정했습니다."
 UNMATCHED_REVIEW_EMPTY = "검토할 매치 실패 사진이 없습니다."
-UNMATCHED_CONFIRM_ON_CLOSE = (
-    "선택(파란 테두리)했지만 아직 확정하지 않은 후보가 있습니다.\n"
-    "선택한 대로 매칭하시겠습니까?"
-)
-BTN_UNMATCHED_CONFIRM = "매치 확정"
+UNMATCHED_CONFIRM_ON_CLOSE = "선택한 대로 매치를 확정할까요?"
+# 버튼 이름은 크게 보기(BTN_EXPAND_*·BTN_CONFIRM_AS_MATCH)와 같게 둔다 — 같은 동작이다.
+BTN_UNMATCHED_CONFIRM = "이 후보로 매치"
 BTN_UNMATCHED_SELECT_THIS = "이 후보로 선택"
-BTN_UNMATCHED_NEXT = "다음 사진"
-BTN_UNMATCHED_PREV = "← 이전"
-BTN_UNMATCHED_CLOSE = "검토 종료"
+BTN_UNMATCHED_NEXT = "다음 ▶"
+BTN_UNMATCHED_PREV = "◀ 이전"
 
 # ‘매칭 취소’ 결합 (#14) — 실패 검토가 `MissEntry.note` 에서 이 표시를 보고 해당
 # 항목을 목록 뒤로 모은다(`unmatched_review_dialog._is_cancelled`).
@@ -305,7 +281,6 @@ IMAGE_SIZE_LABEL = "사진 크기"
 SLOT_LABEL_FMT = "슬롯: {slot}"
 # 후보 패널 '슬롯 고르기' — 사진이 많아 지금 슬롯만 보일 때 다른 슬롯으로 넘어간다.
 SLOT_JUMP_LABEL = "다른 슬롯으로 이동"
-SLOT_JUMP_TOOLTIP = "사진이 많아 슬롯 하나씩 보여 줍니다 — 여기서 다른 슬롯으로 바로 넘어갈 수 있습니다"
 SLOT_JUMP_ITEM_FMT = "{slot} · {n}장"
 SLOT_JUMP_ITEM_NO_FMT = "#{no} · {slot} · {n}장"
 
@@ -329,12 +304,7 @@ MODE_BADGE_CAPTION = "판정 기준"
 JUDGE_NAME_COORD = "좌표 매칭 · 허용 오차"
 JUDGE_VALUE_COORD_FMT = "{tol:.0f} µm"
 JUDGE_NAME_LEGACY_FMT = "구형 {sub} · 유사도 임계치"
-JUDGE_VALUE_LEGACY_FMT = "{th:.0f} %"
-# ★ 배치에 종속된 안내를 하지 않는다 — "아래 '매칭 설정' 카드" 라고 쓰면 C안처럼
-#   상세를 접어 두는 배치에서는 화면에 없는 것을 가리킨다.
-MODE_BADGE_TOOLTIP = (
-    "지금 이 설정으로 매칭합니다.  아래 방식 구역에서 바꿀 수 있습니다."
-)
+JUDGE_VALUE_LEGACY_FMT = "{th:.0f}%"
 COORD_NO_DATA_MSG = (
     "좌표 정보가 없습니다.\n\n"
     "이미지 파일명 또는 폴더에 좌표 데이터(Camtek LIVE / INI / KLA .001)가\n"
@@ -347,14 +317,14 @@ SCORE_DIST_FMT = "{dist:.0f} µm"
 SCORE_DIST_OVER_FMT = "{dist:.0f} µm (허용 초과)"
 # 구형(유사도) 엔진의 점수 표기 — 좌표 모드의 µm 거리에 대응.  같은 포맷이 네 곳
 # (매치 검토 행·차순위 타일·매칭 목록·실패 검토)에 흩어져 갈라져 있었다.
-SCORE_SIMILARITY_FMT = "{pct:.1f} %"
+SCORE_SIMILARITY_FMT = "{pct:.1f}%"
 ENGINE_MODE_BASIC = "기본 모드"
 ENGINE_MODE_EFFICIENCY = "고효율 모드 (사진이 많을 때 권장)"
 COORD_TOLERANCE_LABEL = "허용 오차"
 # 허용 오차 ± 버튼 — Qt 기본 스핀 버튼(잘린 막대·10px 타깃) 대체.
 TOL_STEP_UP = "허용 오차 50 µm 늘리기"
 TOL_STEP_DOWN = "허용 오차 50 µm 줄이기"
-COORD_TOLERANCE_TOOLTIP = "같은 Defect 로 볼 최대 거리(µm). 작은 die 는 낮추세요."
+COORD_TOLERANCE_TOOLTIP = "같은 Defect 로 볼 최대 좌표 거리 (µm)"
 # 기준 폴더에서 읽어낸 die 크기 안내 — 허용 오차를 자재에 맞게 정하도록 돕는다.
 # 값을 대신 바꾸지는 않는다(기존 결과가 조용히 달라지면 안 된다).
 DIE_SIZE_DETECTED_FMT = "감지된 die: {x:,.0f} × {y:,.0f} µm  ({src})"
@@ -363,15 +333,13 @@ DIE_SIZE_SRC_KLA = "KLA .001 DiePitch"
 # 1초를 넘고(슬롯 25 × 결함 3,000 실측 1.4초), 아무 표시도 없으면 '안내가 원래
 # 없는 폴더' 와 구분되지 않는다.  진행을 모를 때도 멈춰 보이게 두지 않는다는
 # 로딩바 규칙(CLAUDE.md)과 같은 취지다.
-DIE_SIZE_CHECKING = "die 크기 확인 중…"
+DIE_SIZE_CHECKING = "die 크기 확인 중"
 # ⚠ **Camtek INI 좌표가 있는데 die pitch 를 못 정한 경우에만** 띄운다.
 # KLA 슬롯·LIVE 파일명 슬롯은 die 크기 없이도 좌표가 나오므로 경고 대상이 아니다.
 # 매칭 자체는 절대 wafer 좌표로 정상 동작한다 — 못 하는 건 die 단위 표기뿐이다.
-DIE_SIZE_NOT_FOUND = (
-    "die 크기를 찾지 못해 **절대 wafer 좌표**로 매칭합니다 (매칭은 정상).\n"
-    "die 내부 좌표·row 표기를 보려면 결과 폴더에 "
-    "Params_WaferInfo.ini(DieStep_X/Y) 또는 ProductInfo.ini(XDieIndex/YDieIndex) 가 필요합니다."
-)
+# ★ 짧은 한 문장 — 이 라벨은 서식 없는 글자라 '**' 가 그대로 보였고, 파일 이름 안내는
+#   사용자가 할 수 있는 일이 아니다(사용자 결정 2026-11-24, 설명 문장 금지).
+DIE_SIZE_NOT_FOUND = "die 크기를 못 찾아 절대 좌표로 매칭합니다."
 ENGINE_EFFICIENCY_CPU_ONLY = (
     "가속 장치(Intel GPU)가 없어 CPU만으로 고효율 모드를 실행합니다."
 )
@@ -387,7 +355,7 @@ MEMORY_PRESSURE_TOAST = "메모리 사용량이 높아 캐시를 정리했습니
 #   돌리라'는 행동으로 이어지지만, GPU 가동 여부로 사용자가 할 수 있는 일은 없었다.
 
 # ── Stage 2 더 크게 보기 ───────────────────────────────────────────────────
-EXPAND_VIEW_TOOLTIP = "이 사진을 크게 보기 (←/→ 이전·다음, Enter 매치, Esc 돌아가기)"
+EXPAND_VIEW_TOOLTIP = "크게 보기"
 # 확대 보기의 확정 버튼 — 좌우 비교(BTN_MATCH_THIS)·줌 윈도우(ZOOM_BTN_PICK_MATCH)와
 # **같은 동작이므로 같은 이름**을 쓴다(예전엔 여기만 '매치' 였다).
 BTN_CONFIRM_AS_MATCH = "이 후보로 매치"
@@ -423,10 +391,10 @@ RESULT_SAVED_AT_FMT = "저장 완료 {time}"
 # ★ 로딩 문구에 진행 수치({done}/{total})를 넣지 마라.  진행 수치는 웨이퍼 맵 **옆의
 #   모노 라벨**(LoadingOverlay._count_label)이 전담한다 — 문구에도 넣으면 같은 숫자가
 #   한 화면에 두 번 보인다("썸네일 생성 중 147 / 480" + "147 / 480").  단일 출처 규칙.
-LOAD_THUMBNAIL = "썸네일 생성 중…"
+LOAD_THUMBNAIL = "썸네일 생성 중"
 # 교차검증 2차 선별에 들어가기 전 — 1차 동안 천천히 만들던 검증 사진 썸네일을 마저 만든다.
-LOAD_THUMBNAIL_CROSS_B = "2차 선별용 썸네일 마무리 중…"
-LOAD_STAGE_PREP = "다음 단계 준비 중…"
+LOAD_THUMBNAIL_CROSS_B = "2차 선별용 썸네일 마무리 중"
+LOAD_STAGE_PREP = "다음 단계 준비 중"
 # ★ [검증 시작] 뒤의 세 단계.  단계가 바뀌면 진행바는 0 에서 다시 차는데(그 스냅은
 #   올바른 동작이다), 여정 표시가 없으면 "다 됐다가 다시 0 이 됐다" 로 읽힌다.
 #   바를 잇는 것이 답이 아니라, 화면이 '전체의 어디쯤' 을 말해야 한다 —
@@ -444,10 +412,10 @@ LOAD_JOURNEY_STEPS = ("폴더 스캔", "썸네일", "매칭 준비")
 #   사진을 각각 다시 임베드한다).  고정 문구 하나로는 그 사실이 전달되지 않아
 #   '3분째 같은 문장' 이 됐다.  행 수치는 여기 넣지 않는다 — 진행 라벨의 몫이다.
 EXPORT_PHASE_FMT = "엑셀로 저장 중 — {sheet} 시트 · {slot}"
-LOAD_REVIEW_ROWS = "검토 목록 준비 중…"
-LOAD_FEATURE = "검증 장비 특징 추출 중…"
-LOAD_SCORING = "유사도 계산 중…"
-LOAD_COORD = "좌표 매칭 중…"             # 좌표 모드는 유사도를 계산하지 않는다
+LOAD_REVIEW_ROWS = "검토 목록 준비 중"
+LOAD_FEATURE = "검증 장비 특징 추출 중"
+LOAD_SCORING = "유사도 계산 중"
+LOAD_COORD = "좌표 매칭 중"             # 좌표 모드는 유사도를 계산하지 않는다
 PHASE_FEATURE = "이미지 특징 분석"
 PHASE_SCORING = "유사도 계산"
 PHASE_EMBED = "후보 찾는 중"      # 고효율 모드 1단계 — 유사도 계산 직전
@@ -455,12 +423,8 @@ PHASE_COORD = "좌표 매칭 중"                # 좌표 기반 매칭 v2
 PHASE_COORD_PARSE = "좌표 읽는 중"         # 좌표 매칭 1단계
 # 수동 모드: 첫 슬롯만 기다리고 나머지는 백그라운드 (#streaming).
 # 선행 단계(특징 분석/임베딩) 동안에도 '유사도 계산' 으로 오인되지 않도록 중립 문구.
-LOAD_PRECOMPUTE_FIRST_SLOT = (
-    "첫 슬롯 준비 중… 잠시만 기다려 주세요."
-)
-LOAD_PRECOMPUTE_WAIT_FMT = (
-    "{slot} 슬롯 계산이 끝나기를 기다리는 중… 다음 슬롯은 백그라운드에서 준비됩니다"
-)
+LOAD_PRECOMPUTE_FIRST_SLOT = "첫 슬롯 준비 중"
+LOAD_PRECOMPUTE_WAIT_FMT = "{slot} 슬롯 계산 중"
 PRECOMPUTE_BG_STATUS_FMT = "백그라운드 유사도 계산: {idx} / {total} 슬롯 완료"
 PRECOMPUTE_BG_DONE = "유사도 계산 완료"
 
@@ -476,7 +440,7 @@ UPDATE_AVAILABLE_BODY = "새 버전이 있습니다. 지금 업데이트할까�
 UPDATE_BTN_NOW = "지금 업데이트"
 UPDATE_BTN_LATER = "나중에"
 UPDATE_UNKNOWN_CURRENT = "최신 버전을 받아 적용할까요?"
-UPDATE_DOWNLOADING = "업데이트 다운로드 중…"
+UPDATE_DOWNLOADING = "업데이트 다운로드 중"
 UPDATE_DONE_RESTART = "업데이트가 적용되었습니다.\n프로그램을 종료합니다. 다시 실행해 주세요."
 # exe 배포본은 실행 중인 app 폴더를 바꿀 수 없어 새 버전을 받아두기만 하고, 다음 실행 때
 # 런처가 교체한다.  '적용되었다' 고 하면 사실과 다르므로 문구를 나눈다.
@@ -492,20 +456,20 @@ UPDATE_NEEDS_NEW_BUNDLE = (
     "이번 업데이트에 필요한 패키지를 설치하지 못해 적용하지 않았습니다.\n"
     "지금 버전은 그대로 사용하실 수 있습니다.\n\n"
     "인터넷 연결을 확인한 뒤 다시 시도해 주세요.\n"
-    "계속 실패하면 관리자에게 새 배포본 'AOI_Verify' 폴더 전체(zip)를 요청하세요.\n"
+    "계속 실패하면 관리자에게 새 배포본 ‘AOI_Verify’ 폴더 전체(zip)를 요청하세요.\n"
     "app 폴더만 바꾸면 앱이 실행되지 않습니다."
 )
 UPDATE_FAILED = "업데이트에 실패했습니다. 잠시 후 다시 시도해 주세요."
-UPDATE_CHECKING = "업데이트 확인 중…"
+UPDATE_CHECKING = "업데이트 확인 중"
 UPDATE_LATEST = "최신 버전입니다."
 UPDATE_CONNECT_FAILED = "업데이트 서버에 연결하지 못했습니다. 인터넷·프록시를 확인하세요."
-UPDATE_BTN_CHECKING = "확인 중…"
+UPDATE_BTN_CHECKING = "확인 중"
 UPDATE_GIT_HINT = "개발(git) 환경입니다. 'git pull' 로 업데이트하세요."
 # 첫 화면 '업데이트 확인' 버튼 라벨(좌상단 도움말 메뉴 대체).
 MENU_CHECK_UPDATE = "업데이트 확인"
 # 접힌 왼쪽 메뉴 — 아이콘 아래에 붙는 짧은 이름(76px 폭 안에 들어가야 한다).
 RAIL_SHORT_NAMES = {
-    "match": "매칭", "image_info": "사진 정보", "wafer_map": "Wafer Map",
+    "match": "매칭", "image_info": "정보 조회", "wafer_map": "Map",
     "extract": "추출", "gl": "GL", "threshold": "Overkill", "zone_origin": "Zone",
     "update": "업데이트",
 }
@@ -518,18 +482,14 @@ DEV_MODE_ON = "개발자 모드를 켰습니다."
 DEV_MODE_OFF = "개발자 모드를 껐습니다. 자동 업데이트는 기본 브랜치를 따릅니다."
 DEV_MODE_BUTTON = "개발자 모드"
 DEV_MODE_TITLE = "개발자 모드 — 업데이트 대상"
-DEV_MODE_BODY = (
-    "업데이트를 받을 저장소와 브랜치를 고릅니다. 개발자 모드가 켜져 있는 동안에는 "
-    "자동 업데이트도 이 브랜치를 따릅니다. 브랜치를 비우면 기본 브랜치를 따릅니다.\n"
-    "개발자 모드를 끄면(Ctrl+Shift+D) 다음 업데이트부터 기본 브랜치로 돌아갑니다."
-)
+DEV_MODE_BODY = "브랜치를 비우면 기본 브랜치를 따릅니다.  끄기: Ctrl+Shift+D"
 DEV_MODE_CURRENT_FMT = "지금 설치된 버전: {branch} @ {sha}  ({repo})"
 DEV_MODE_CURRENT_UNKNOWN = "지금 설치된 버전: 알 수 없음"
 DEV_MODE_REPO = "저장소 (소유자/이름)"
 DEV_MODE_BRANCH = "브랜치"
 DEV_MODE_BRANCH_DEFAULT_HINT = "비우면 기본 브랜치"
 DEV_MODE_LOAD_BRANCHES = "브랜치 목록 불러오기"
-DEV_MODE_LOADING_BRANCHES = "브랜치 목록을 불러오는 중…"
+DEV_MODE_LOADING_BRANCHES = "브랜치 목록을 불러오는 중"
 DEV_MODE_BRANCHES_LOADED_FMT = "브랜치 {n}개를 불러왔습니다."
 DEV_MODE_BRANCHES_FAILED = "브랜치 목록을 불러오지 못했습니다. 이름을 직접 적어 주세요."
 DEV_MODE_CHECK = "업데이트 확인"
@@ -538,12 +498,12 @@ DEV_MODE_RESET = "기본으로 되돌리기"
 DEV_MODE_CLOSE = "닫기"
 DEV_MODE_OPEN_LOG = "로그 폴더 열기"
 DEV_MODE_LOG_PATH_FMT = "app.log 위치: {path}"
-DEV_MODE_CHECKING = "확인 중…"
+DEV_MODE_CHECKING = "확인 중"
 DEV_MODE_RESULT_UPDATE_FMT = "새 버전이 있습니다: {sha}  {message}"
-DEV_MODE_RESULT_LATEST_FMT = "이미 이 버전입니다: {sha}  ([이 브랜치로 설치] 로 다시 받을 수 있습니다)"
+DEV_MODE_RESULT_LATEST_FMT = "이미 이 버전입니다: {sha}"
 DEV_MODE_RESULT_UNKNOWN_FMT = "확인할 수 없습니다 — {error}"
 DEV_MODE_INSTALL_ASK_FMT = "{repo} 의 {branch} 브랜치({sha})를 설치할까요?"
-LOAD_AUTO_MATCH = "자동 매치 진행 중…"
+LOAD_AUTO_MATCH = "자동 매치 진행 중"
 
 # ── 자동 업데이트 진행 단계 (utils/updater.py → LoadingOverlay) ──────────────
 # ★ 이 문구들은 `updater.download_and_apply(progress=…)` 이 단계마다 보고하는 phase 다.
@@ -553,11 +513,11 @@ LOAD_AUTO_MATCH = "자동 매치 진행 중…"
 #   (UPDATE_DOWNLOADING='업데이트 다운로드 중…')와 어긋난 채 '다운로드 중…' 으로
 #   바뀌었다.  한 화면의 문구는 한 곳에서 정한다.
 UPDATE_PHASE_DOWNLOAD = UPDATE_DOWNLOADING
-UPDATE_PHASE_EXTRACT = "업데이트 압축 해제 중…"
-UPDATE_PHASE_PREPARE = "업데이트 준비 중…"
-UPDATE_PHASE_DEPS = "필요한 패키지 설치 중…"
-UPDATE_PHASE_APPLY = "업데이트 적용 중…"
-UPDATE_PHASE_WAIT_LOCK = "보안 검사가 새 파일 확인을 마치길 기다리는 중…"
+UPDATE_PHASE_EXTRACT = "업데이트 압축 해제 중"
+UPDATE_PHASE_PREPARE = "업데이트 준비 중"
+UPDATE_PHASE_DEPS = "필요한 패키지 설치 중"
+UPDATE_PHASE_APPLY = "업데이트 적용 중"
+UPDATE_PHASE_WAIT_LOCK = "보안 검사가 새 파일 확인을 마치길 기다리는 중"
 UPDATE_PHASE_DONE = "업데이트 완료"
 # 사용자에게는 크게 두 단계로만 보인다 — 받는 일(다운로드) / 그 뒤 전부(설치: 압축 해제·
 # 준비·패키지·적용).  `UPDATE_PHASE_DOWNLOAD` 만 1단계, 나머지 phase 는 2단계다.
@@ -598,18 +558,18 @@ OPENVINO_INSTALL_OK = "설치 완료"
 BOOT_DEPS_INSTALLING = "필요한 패키지를 설치합니다 — 처음 1회, 인터넷이 필요하고 몇 분 걸립니다."
 BOOT_DEPS_FAILED = "패키지 설치에 실패했습니다. 인터넷·프록시 설정을 확인한 뒤 다시 실행하세요."
 BOOT_DEPS_DONE = "설치가 끝났습니다."
-BOOT_PY_DOWNLOADING = "파이썬 런타임을 내려받는 중… (처음 1회, 수십 MB)"
+BOOT_PY_DOWNLOADING = "파이썬 런타임을 내려받는 중 (처음 1회, 수십 MB)"
 BOOT_PY_DOWNLOAD_FAILED_FMT = "파이썬 런타임 다운로드 실패: {error}"
 BOOT_PY_TOO_SMALL_FMT = (
     "받은 파일이 너무 작습니다({n} bytes) — 회사 프록시가 차단 페이지를 돌려줬을 수 있습니다."
 )
-BOOT_PY_EXTRACTING = "파이썬 런타임을 푸는 중…"
+BOOT_PY_EXTRACTING = "파이썬 런타임을 푸는 중"
 BOOT_PY_EXTRACT_FAILED_FMT = "파이썬 런타임 압축 해제 실패: {error}"
 BOOT_PY_NOT_FOUND = "파이썬 런타임을 풀었지만 실행 파일을 찾지 못했습니다."
 BOOT_PY_UNAVAILABLE = "파이썬 런타임을 준비하지 못해 시작할 수 없습니다."
-BOOT_APP_DOWNLOADING = "앱을 내려받는 중…"
+BOOT_APP_DOWNLOADING = "앱을 내려받는 중"
 BOOT_APP_DOWNLOAD_FAILED = "앱 다운로드 실패 — 인터넷 연결을 확인하세요."
-BOOT_DEPS_INSTALLING_FIRST = "필요한 패키지를 설치하는 중… (처음 1회, 인터넷 필요)"
+BOOT_DEPS_INSTALLING_FIRST = "필요한 패키지를 설치하는 중 (처음 1회, 인터넷 필요)"
 BOOT_DEPS_FAILED_SHORT = "패키지 설치 실패 — 인터넷/프록시 설정을 확인하세요."
 BOOT_APP_STARTING = "앱을 시작합니다…"
 
@@ -629,41 +589,26 @@ BTN_FINISH_REVIEW = "검토 완료"
 RUNNERUP_TOOLTIP = "클릭하면 이 사진으로 매치를 교체합니다."
 # A2 밀집 리스트 — 상단 집계 바 / 판정 칩 / 컴팩트 토글 (#A2)
 TALLY_KEPT_FMT = "유지 {n}"
-TALLY_OK_FMT = "일치 {n}"
+TALLY_OK_FMT = "매치 {n}"
 TALLY_OVER_FMT = "허용 초과 {n}"
 TALLY_NO_MATCH_FMT = "매치 없음 {n}"
 TALLY_COORD_FAILED_FMT = "매치 실패 {n}"
 # 네 낱말이 서로 어떻게 다른지 화면에서 설명한다 (U-13) — 이름만 봐서는
 # '매치 없음' 과 '매치 실패' 가 같은 말로 읽힌다.
 TALLY_TOOLTIP = (
-    "일치 — 짝을 찾았고 허용 오차 안에 든 매치입니다.\n"
-    "허용 초과 — 짝은 찾았지만 좌표 차이가 허용 오차를 넘었습니다.\n"
-    # ★ 여기서 다섯째 낱말을 만들지 않는다.  예전엔 "직접 '매치 아님' 으로 되돌린" 이라
-    #   적었는데 화면에 '매치 아님' 이라는 라벨은 없다(버튼은 BTN_MARK_NO_MATCH='매치
-    #   없음 ✕', 칩은 CHIP_NO_MATCH='매치 없음').  네 낱말의 차이를 설명하는 툴팁이
-    #   그 자리에서 없는 낱말을 새로 만들면 안 된다.
-    "매치 없음 — 검토에서 직접 ‘매치 없음’ 으로 되돌린 것입니다.\n"
-    "매치 실패 — 가장 가까운 후보조차 허용 오차의 3배를 넘어 짝으로 볼 수"
-    " 없었습니다 (이 화면에서는 고칠 수 없습니다).\n"
-    # 화면('매치 없음')과 엑셀('미매칭')의 낱말이 다른 유일한 자리 — 다리를 놓아 둔다.
-    "※ 매치 없음·매치 실패는 결과 엑셀에서 ‘미매칭’ 으로 적힙니다."
+    "매치 — 허용 오차 안\n"
+    "허용 초과 — 짝은 찾았지만 허용 오차를 넘음\n"
+    "매치 없음 — 검토에서 직접 되돌림\n"
+    "매치 실패 — 후보가 허용 오차의 3배 밖"
 )
 CHIP_OVER = "허용 초과"
 CHIP_NO_MATCH = "매치 없음"
 # ★ 기호 한 글자('×'·'↩')였다 — 줄 삭제인지 닫기인지 읽히지 않았다(사용자 지적 2026-11-11, 안 A).
 BTN_NO_MATCH_COMPACT = "✕ 매치 없음"
 BTN_RESTORE_COMPACT = "↩ 되돌리기"
-# 매치 없음으로 표시한 줄 아래 한 줄 — 화면('매치 없음')과 엑셀('미매칭')을 잇는다.
-REVIEW_NO_MATCH_NOTE = "결과에 ‘매치 없음(미매칭)’ 으로 나갑니다 · 후보를 누르면 그 사진으로 바뀝니다"
-REVIEW_EMPTY_HINT = (
-    # ★ 화면의 버튼 이름과 같게 적는다 — 예전엔 [완료] 라고 안내했지만 실제 버튼은
-    #   '검토 완료 · 유지 n' 이라, 있지도 않은 버튼을 찾게 만들었다.
-    "자동 매치된 항목이 없습니다.  [검토 완료] 를 누르면 결과 화면으로 이동합니다."
-)
-# 교차검증 1차 검토 — 다음은 결과가 아니라 2차 선별이다(문구가 틀린 곳으로 안내하던 것).
-REVIEW_EMPTY_HINT_CROSS_A = (
-    "자동 매치된 항목이 없습니다.  [검토 완료] 를 누르면 2차 선별로 이동합니다."
-)
+# 매치 없음으로 표시한 줄 아래 한 줄 — 후보가 그대로 살아 있다는 것만 짧게.
+REVIEW_NO_MATCH_NOTE = "후보를 누르면 그 사진으로 바뀝니다"
+REVIEW_EMPTY_HINT = "자동 매치된 항목이 없습니다"
 # 검토 리스트 컬럼 헤더 — ★ 이미지 세 종류를 **각자 자기 사진 위**에 놓기 위해
 # 하나였던 'COL_IMAGES = 기준 · 검증 · 후보' 를 셋으로 쪼갰다(한 라벨이면 어느 것도
 # 자기 사진 위에 없다).  폭 정렬은 match_review_page._sync_header_widths 가 맞춘다.
@@ -681,27 +626,26 @@ COMPARE_REF_CAPTION_FMT = "기준 — {name}"
 COMPARE_VAL_CAPTION_FMT = "검증 — {name}"     # 교차검증 역방향
 # 비교 뷰어 상단 조작 힌트.  확대/이동은 **마우스가 올라간 쪽 사진에만** 적용된다
 # (사용자 결정) — 기준을 그대로 두고 후보만 파고들어 볼 수 있다.
-COMPARE_HINT = "← → 후보 이동 · 휠 확대/축소 · 드래그 이동 (사진마다 따로)"
+COMPARE_HINT = "← → 후보 · 휠 확대 · 드래그 이동"
 # 액션 버튼이 달려 열린 비교 뷰어 전용 — Enter 로 확정할 수 있다는 사실을 싣는다.
 # Stage 2 확대 보기(match_expand_view)가 이미 ←/→ + Enter + Esc 문법을 쓰므로,
 # 같은 목적의 이 화면만 키가 다르면 손이 마지막에만 마우스로 옮겨 간다.
-COMPARE_HINT_ACTION = (
-    "← → 후보 이동 · Enter 선택 · 휠 확대/축소 · 드래그 이동 (사진마다 따로)")
+COMPARE_HINT_ACTION = "← → 후보 · Enter 선택 · 휠 확대 · 드래그 이동"
 # 단일 풀스크린 뷰어 — 화면에 사진 말고는 아무 표시가 없어 확대가 되는 줄 모른다.
-VIEWER_HINT = "휠 확대/축소 · 드래그 이동 · Ctrl+C 원본 복사 · Esc 닫기"
+VIEWER_HINT = "휠 확대 · 드래그 이동 · Ctrl+C 복사 · Esc 닫기"
 # Scan 범위 박스가 있는 뷰어 — 박스 밑 결함을 보려고 끄는 버튼.
 VIEWER_CROP = "크롭하기"
 VIEWER_CROP_CANCEL = "크롭 취소"
 VIEWER_CROP_TIP = "드래그한 구역을 원본 화질 그대로 복사합니다"
 VIEWER_CROP_HINT = "복사할 구역을 드래그하세요"
 VIEWER_COPIED_FULL = "원본 복사됨"
-VIEWER_ORIG_WAIT = "원본을 불러오는 중…"
+VIEWER_ORIG_WAIT = "원본을 불러오는 중"
 VIEWER_COPIED_CROP = "구역 복사됨 ({w}×{h}px)"
 VIEWER_BOX_OFF = "박스 끄기"
 VIEWER_BOX_ON = "박스 켜기"
 VIEWER_BOX_TIP = "Scan 범위 박스를 숨기거나 다시 보여줍니다 (B)"
 # Defect 의 Scan 사진 — Overkill 튜닝의 크게보기에서만
-VIEWER_SCAN_CHECKING = "Scan 확인 중…"
+VIEWER_SCAN_CHECKING = "Scan 확인 중"
 VIEWER_SCAN_YES = "Scan 있음"
 VIEWER_SCAN_NONE = "Scan 없음"
 VIEWER_SCAN_VIEW = "Scan image 보기"
@@ -710,8 +654,6 @@ VIEWER_SCAN_TIP = "이 Defect 자리의 Scan 사진(300 µm Crop)을 보여 줍�
 # ※ 검토 화면의 키보드 상호작용(↑↓ 줄 이동 · R 매치 없음 · Enter 검토 완료)과 키캡 힌트
 #   줄, '확인 필요만' 필터는 제거했다.  '매치 없음'은 행마다 있는 ✕ 토글, '검토 완료'는
 #   상단 버튼이 한다.  Enter 가 검토 전체를 끝내던 것은 특히 위험했다.
-# 카드 제목 옆 '?' 도움말 토글 (하드코딩 금지 — 사용자 노출 문자열은 여기 모은다)
-HELP_TOGGLE_TOOLTIP = "설명 보기/숨기기"
 
 # ※ 배치안 스위처(LAYOUT_*)와 C안 요약(SETUP_DETAIL_*·SUMMARY_*) 문구는 제거했다 —
 #   사용자가 '순서형' 배치를 확정하면서 비교용 스위처와 미선택 2안이 함께 사라졌다.
@@ -736,17 +678,22 @@ JOURNEY_BACK_TO_SETUP_BODY = (
     "저장하지 않은 결과는 복구할 수 없습니다.")
 
 # ※ '모션 줄이기' 토글은 제거했다 — 모션은 항상 켜진다(사용자 결정).
-LOAD_SCAN = "폴더 스캔 중…"          # 여정 규칙은 LOAD_JOURNEY_STEPS 주석 참조
-LOAD_EXPORT = "엑셀로 저장 중…"
-EXPORT_WRITING = "엑셀 파일 쓰는 중…"
+LOAD_SCAN = "폴더 스캔 중"          # 여정 규칙은 LOAD_JOURNEY_STEPS 주석 참조
+LOAD_EXPORT = "엑셀로 저장 중"
+EXPORT_WRITING = "엑셀 파일 쓰는 중"
 
 # ── 경고/안내 모달 ─────────────────────────────────────────────────────────
 WARN_SAME_PATH_TITLE = "경로 확인"
 WARN_SAME_PATH_BODY = (
     "기준 장비와 검증 장비의 경로가 동일합니다.\n"
-    "정말로 같은 폴더를 비교하시겠습니까?"
+    "정말로 같은 폴더를 비교할까요?"
 )
 WARN_PATH_NOT_EXIST = "선택한 경로가 존재하지 않습니다:\n{path}"
+# 안내 시트 제목 — 앱 이름 대신 무슨 일인지 짧게(현택님 2026-11-24).
+PATH_MISSING_TITLE = "경로 없음"
+SCAN_FAIL_TITLE = "스캔 실패"
+NO_IMAGES_TITLE = "사진 없음"
+NO_SLOTS_TITLE = "슬롯 없음"
 WARN_NO_SLOTS = "두 폴더에 공통된 슬롯이 존재하지 않습니다."
 # 폴더 스캔이 실패했을 때 (U-05) — 예전엔 로딩만 켜진 채 앱이 잠긴 것처럼 보였다.
 WARN_SCAN_FAILED_FMT = (
@@ -757,13 +704,12 @@ WARN_SCAN_FAILED_FMT = (
 WARN_NO_IMAGES = "선택된 슬롯에 이미지가 없습니다."
 WARN_SLOT_MISMATCH_TITLE = "슬롯 불일치"
 WARN_SLOT_MISMATCH_FMT = (
-    "한쪽에만 있는 Slot 이 있습니다.\n\n"
-    "기준 전용: {ref_only}\n검증 전용: {val_only}"
+    "한쪽에만 있는 슬롯이 있습니다.\n"
+    "\n"
+    "기준 전용: {ref_only}\n"
+    "검증 전용: {val_only}"
 )
-SLOT_MAP_TITLE = "Slot 매핑"
-SLOT_MAP_HINT = (
-    "남은 Slot 을 양쪽에서 하나씩 골라 ‘연결’ 하세요. 다시 누르면 해제됩니다."
-)
+SLOT_MAP_TITLE = "슬롯 수동 매핑"
 SLOT_MAP_REF_LABEL = "기준 (남은 슬롯)"
 SLOT_MAP_VAL_LABEL = "검증 (남은 슬롯)"
 SLOT_MAP_ADD = "연결 ↔"
@@ -772,13 +718,9 @@ SLOT_MAP_PAIRS_LABEL = "연결된 Slot"
 # ※ SLOT_MAP_OPEN('매핑 다이얼로그 열기')은 제거했다 — 전 저장소 참조 0건.
 #   확인창은 SLOT_MAP_ASK 문장 + 표준 예/아니오 버튼을 쓴다(U-23).
 # 확인창 본문용 완결 문장 — 라벨에 " ?" 를 붙여 만들던 비문을 대체한다.
-SLOT_MAP_ASK = "Slot 매핑을 직접 할까요?"
+SLOT_MAP_ASK = "슬롯을 직접 짝지을까요?"
 
 # ── 일부 슬롯만 진행 (Setup) ───────────────────────────────────────────────
-SLOT_SELECT_BTN_TOOLTIP = (
-    "기준 폴더의 슬롯 중 이번 검증에서 진행할 슬롯만 선택합니다.\n"
-    "선택하지 않으면 모든 공통 슬롯을 진행합니다."
-)
 SLOT_SELECT_TITLE = "슬롯 선택"
 # 다이얼로그 상단 — 지금 무엇이 진행되는지 **큰 글자로** 말한다(이전엔 '선택 3 / 24' 뿐).
 SLOT_SELECT_COUNT_HEAD_FMT = "{total}개 중 {n}개 선택"
@@ -791,22 +733,18 @@ SLOT_SELECT_PICK_VISIBLE = "검색 결과 선택"
 SLOT_SELECT_NEED_ONE = "최소 한 개는 선택해야 합니다."
 # ※ SLOT_SELECT_KEY_HINT 는 제거했다 — 타일 키보드 조작을 없앴으므로(사용자 결정)
 #   안내할 키가 남지 않았다.  화면에 지키지 못할 약속을 적어 두지 않는다.
-SLOT_SELECT_HINT = (
-    "이번에 쓸 슬롯을 눌러 고르세요. 이름을 알면 위에서 바로 찾을 수 있습니다.\n"
-    "고르지 않은 슬롯은 이번 작업에서 제외됩니다."
-)
 SLOT_SELECT_ALL = "전체 선택"
 SLOT_SELECT_NONE = "전체 해제"
 # 타일 둘째 줄 — 그 슬롯에 사진이 몇 장인지(사용자 요청: "slot별로 몇 개 있는지 보이게").
 # ★ 세는 것은 **결함 사진 장수**다(`models.slot.count_images`) — 웨이퍼 전경 사진은
 #   빠지므로 검증이 실제로 도는 장수와 같다.  좌표 항목 수가 아니다.
 # ★ 폴더를 열거해야 알 수 있어 워커가 채운다.  채워지기 전에는 빈칸이 아니라
-#   '확인 중…' 을 보여 준다(로딩바 계약과 같은 취지 — 모를 때도 멈춰 보이지 않게).
-SLOT_SELECT_TILE_COUNT_FMT = "기준 {ref}장 · 검증 {val}장"
-SLOT_SELECT_TILE_COUNT_PENDING = "확인 중…"
+#   '확인 중' 을 보여 준다(로딩바 계약과 같은 취지 — 모를 때도 멈춰 보이지 않게).
+SLOT_SELECT_TILE_COUNT_FMT = "기준 {ref} · 검증 {val}"
+SLOT_SELECT_TILE_COUNT_PENDING = "확인 중"
 SLOT_SELECT_TILE_COUNT_NONE = "—"      # 검증 폴더에 그 슬롯이 없다
 # KLA 폴더 타일 이름 — 폴더명(검사 시각) 대신 정보파일의 WaferID·Slot 번호(사용자 요청).
-SLOT_SELECT_KLA_FMT = "{wafer_id}  ·  슬롯 #{slot}"
+SLOT_SELECT_KLA_FMT = "{wafer_id} · 슬롯 #{slot}"
 SLOT_MAP_FOLDER_TIP_FMT = "폴더: {folder}"
 # 진행 범위 타일 — 상태를 옆 라벨이 아니라 타일 자신이 말한다.
 SCOPE_TITLE = "진행 범위"
@@ -818,7 +756,7 @@ SETUP_INVALID_FOLDER = "폴더 없음"
 SETUP_NO_PHOTOS = "사진 0장"
 START_BLOCKED_HINT = "기준·검증 폴더를 먼저 지정하세요."
 # 폴더 존재 확인이 아직 안 끝났을 때 — 네트워크 폴더는 응답이 느릴 수 있다 (P-15).
-START_CHECKING_HINT = "폴더를 확인하는 중입니다…"
+START_CHECKING_HINT = "폴더를 확인하는 중"
 # 폴더는 다 골랐는데 아직 구성 요소를 불러오는 중일 때 — 곧 저절로 풀린다.
 START_PREPARING_HINT = "구성 요소를 불러오는 중입니다. 잠시만 기다려 주세요."
 # 그 불러오기가 실패한 경우(설치 손상 등) — 시작 버튼은 잠긴 채로 둔다.
@@ -831,23 +769,20 @@ BACKEND_LOAD_FAILED_FMT = (
 #   통째로 비므로, 되돌릴 기회를 한 번 준다.
 SELECT_NONE_CHOSEN_TITLE = "검증 대상이 없습니다"
 SELECT_NONE_CHOSEN_BODY = (
-    "검증 대상으로 고른 사진이 한 장도 없습니다.\n"
-    "이대로 진행하면 매칭할 사진이 없어 결과가 비어 있습니다.\n\n"
+    "검증 대상으로 고른 사진이 없습니다.\n"
+    "\n"
     "설정 화면으로 돌아갈까요? (아니오 = 그대로 진행)"
 )
 SLOT_SELECT_NEED_REF = "먼저 기준 폴더를 선택하세요."
 
 # 이전 결과 엑셀을 기준으로 쓰기 (기준 폴더 줄의 [엑셀로])
-EXCEL_REF_LOADING = "엑셀에서 기준 사진 꺼내는 중…"
+EXCEL_REF_LOADING = "엑셀에서 기준 사진 꺼내는 중"
 EXCEL_REF_DONE_TIP_FMT = "{name}\n사진 {photos}장 · 슬롯 {groups}개 · 좌표 {coords}장"
 EXCEL_REF_ERR_NOFILE = "엑셀 파일을 찾을 수 없습니다."
 EXCEL_REF_ERR_OPEN = "엑셀을 열 수 없습니다. 다른 프로그램에서 열려 있거나 손상된 파일일 수 있습니다."
 EXCEL_REF_ERR_NOPHOTO = "이 엑셀에서 기준 사진을 찾지 못했습니다. 앱이 저장한 결과 엑셀인지 확인하세요."
 EXCEL_REF_PICK_SHEETS_TITLE = "기준으로 쓸 시트 선택"
-EXCEL_REF_PICK_SHEETS_HINT = (
-    "이 엑셀은 여러 시트(LOT)에 같은 이름의 슬롯이 있습니다. "
-    "섞이지 않게, 한 LOT 에 해당하는 시트만 고르세요."
-)
+EXCEL_REF_PICK_SHEETS_HINT = "같은 슬롯 이름이 여러 시트(LOT)에 있습니다. 한 LOT 만 고르세요."
 EXCEL_REF_SHEET_COUNT_FMT = "사진 {n}장"
 EXCEL_REF_SHEET_SEARCH = "시트 이름으로 찾기"
 EXCEL_REF_PARTIAL_FMT = "좌표가 없는 사진 {n}장은 이미지 유사도로만 비교합니다."
@@ -855,24 +790,17 @@ SLOT_SELECT_EMPTY = "기준 폴더에서 슬롯(하위 폴더)을 찾지 못했�
 
 # ── 기준 사진 재사용 (#6) ──────────────────────────────────────────────────
 REF_REUSE_TITLE = "이전 기준 사진 재사용"
-REF_REUSE_BODY_FMT = (
-    "이 기준 폴더로 이전에 매치를 진행한 기록이 있습니다.\n"
-    "그때 직접 고른 기준 사진 {n}장을 그대로 사용하시겠습니까?\n\n"
-    "예 — 해당 사진들을 자동으로 ‘검증 대상’ 으로 옮긴 상태에서 시작합니다.\n"
-    "아니오 — 처음부터 직접 고릅니다."
-)
+REF_REUSE_BODY_FMT = "이 기준 폴더에서 전에 고른 기준 사진 {n}장을 그대로 쓸까요?"
 # KLA slot 해석 단계 — 로딩창에 현재 진행 단계(정보파일/OCR)를 실시간 표시.
-LOAD_KLA_INFO = "KLA 정보파일 읽는 중…"
-LOAD_KLA_OCR = "KLA 웨이퍼 번호 읽는 중…"
+LOAD_KLA_INFO = "KLA 정보파일 읽는 중"
+LOAD_KLA_OCR = "KLA 웨이퍼 번호 읽는 중"
 
 # slot 매칭 실패 시 'KLA 가 어느 쪽?' 확인 — 호기가 K-n 이면 자동, 아니면 묻는다.
-KLA_ASK_TITLE = "KLA 장비 확인"
-# 팝업 최상단에 크게·색상으로 강조되는 핵심 질문(#2).
-KLA_ASK_SIDE_HEADING = "KLA 장비가 어느 쪽인가요?"
-KLA_ASK_SIDE_BODY = "KLA(WaferID) 장비 위치를 선택하세요. 없으면 ‘KLA 아님’."
+# 그림 카드 넷 + [취소](BTN_CANCEL) — 설명문 없음(현택님 2026-11-24, K1 A안).
+KLA_ASK_TITLE = "KLA 장비는 어느 쪽?"
 KLA_SIDE_REF = "기준"
 KLA_SIDE_VAL = "검증"
-KLA_SIDE_BOTH = "둘다"
+KLA_SIDE_BOTH = "둘 다"
 KLA_SIDE_NONE = "KLA 아님"
 
 INFO_RESUME_TITLE = "이전 검증 설정 복원"
@@ -880,10 +808,8 @@ INFO_RESUME_TITLE = "이전 검증 설정 복원"
 #   임계치 같은 **입력값뿐**이고, 선별 결정은 처음부터 다시 한다.  다만 직접 고른
 #   기준 사진은 기록해 두므로 선별 화면에서 '재사용할까요?' 로 되돌려 받을 수 있다.
 INFO_RESUME_BODY = (
-    "마치지 못한 검증이 있습니다.  이전 입력값(폴더·호기·판정 기준)을 복원해 "
-    "처음부터 다시 시작할까요?\n\n"
-    "선별은 다시 하게 되지만, 직접 고르셨던 기준 사진은 선별 화면에서 "
-    "재사용할지 물어봅니다."
+    "마치지 못한 검증이 있습니다.\n"
+    "이전 입력값(폴더·호기·판정 기준)으로 처음부터 다시 시작할까요?"
 )
 # ※ INFO_PHASE_TRANSITION_TITLE('단계 전환')·INFO_PHASE_A_TO_MATCH 는 제거했다 —
 #   U-14 로 '선택지 없는 안내 모달' 을 없앨 때 문구만 남아 참조가 0건이었다
@@ -894,24 +820,15 @@ INFO_RESUME_BODY = (
 #   없는 영어 낱말('Skip')과 낱말 규약을 어긴 표기는 지금 고쳐 둔다.
 INFO_NO_MATCH_FOUND = "조건에 맞는 검증 후보가 없습니다. 자동으로 ‘매치 없음’ 으로 처리됩니다."
 INFO_NO_VAL_PHOTOS = "이 슬롯에 검증 사진이 없습니다. 자동으로 ‘매치 없음’ 으로 처리됩니다."
-INFO_ALREADY_MATCHED_SECTION = "이미 매칭됨 (자동 제외)"
+INFO_ALREADY_MATCHED_SECTION = "이미 매치됨 (자동 제외)"
 
 # ── 저장/엑셀 ──────────────────────────────────────────────────────────────
 # 마지막 저장 직전에 뜨는 제목 확인창(사용자 요청).  여기서는 **이름만** 정한다 —
 # 파일은 이 창에서 이름을 확정한 뒤에야 만들어진다(검증 시작 때 미리 만들지 않는다:
 # 저장까지 안 간 세션마다 빈 xlsx 가 남았다).
 SAVE_NAME_TITLE = "저장할 파일 이름"
-SAVE_NAME_BODY = (
-    "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
-    "규칙: 장비 자재_Layer_S/M 검증(기준 장비 기준)"
-)
-SAVE_NAME_CROSS_BODY = (
-    "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
-    "규칙: 기준 장비 vs 검증 장비 자재_Layer_S/M 교차검증"
-)
 SAVE_NAME_FOLDER_FMT = "저장 폴더: {path}"
 # 이름 아래 칸들 — 추천값이 들어 있고, 고친 뒤 버튼을 누르면 위 이름을 다시 만든다(사용자 요청 2026-10-30).
-SAVE_NAME_FIELDS_HINT = "아래 값을 고친 뒤 ‘제목 자동 생성’을 누르면 위 이름이 바뀝니다. 비워 둔 값은 제목에서 빠집니다."
 SAVE_NAME_AUTO = "제목 자동 생성"
 SAVE_NAME_FIELD_VAL = "검증 장비"
 SAVE_NAME_FIELD_REF = "기준 장비"
@@ -920,13 +837,18 @@ SAVE_NAME_FIELD_LAYER = "Layer"
 SAVE_NAME_FIELD_MATERIAL = "자재"
 SAVE_NAME_FIELD_SM = "S/M"
 SAVE_NAME_OK = "이 이름으로 저장"
+SAVE_NAME_EXISTS = "같은 이름 있음 · 다시 누르면 덮어씀"
+SAVE_NAME_OVERWRITE = "덮어쓰기"
 SAVE_NAME_CANCEL = "취소"
 SAVE_NAME_EMPTY = "이름을 비워 둘 수 없습니다."
 SAVE_NAME_BAD_CHARS = "파일 이름에 쓸 수 없는 문자가 있습니다:  \\ / : * ? \" < > |"
 SAVE_DIALOG_TITLE = "결과 엑셀 저장 위치 선택"
 SAVE_FILENAME_FMT = "AOI검증결과_{ref}_vs_{val}_{ts}.xlsx"
+# 저장 결과 시트 제목 — 앱 이름 대신(현택님 2026-11-24).
+SAVE_SUCCESS_TITLE = "저장 완료"
+SAVE_FAIL_TITLE = "저장 실패"
 SAVE_SUCCESS_FMT = "엑셀 저장 완료:\n{path}"
-SAVE_FAIL_FMT = "엑셀 저장 실패:\n{error}"
+SAVE_FAIL_FMT = "저장 실패 · {error}"
 # ★ 가장 흔한 실패는 결과 파일이 엑셀에서 열려 있는 경우다.  OS 원문만 보여 주면
 #   무엇을 해야 할지 알 수 없으므로 **다음 행동을 먼저** 말한다.
 SAVE_FAIL_LOCKED_FMT = (
@@ -938,10 +860,11 @@ SAVE_FAIL_LOCKED_FMT = (
 # ⚠ **엑셀 표기만 예외로 'Slot' 을 남긴다.**  화면 문구는 전부 '슬롯' 으로 통일했지만
 #   (STAT_SLOT_MISMATCH·WARN_SLOT_MISMATCH_*·SLOT_MAP_TITLE·SLOT_LABEL_FMT·
 #   LOT_COUNTS_PREFIX·WARN_NO_SLOTS·WARN_NO_IMAGES·LOAD_KLA_INFO), 시트 이름·헤더는
-#   현장 양식과 맞춰야 하므로 확인 전까지 건드리지 않는다(같은 이유로 `NOTE_UNMATCHED`
-#   의 '미매칭' 도 남는다 — 다리는 TALLY_TOOLTIP 이 놓는다).
+#   현장 양식과 맞춰야 하므로 확인 전까지 건드리지 않는다.  '미매칭' 은 화면과 같은
+#   '매치 없음' 으로 바꿨다(현택님 2026-11-24) — 시트 이름·메모는 되읽는 곳이 없다
+#   (`utils/excel_ref` 는 시트 이름 대신 머리줄로 배치를 고르고, 메모는 읽지 않는다).
 SLOT_MISMATCH_SHEET = "Slot 불일치 목록"
-SHEET_UNMATCHED = "미매칭 사진"
+SHEET_UNMATCHED = "매치 없음 사진"
 # 미매칭 행 D열 — 결함 geometry(area/width/length/contrast) 표기.  Surface.flt 에서
 # 환산해 파일명 아래 회색 글씨로 덧붙인다.  값을 못 얻을 때의 명시적 마커:
 GEOM_NOT_SUPPORTED = "측정정보 미지원 자재"   # Surface.flt 자체가 없는 자재(예: KLA)
@@ -960,25 +883,19 @@ EXPORT_OPTIONS_CAPTION = "엑셀 저장 옵션"
 SAVE_TARGET_FMT = "저장 파일명: {name}"
 SAVE_TARGET_AGAIN_FMT = "다시 저장: 같은 파일에 덮어씀 · {path}"
 
-# 결과 화면 — 미매칭 사진만 원본 화질로 임베드 옵션 (기본 해제).
-EXPORT_UNMATCHED_ORIGINAL_LABEL = "미매칭 사진만 원본 화질로 넣기"
-EXPORT_UNMATCHED_ORIGINAL_TOOLTIP = (
-    "체크하면 미매칭 사진만 원본 화질 그대로 임베드합니다.\n"
-    "매칭된 사진은 중간 화질 캐시를 그대로 써서 파일이 크게 늘지 않습니다.\n"
-    "‘사진을 원본 화질로 넣기’ 를 켜면 이 옵션과 무관하게 모든 사진이 원본 화질입니다."
-)
+# 결과 화면 — 매치 없음 사진만 원본 화질로 임베드 옵션 (기본 해제).
+EXPORT_UNMATCHED_ORIGINAL_LABEL = "매치 없음 사진만 원본 화질로 넣기"
+EXPORT_UNMATCHED_ORIGINAL_TOOLTIP = "나머지 사진은 중간 화질"
 # 결과 화면 — 사진을 원본 화질로 임베드 옵션 (기본 해제).
 EXPORT_ORIGINAL_QUALITY_LABEL = "사진을 원본 화질로 넣기"
-EXPORT_ORIGINAL_QUALITY_TOOLTIP = (
-    "체크하면 셀에 들어가는 사진을 줄이지 않고 원본 화질 그대로 임베드합니다.\n"
-    "기본(해제)은 중간 화질 캐시를 사용해 더 빠르고 가벼운 파일이 됩니다.\n"
-    "원본은 화질이 좋지만 파일 용량이 크게 늘고 저장이 느려질 수 있습니다."
-)
+EXPORT_ORIGINAL_QUALITY_TOOLTIP = "파일이 커지고 저장이 느려집니다"
 
 # ── 단일 사진 정보 ─────────────────────────────────────────────────────────
 # 사진 한 장에서 뽑은 결함 계측.  `coords.single_info` 가 유일한 생산자이고 두 화면이
-# **같은 수치**를 쓴다 — 엑셀 미매칭 행(D열)은 `_FMT`(한 줄), 정보 화면은
+# **같은 수치**를 쓴다 — 엑셀 매치 없음 행(D열)은 `_FMT`(한 줄), 정보 화면은
 # `_LABEL`/`_VALUE_FMT`(제도 시트 표의 2열).  셋은 한 자리에서 같은 값으로 채워진다.
+# ⚠ 단위 글자가 다르다: 화면(`_VALUE_FMT`)은 µm, 엑셀 D열(`_FMT`)은 ㎛ 그대로 —
+#   `utils/excel_ref` 가 D열 좌표 줄을 ㎛ 로 되읽는다(옛 결과 파일 호환).
 DEFECT_RECIPE_ZONE_LABEL = "recipe / zone"
 DEFECT_RECIPE_ZONE_VALUE_FMT = "{recipe} / {zone}"
 DEFECT_RECIPE_ZONE_FMT = "recipe {recipe} / zone {zone}"
@@ -986,17 +903,21 @@ DEFECT_RECIPE_NONE_VALUE = "—"  # Surface.flt 에 recipe 칸이 없는 구형 
 # 장비 Export 와 같은 Type('<검사>-<Zone>') · 종류 이름(EquipmentClassifications) · 분류 이름(Export Classify).
 DEFECT_TYPE_LABEL = "type"
 DEFECT_TYPE_VALUE_FMT = "{kind}-{zone}"
-DEFECT_TYPE_NAME_LABEL = "defect"
+DEFECT_TYPE_NAME_LABEL = "Defect"
 DEFECT_CLASS_LABEL = "classify"
 # Height.flt(3D) Defect 의 높이 — 장비 Export 의 Height 값.
 DEFECT_HEIGHT_LABEL = "height"
-DEFECT_HEIGHT_VALUE_FMT = "{v:.2f} ㎛"
+DEFECT_HEIGHT_VALUE_FMT = "{v:.2f} µm"
+DEFECT_HEIGHT_FMT = "height {v:.2f} ㎛"
 DEFECT_AREA_LABEL = "area"
-DEFECT_AREA_VALUE_FMT = "{v:.2f} ㎛²"
+DEFECT_AREA_VALUE_FMT = "{v:.2f} µm²"
+DEFECT_AREA_FMT = "area {v:.2f} ㎛²"
 DEFECT_WIDTH_LABEL = "width"
-DEFECT_WIDTH_VALUE_FMT = "{v:.2f} ㎛"
+DEFECT_WIDTH_VALUE_FMT = "{v:.2f} µm"
+DEFECT_WIDTH_FMT = "width {v:.2f} ㎛"
 DEFECT_LENGTH_LABEL = "length"
-DEFECT_LENGTH_VALUE_FMT = "{v:.2f} ㎛"
+DEFECT_LENGTH_VALUE_FMT = "{v:.2f} µm"
+DEFECT_LENGTH_FMT = "length {v:.2f} ㎛"
 DEFECT_CONTRAST_LABEL = "contrast"
 DEFECT_CONTRAST_VALUE_FMT = "{v:.2f}"
 # contrast 는 일부 자재(예: PI)만 측정 — 0 은 ‘측정 안 함’이라 0.00 대신 ‘—’.
@@ -1005,7 +926,7 @@ DEFECT_COLROW_LABEL = "col / row"
 DEFECT_COLROW_VALUE_FMT = "{col} / {row}"
 DEFECT_COLROW_FMT = "col {col} / row {row}"
 DEFECT_XY_LABEL = "x / y"
-DEFECT_XY_VALUE_FMT = "{x:.0f} / {y:.0f} ㎛"
+DEFECT_XY_VALUE_FMT = "{x:.0f} / {y:.0f} µm"
 DEFECT_XY_FMT = "x {x:.0f} / y {y:.0f} ㎛"
 DEFECT_KLA_NATIVE_LABEL = "KLA원본 x / y"
 # die pitch 를 못 찾아 die 로 쪼개지 못한 경우(source="camtek_abs") — 있는 사실만 적는다.
@@ -1021,7 +942,7 @@ DEFECT_NUMBER_WARN_FMT = "⚠ {text}"
 # 매칭·검토 화면 위 큰 경고 — col / row 를 장비 번호표 없이 계산한 웨이퍼(`coords.number_risk`).
 # 좌표 매칭 중 좌표를 못 읽어 사진 모양(유사도)으로 짝을 찾은 기준 사진 — 검토 화면.
 REVIEW_NO_COORD_BANNER_FMT = ("⚠ 좌표를 못 읽은 기준 사진 {n}장은 좌표 대신 사진 모양(유사도)으로 짝을 찾았습니다. "
-                              "'좌표 없음' 표시가 붙은 줄을 직접 확인해 주세요.")
+                              "‘좌표 없음’ 표시가 붙은 줄을 직접 확인해 주세요.")
 REVIEW_NO_COORD_TAG = "좌표 없음"
 REVIEW_NO_COORD_TIP = "이 기준 사진은 좌표를 못 읽어 사진 모양(유사도)으로 후보를 찾았습니다. 점수는 거리(µm)가 아니라 유사도입니다."
 NUMBER_RISK_HEAD = "⚠ 틀릴 확률이 매우 높습니다!!  col / row 번호를 확실히 정하지 못한 웨이퍼가 있습니다"
@@ -1035,16 +956,18 @@ DEFECT_ABS_XY_FMT = "wafer x {x:.0f} / y {y:.0f} ㎛"
 # 화면 전용 라벨 — 파일 하나에서만 의미 있는 항목(엑셀에는 나가지 않는다).
 IMAGE_INFO_LOADING = "사진 정보를 불러오는 중"
 IMAGE_INFO_GROUP_FILE = "파일"
-IMAGE_INFO_GROUP_DEFECT = "결함 계측"
-IMAGE_INFO_COL_VALUE = "값"
+IMAGE_INFO_GROUP_DEFECT = "Defect 계측"
 IMAGE_INFO_ROW_FILE = "파일명"
 IMAGE_INFO_ROW_FOLDER = "폴더"
-IMAGE_INFO_ROW_WAFER_ID = "WaferID"
+IMAGE_INFO_ROW_LOT = "LOT"
+IMAGE_INFO_ROW_WAFER_ID = "Wafer ID"
+IMAGE_INFO_ROW_SLOT = "슬롯"
+IMAGE_INFO_UNKNOWN = "—"              # LOT · Wafer ID · Slot# 를 장비 파일에서 못 읽었을 때
 IMAGE_INFO_ROW_SOURCE = "좌표 출처"
 IMAGE_INFO_ROW_ABS_XY = "절대 X / Y"
 IMAGE_INFO_ROW_PIXEL = "픽셀 크기"
-IMAGE_INFO_ABS_XY_FMT = "{x:.0f} / {y:.0f} ㎛"
-IMAGE_INFO_PIXEL_FMT = "{v:.3f} ㎛/px"
+IMAGE_INFO_ABS_XY_FMT = "{x:.0f} / {y:.0f} µm"
+IMAGE_INFO_PIXEL_FMT = "{v:.3f} µm/px"
 # 판정 스탬프 — 측정정보 유무를 한눈에.  미지원/없음은 GEOM_* 를 그대로 쓴다.
 IMAGE_INFO_STAMP_MEASURED = "측정정보 있음"
 # DefectCoord.source 코드 → 사람이 읽는 이름.
@@ -1056,23 +979,18 @@ IMAGE_INFO_SOURCE_NAMES = {
 }
 
 # 다이얼로그.
-IMAGE_INFO_BUTTON = "사진 정보 보기"
-IMAGE_INFO_TITLE = "단일 사진 정보"
-IMAGE_INFO_SUBTITLE = "결과 엑셀에 찍히는 것과 같은 좌표·계측값을 사진 한 장에서 바로 읽습니다"
+# ★ 메뉴 이름 = 화면 제목 = 이 화면을 여는 다른 버튼 이름(현택님 2026-11-24).
+IMAGE_INFO_BUTTON = "Defect 정보 조회"
+IMAGE_INFO_TITLE = IMAGE_INFO_BUTTON
 IMAGE_INFO_PICK = "사진 선택"
-IMAGE_INFO_PICK_ANOTHER = "다른 사진"
+# 도구 화면 빈 화면 — 가운데 큰 [사진 선택]/[폴더 선택] 아래 짧은 한 줄(현택님 2026-11-24 B1 안 B).
+EMPTY_DROP_HINT = "끌어다 놓기 가능"
+IMAGE_INFO_LISTING = "사진 목록 읽는 중"
+IMAGE_INFO_NO_PHOTOS = "사진 없음"
+IMAGE_INFO_PHOTO_POS_FMT = "{i} / {n}"        # 여러 장 넘겨 보기 — 지금 사진 / 전체
 IMAGE_INFO_FILE_FILTER_FMT = "사진 파일 ({patterns})"
-IMAGE_INFO_NO_FILE = (
-    "사진을 이 창으로 끌어다 놓거나, ‘사진 선택’(Ctrl+O) 을 누르세요.\n\n"
-    "계측값은 사진이 든 폴더의 정보파일에서 읽습니다 — "
-    "ColorImageGrabingInfo.ini(Camtek) · KLA 정보파일 · Surface.flt.\n"
-    "사진만 따로 복사한 폴더에서는 일부 항목이 나오지 않습니다."
-)
-IMAGE_INFO_EMPTY = (
-    "이 사진에서 읽을 수 있는 결함 정보가 없습니다.\n"
-    "폴더에 정보파일(ColorImageGrabingInfo.ini / KLA 정보파일 / Surface.flt)이 "
-    "있는지 확인하세요."
-)
+IMAGE_INFO_NO_FILE = "사진을 끌어다 놓거나 ‘사진 선택’(Ctrl+O) 을 누르세요"
+IMAGE_INFO_EMPTY = "이 사진의 정보파일을 찾지 못했습니다"
 IMAGE_INFO_COPY = "전체 복사"
 # 업데이트 안내 — 업데이트 후 첫 실행 때 한 번(항목은 `i18n/whats_new.py`).
 WHATS_NEW_TITLE = "업데이트 안내"
@@ -1089,8 +1007,25 @@ SCAN_IMAGE_LOADING = "Scan 이미지 불러오는 중"
 # 불러오는 동안 문구 아래에서 도는 점 — 폭이 같은 프레임이라 글자가 흔들리지 않는다.
 SCAN_IMAGE_LOADING_DOTS = ("●  ○  ○", "○  ●  ○", "○  ○  ●", "○  ●  ○")
 SCAN_IMAGE_UNREADABLE = "Scan 이미지를 읽을 수 없음"
-SCAN_IMAGE_OPEN_TIP = "누르면 전체 Scan 이미지에서 이 범위를 보여줍니다"
-IMAGE_INFO_OPEN_TIP = "누르면 크게 보여줍니다"
+SCAN_IMAGE_OPEN_TIP = "전체 Scan 이미지 보기"
+IMAGE_INFO_OPEN_TIP = "크게 보기"
+# ── 흑백 Scan 사진만 넣었을 때 — 그 안에 찍힌 Defect 를 찾아 잘라 보인다(사용자 요청 2026-11-24) ──
+IMAGE_INFO_ROW_SCAN = "Scan 사진"
+IMAGE_INFO_ROW_DEFECT_PHOTO = "Defect 사진"
+SCAN_DEFECT_TITLE_FMT = "Defect 위치 ({um:.0f} µm)"
+SCAN_DEFECT_STEP_FMT = "Defect {i} / {n}"
+SCAN_DEFECT_PREV = "◀"
+SCAN_DEFECT_NEXT = "▶"
+SCAN_DEFECT_NONE = "이 Scan 사진 안에 찍힌 Defect 가 없습니다."
+# 찾지 못한 이유 — scan_image 상태 코드별.  없는 코드는 SCAN_DEFECT_FAIL_OTHER.
+SCAN_DEFECT_FAIL = {
+    "no_manifest": "폴더에 ScanResultImageList.txt 가 없어 이 Scan 사진의 위치를 모릅니다.",
+    "unsupported_version": "ScanResultImageList.txt 형식을 읽을 수 없습니다.",
+    "not_listed": "ScanResultImageList.txt 에 이 Scan 사진이 없습니다.",
+    "no_pixel_size": "이 Scan 레시피의 픽셀 크기를 읽지 못해 Defect 위치를 계산할 수 없습니다.",
+    "no_coordinates": "폴더에 ColorImageGrabingInfo.ini 가 없어 Defect 를 찾을 수 없습니다.",
+}
+SCAN_DEFECT_FAIL_OTHER = "Scan 사진을 읽을 수 없습니다."
 # 엑셀 — Scan 열 머리(2행)와, Scan 열이 생긴 시트에서 그 행만 Scan 이 없을 때의 칸 문구.
 SCAN_EXCEL_HEADER_FMT = "{machine} Scan"
 SCAN_EXCEL_HEADER = "Scan"
@@ -1102,16 +1037,16 @@ SCAN_EXPORT_PHASE = "엑셀로 저장 중 — Scan 이미지 확인"
 COUNT_PLUS_N_FMT = "+{n}"
 # 진행 표시는 **두 등급**으로 나뉜다 — 슬롯명은 보조(mute), 수치는 모노 본문 잉크.
 # 화면의 핵심 상태('몇 장 남았나')가 가장 약한 잉크에 묻혀 있던 것을 올린 결과다.
-# 자동 매치 중(우측 후보 패널을 떼어 낸 상태) 중앙 카드 아래 한 줄 안내.
-MATCH_AUTO_RESULT_NOTE = "매치 결과는 다음 ‘매치 검토’ 화면에서 확인합니다."
-PROGRESS_SLOT_ONLY_FMT = "{slot}  ·"
+PROGRESS_SLOT_ONLY_FMT = "{slot} ·"
 PROGRESS_COUNT_FMT = "{done} / {total}"
-GROUP_HEADER_FMT = "{slot}  ·  {count}장"
-GROUP_HEADER_NO_FMT = "{slot}\n#{no}  ·  {count}장"
+GROUP_HEADER_FMT = "{slot} · {count}장"
+GROUP_HEADER_NO_FMT = "{slot}\n#{no} · {count}장"
 
 # ── UI 개선 (#11 / #13 / #16) ─────────────────────────────────────────────
-# 썸네일 우클릭 컨텍스트 메뉴 — 원본 크게 보기 (#13).
-CTX_VIEW_LARGER = "크게보기"
+# 사진 우클릭 메뉴 — 어느 화면이든 같은 세 항목(현택님 2026-11-24, ``widgets/photo_menu``).
+CTX_VIEW_LARGER = "크게 보기"
+CTX_PHOTO_INFO = "Defect 정보 조회"
+CTX_PHOTO_GL = "GL 히스토그램"
 # 매치 검토 각 행 slot 라벨 아래 ‘크게 보기’ 버튼 — 좌우 비교 뷰어를 연다.
 # ★ 확대 글리프(⤢/⧉ 등)를 **붙이지 않는다.**  이 글자들은 폰트 폴백이 플랫폼마다 달라
 #   컬러 이모지로 렌더되는 경우가 있다(실측: 이 리눅스 캡처 박스에서 주황·파랑 화살표로
@@ -1124,7 +1059,7 @@ BTN_MATCH_THIS = "이 후보로 매치"
 # ★ 몇 개가 더 숨어 있는지 라벨에 싣는다 — 최대 50개까지 보관하므로 개수를 모르면
 #   '몇 번 더 눌러야 하는가' 를 알 수 없다.  +N 타일·'매치 없음 사진 보기 (n)' 과
 #   같은 개수 표기 관습이다.
-RUNNERUP_MORE_ROW_FMT = "후보 한 줄 더 보기 (+{n}) ▾"
+RUNNERUP_MORE_ROW_FMT = "후보 한 줄 더 보기 +{n} ▾"
 RUNNERUP_LESS_ROW = "접기 ▴"
 
 # ── 앱 내 메시지 시트 버튼 (widgets/sheet_host.py) ─────────────────────────
@@ -1174,9 +1109,9 @@ SLOT_MAP_UNREAD_LINE = "\n→ 판독 실패 (Slot 매핑)"
 # 좌표 매칭 — 좌표를 못 읽은 사진의 사유 표기
 COORD_MISSING = "좌표 정보가 없습니다"
 
-# 결과/검토에서 '매치 아님' 으로 되돌린 항목의 사유
-NOTE_UNMATCHED = "미매칭"
-NOTE_UNMATCHED_BY_USER = "미매칭 (사용자 검토)"
+# 결과/검토에서 '매치 없음' 으로 되돌린 항목의 사유(엑셀 메모)
+NOTE_UNMATCHED = "매치 없음"
+NOTE_UNMATCHED_BY_USER = "매치 없음 (사용자 검토)"
 
 # 호기 이름을 비워 두었을 때 채우는 기본값
 DEFAULT_REF_MACHINE = "기준호기"
@@ -1190,17 +1125,16 @@ CAUSE_PREFIX = "\n\n[원인] "
 THRESH_PREVIEW_BUTTON = "Overkill 튜닝"
 THRESH_PREVIEW_TITLE = "Overkill 튜닝"
 THRESH_PREVIEW_PICK_TITLE = "Scanresult 웨이퍼 폴더 또는 LOT 폴더 선택"
-OVERKILL_ADD_FOLDER = "+ 폴더"
+OVERKILL_ADD_FOLDER = "폴더 선택"
 OVERKILL_RATIO_DROP_FMT = "새로 빠짐 {n:,}"           # 비율 막대 범례 — 빨강
 OVERKILL_RATIO_KEEP_FMT = "남음 {n:,}"                # 비율 막대 범례 — 회색
 OVERKILL_RATIO_NONE_FMT = "빠지는 Defect 없음 · 남음 {n:,}"
-OVERKILL_EMPTY = "웨이퍼 폴더 또는 LOT 폴더를 더하세요"
-OVERKILL_ADD_FOLDER_TIP = "웨이퍼 폴더 또는 LOT 폴더 — 여러 번 더하거나 탐색기에서 끌어다 놓기"
+OVERKILL_ADD_FOLDER_TIP = "웨이퍼 폴더 또는 LOT 폴더"
 OVERKILL_MODE_MANUAL = "직접 조정"
 OVERKILL_MODE_AUTO = "자동 추천"
 OVERKILL_WAFERS = "웨이퍼 {n}"
 OVERKILL_CHIP_READING = "읽는 중 {i}/{n}"
-OVERKILL_CHIP_READING_NOCOUNT = "읽는 중…"
+OVERKILL_CHIP_READING_NOCOUNT = "읽는 중"
 OVERKILL_CHIP_PARTIAL = "제외 {n}"
 OVERKILL_CHIP_EX_RECIPE = "제외: 레시피 다름"
 OVERKILL_CHIP_EX_UNREAD = "제외: 못 읽음"
@@ -1220,8 +1154,8 @@ OVERKILL_VIEW_SCAN = "스캔"
 OVERKILL_VIEW_NO_COLOR = "이 폴더에는 컬러 사진이 없습니다"
 OVERKILL_VIEW_NO_SCAN = "이 폴더에는 스캔 사진 목록이 없습니다"
 OVERKILL_FILTER_ONLY = "{name} 만 보는 중 · {n:,}"
-OVERKILL_UNDO = "되돌리기"
-OVERKILL_NOTICE_REMOVED = "{name} 를 뺐습니다"
+OVERKILL_UNDO = BTN_UNDO
+OVERKILL_NOTICE_REMOVED = "{name} 뺌"
 OVERKILL_NOTICE_PICKS_LOST = " · 꼭 잡기 {n}개도 빠짐"
 OVERKILL_NOTICE_ADDED = "{name} 를 더했습니다 · 웨이퍼 {w}장 · Defect {n:,}"
 OVERKILL_NOTICE_ADDED_MANY = "폴더 {k}개를 더했습니다 · 웨이퍼 {w}장 · Defect {n:,}"
@@ -1242,9 +1176,25 @@ OVERKILL_STAT_MISSED = "놓침"
 OVERKILL_STAT_OVERKILL_GONE = "Overkill 빠짐"
 OVERKILL_PICK_OPEN = "Defect 고르기"
 OVERKILL_DETAIL_CLOSE = "닫기"
+OVERKILL_MARK_DEFECT = "Defect"         # 값 띠에서 바로 가르기(현택님 2026-11-24 안 D) — Z 로 되돌린다
+OVERKILL_MARK_OVERKILL = "Overkill"
+OVERKILL_CLASSIFY_OPEN = "Classify 가져오기"     # 사람이 바꾼 분류 → 꼭 잡기 · Overkill(현택님 2026-11-24 안 A)
+OVERKILL_CLASSIFY_TITLE = "Classify 가져오기"
+OVERKILL_CLASSIFY_SKIP = "안 씀"
+OVERKILL_CLASSIFY_NONE = "바꾼 분류 없음"
+OVERKILL_CLASSIFY_APPLY_FMT = "적용 · Defect {d} · Overkill {o}"
+OVERKILL_LIST = "선택 목록"                     # 고른 것 ↔ CSV(현택님 2026-11-24 안 B)
+OVERKILL_LIST_SAVE = "저장"
+OVERKILL_LIST_OPEN = "열기"
+OVERKILL_LIST_FILTER = "CSV (*.csv)"
+OVERKILL_LIST_FILE_FMT = "Overkill선택_{base}_{stamp}.csv"   # 도구_대상_날짜(2026-11-24 규칙)
+OVERKILL_LIST_SAVED = "선택 목록 {n}개를 저장했습니다"
+OVERKILL_LIST_LOADED = "선택 목록 {n}개 중 {k}개를 골랐습니다"
+OVERKILL_LIST_FAILED = "선택 목록을 읽지 못했습니다 · {e}"
+OVERKILL_LIST_SAVE_FAILED = "저장 실패 · {e}"
 OVERKILL_SCAN_TAG = "Scan"
 OVERKILL_SCAN_PROGRESS = "스캔 사진 불러오는 중 {done}/{total}"
-OVERKILL_SCAN_WAIT = "불러오는 중…"
+OVERKILL_SCAN_WAIT = "불러오는 중"
 OVERKILL_LOADING_WAFERS = "Defect 읽는 중 · 웨이퍼 {i}/{n}"
 OVERKILL_RICH_PROGRESS = "내리기 준비 {p}%"
 OVERKILL_RICH_FAIL = "내리기 준비를 하지 못했습니다"
@@ -1259,13 +1209,12 @@ THRESH_PREVIEW_CHECK_OK = "✓ 검산 {ok:,} / {n:,}"
 THRESH_PREVIEW_CHECK_BAD = "⚠ 검산 {ok:,} / {n:,}"
 THRESH_PREVIEW_ZONE = "Zone"
 THRESH_PREVIEW_ZONE_COUNT = "Defect {n:,}"
-THRESH_PREVIEW_RECIPE = "레시피 {n}"
-THRESH_PREVIEW_RECIPE_HEAD = "레시피 {n} · {name}"   # Overkill 튜닝 Zone 목록의 레시피 머리줄
+THRESH_PREVIEW_RECIPE = "Recipe {n}"
+THRESH_PREVIEW_RECIPE_HEAD = "Recipe {n} · {name}"   # Overkill 튜닝 Zone 목록의 레시피 머리줄
 THRESH_PREVIEW_DROPPED = "새로 빠짐"
 THRESH_PREVIEW_RESET = "레시피 값으로 되돌리기"
-THRESH_PREVIEW_RESET_TIP = "지금 보고 있는 Zone 만 레시피 값으로 되돌립니다 (다른 Zone 은 그대로)"
+THRESH_PREVIEW_RESET_TIP = "지금 보는 Zone 만"
 OVERKILL_SAVED_LOAD = "저장한 선택 불러오기"
-OVERKILL_SAVED_LOAD_TIP = "이 웨이퍼 폴더에서 전에 고른 Overkill · Defect 를 다시 불러옵니다 (고를 때 자동 저장됩니다)"
 THRESH_PREVIEW_NO_FILTER = "Feature Filter 없음"
 THRESH_PREVIEW_DETECT_STAGE = "검출 단계 (Dark/Bright)"
 THRESH_PREVIEW_DETECT_STAGE_HEAD = "{pol} 검출 단계"    # 기준 줄 머리, 극성마다 한 줄(아래 줄에 → 분류 이름)
@@ -1284,55 +1233,78 @@ OVERKILL_SORT_LENGTH = "Length"
 OVERKILL_CHIP_ADJUSTED = "조정 {v}"
 OVERKILL_DEFECT_BOX = "Defect 표시"
 OVERKILL_DEFECT_BOX_TIP = "Scan 사진에 Defect 자리를 빨간 상자로 표시합니다"
-THRESH_PREVIEW_EXPORT = "HTML 내보내기"
+THRESH_PREVIEW_EXPORT = "HTML로 저장"
 THRESH_PREVIEW_APPEARED = "새로 생김"
 THRESH_PREVIEW_LOWEST = "▼ 최소 {v}"
 THRESH_PREVIEW_RICH = "RichSurface 읽는 중"
 THRESH_EXPORT_TITLE = "Overkill 튜닝 결과"
 THRESH_EXPORT_SAVE_TITLE = "HTML 저장"
 THRESH_EXPORT_FILTER = "HTML (*.html)"
-THRESH_EXPORT_FAILED = "저장하지 못했습니다: {e}"
+THRESH_EXPORT_FAILED = "저장 실패 · {e}"
 THRESH_EXPORT_ALL = "전체"
 THRESH_EXPORT_CHANGES = "바꾼 기준"
 THRESH_EXPORT_ITEM = "항목"
 THRESH_EXPORT_OLD_NEW = "레시피 → 변경"
 THRESH_EXPORT_SHAPE = "분포"
+# 눌러 보는 보고서(현택님 2026-11-24 안 8)
+REPORT_BEFORE = "변경 전"
+REPORT_AFTER = "변경 후"
+REPORT_MAP = "Defect Map"
+REPORT_PHOTOS = "사진"
+REPORT_PICKED = "고른 목록"
+REPORT_WAFERS = "웨이퍼별"
+REPORT_COPY = "복사"
+REPORT_COPIED = "복사됨"
+REPORT_CSV = "선택 목록 CSV"
+REPORT_TAB_MARKED = "고른 것"
+REPORT_CLASS = "분류"
+REPORT_WAFER = "웨이퍼"
+REPORT_RESULT = "결과"
+REPORT_MARK = "표시"
+REPORT_NO_PHOTO = "사진 없음"
+REPORT_NONE = "없음"
+REPORT_RECIPE = "레시피"
+REPORT_CHANGED = "변경"
+REPORT_OPTIONS_TITLE = "보고서 내보내기"
+REPORT_OPT_DROP = "빠짐 견본 사진"
+REPORT_OPT_KEEP = "남음 견본 사진"
+REPORT_OPT_SCAN = "Scan 사진"
+REPORT_OPT_MAP = "Defect Map"
+REPORT_OPT_SIZE = "사진 크기"
+REPORT_OPT_SIZE_FMT = "{n}px"
+REPORT_OPT_SAVE = "저장"
 
 # ── Wafer map ────────────────────────────────────────────────────────────────
-WAFER_MAP_BUTTON = "Wafer Map 보기"
-WAFER_MAP_TITLE = "Wafer Map"
-WAFER_MAP_SUBTITLE = "결함 사진을 웨이퍼 위 실제 위치에 찍습니다 — 휠: 확대 · 드래그: 이동 · 점에 마우스: 사진 · 점 더블클릭: 상세 정보"
+# ★ 메뉴 이름 = 화면 제목 = 결과 화면 버튼 이름(현택님 2026-11-24).  엑셀 시트 이름
+#   (WAFER_MAP_SHEET)은 그대로 — 이전 결과 엑셀 읽기가 그 이름으로 시트를 건너뛴다.
+WAFER_MAP_BUTTON = "Defect Map"
+WAFER_MAP_TITLE = WAFER_MAP_BUTTON
 WAFER_MAP_PICK_FOLDER = "폴더 선택"
-WAFER_MAP_PICK_FOLDER_ANOTHER = "다른 폴더"
 WAFER_MAP_PICK_FOLDER_TITLE = "웨이퍼(슬롯) 폴더 또는 LOT 폴더 선택"
-WAFER_MAP_NO_FOLDER = (
-    "‘폴더 선택’ 으로 사진이 든 웨이퍼(슬롯) 폴더를 고르세요.\n"
-    "사진(여러 장 가능)을 끌어다 놓으면 그 결함만 봅니다.\n\n"
-    "좌표는 그 폴더의 정보파일에서 읽습니다 — "
-    "ColorImageGrabingInfo.ini(Camtek) · LIVE 파일명 · KLA 정보파일."
-)
+WAFER_MAP_NO_FOLDER = "‘폴더 선택’ 을 누르거나 사진을 끌어다 놓으세요"
 WAFER_MAP_NO_IMAGES = "이 폴더에는 사진이 없습니다."
 WAFER_MAP_FOLDER_MISSING = "폴더를 찾을 수 없습니다"
 WAFER_MAP_PICK_OTHER_FOLDER = "다른 폴더 선택"
-WAFER_MAP_BUILD_FAILED = "Wafer Map 을 만드는 중 오류가 났습니다 — 폴더를 다시 골라 보세요(자세한 내용은 app.log)."
+WAFER_MAP_BUILD_FAILED = "Defect Map 을 만드는 중 오류가 났습니다 — 폴더를 다시 골라 보세요(자세한 내용은 app.log)."
 WAFER_MAP_NO_FRAME = "die 기하(pitch·웨이퍼 중심)를 찾지 못해 맵을 그릴 수 없습니다."
 WAFER_MAP_SLOT_LABEL = "슬롯"
 WAFER_MAP_ALL_SLOTS = "전체 (LOT 합산)"
 WAFER_MAP_SIDE_REF_FMT = "기준 · {machine}"
 WAFER_MAP_SIDE_VAL_FMT = "검증 · {machine}"
-WAFER_MAP_LEGEND_MATCHED = "매치됨"
-WAFER_MAP_LEGEND_UNMATCHED = "미매치"
-WAFER_MAP_LEGEND_DEFECT = "결함"
+WAFER_MAP_LEGEND_MATCHED = "매치"
+WAFER_MAP_LEGEND_UNMATCHED = "매치 없음"
+WAFER_MAP_LEGEND_DEFECT = "Defect"
 WAFER_MAP_COUNT_FMT = "{n}장"
 WAFER_MAP_DEFECT_TOTAL_FMT = "Defect {n:,}개"
 WAFER_MAP_UNPLACED_FMT = "좌표 없음 {n}장"
 WAFER_MAP_CENTER_ASSUMED = "중심 가정(±½ die)"
 WAFER_MAP_GRID_COMPUTED = "die 격자: 계산값(장비 die 맵 없음)"
 WAFER_MAP_PITCH_ASSUMED = "die 크기 추정(사진 좌표 기준 — 폴더에 die 크기 정보 없음, 위치 근사)"
-WAFER_MAP_TIP_COLROW_FMT = "col {col} · row {row}"
-WAFER_MAP_WARN_HEAD = "⚠ 이 Wafer map 은 실제와 다르게 그려졌을 수 있습니다"
+WAFER_MAP_TIP_COLROW_FMT = "col {col} / row {row}"
+WAFER_MAP_WARN_HEAD = "⚠ 이 Defect Map 은 실제와 다르게 그려졌을 수 있습니다"
 WAFER_MAP_WARN_OFF_DIE_FMT = "die 가 없는 칸(또는 웨이퍼 밖)에 찍힌 사진 {n}장"
 WAFER_MAP_WARN_MIXED_FRAMES = "합친 슬롯들의 die 격자가 서로 달라 다른 슬롯 점이 엉뚱한 칸에 찍힐 수 있음"
+WAFER_MAP_WARN_MIXED_KINDS = "KLA · Camtek 사진이 섞임 — 노치 방향이 달라 위치가 틀릴 수 있음"
 WAFER_MAP_WARN_UNPLACED_FMT = "좌표를 읽지 못해 맵에서 빠진 사진 {n}장"
 WAFER_MAP_WARN_NUMBER_GUESS_FMT = "col / row 를 장비 번호표 없이 계산한 사진 {n}장 — 장비 화면으로 확인"
 WAFER_MAP_WARN_NOTCH_UP_FMT = "노치가 위쪽인 맵으로 칸을 정한 사진 {n}장 — 아래쪽 맵과 같다고 보고 읽음, 장비 화면으로 확인"
@@ -1343,18 +1315,18 @@ WAFER_MAP_WARN_SIDE_FMT = "{side} — {reasons}"
 # 칸·번호가 틀렸을 가능성이 큰 맵(번호 계산·die 없는 칸·격자 불일치) — 빨간 큰 배너 머리말
 # (사용자 지시 2026-11-13 "틀릴 확률이 매우 높음!!!!! 뭐 이런식으로").
 WAFER_MAP_DANGER_HEAD = (
-    "⚠ 틀릴 확률이 매우 높습니다!!  이 Wafer map 의 die 위치·col / row 를 그대로 믿지 말고 "
+    "⚠ 틀릴 확률이 매우 높습니다!!  이 Defect Map 의 die 위치·col / row 를 그대로 믿지 말고 "
     "반드시 장비 화면으로 확인하세요")
 WAFER_MAP_DANGER_SHORT = "⚠ 틀릴 확률이 매우 높음!! 반드시 장비 화면으로 확인"
 WAFER_MAP_SHEET_COL_WARN = "주의(칸이 틀렸을 수 있음)"
 WAFER_MAP_DISCLAIMER = (
-    "※ Wafer map 은 파일명·장비 파일로 다시 그린 참고용 그림입니다. "
+    "※ Defect Map 은 파일명·장비 파일로 다시 그린 참고용 그림입니다. "
     "die 위치와 판정은 반드시 장비 화면이나 원본 데이터로 확인하세요."
 )
 WAFER_MAP_TIP_NO_DIE = "die 인덱스 없음(절대좌표)"
 # die 안쪽 x·y — 장비·Conder scan 과 같은 표기.  아래 X·Y 는 웨이퍼 중심 기준이라 다르다.
-WAFER_MAP_TIP_DIE_FMT = "col {col} · row {row} · x {x:,.0f} · y {y:,.0f} ㎛"
-WAFER_MAP_TIP_XY_FMT = "웨이퍼 중심 기준 X {x:,.0f} · Y {y:,.0f} ㎛"
+WAFER_MAP_TIP_DIE_FMT = "col {col} / row {row} · x {x:,.0f} / y {y:,.0f} µm"
+WAFER_MAP_TIP_XY_FMT = "웨이퍼 중심 기준 X {x:,.0f} / Y {y:,.0f} µm"
 WAFER_MAP_SHEET = "Wafer Map"
 WAFER_MAP_SHEET_COL_SLOT = "슬롯"
 WAFER_MAP_SHEET_COL_REF = "기준"
@@ -1371,39 +1343,33 @@ WAFER_MAP_LOADING_COORDS = "좌표 읽는 중"
 WAFER_MAP_LOADING_THUMBS = "사진 미리보기 준비 중"
 # 보기 옵션 — die 색칠 · 노치 방향(90° 단위 회전) · 사진 1장만 보기.
 WAFER_MAP_FILL_DIES = "die 색칠"
-WAFER_MAP_FILL_DIES_TIP = (
-    "결함 위치(점) 대신 결함이 든 die 칸을 통째로 칠합니다(점과 같은 색). "
-    "die 격자를 모르는 폴더(절대좌표)에서는 점 그대로입니다.")
-WAFER_MAP_UNMATCHED_FIRST = "미매치 우선"
-WAFER_MAP_UNMATCHED_FIRST_TIP = (
-    "한 die 칸에 매치됨·미매치 결함이 섞여 있을 때 칸 색을 정합니다. "
-    "켜면 미매치 색(미매치가 가려지지 않음), 끄면 매치됨 색입니다.")
+WAFER_MAP_FILL_DIES_TIP = "Defect 가 든 die 칸을 칠합니다"
+WAFER_MAP_UNMATCHED_FIRST = "매치 없음 우선"
+WAFER_MAP_UNMATCHED_FIRST_TIP = "섞인 칸은 매치 없음 색으로"
 WAFER_MAP_DOT_SIZE = "점 크기"
-WAFER_MAP_DOT_SIZE_TIP = "결함 점을 키우거나 줄입니다(화면 보기 전용 — die 색칠 중에는 꺼집니다)."
 WAFER_MAP_NOTCH_FMT = "노치: {dir}"
 WAFER_MAP_NOTCH_DIRS = ("아래", "왼쪽", "위", "오른쪽")
-WAFER_MAP_NOTCH_TIP = "누를 때마다 90°씩 돌려 노치 방향을 맞춥니다(화면 보기 전용)."
+WAFER_MAP_NOTCH_TIP = "90° 회전 (보기 전용)"
 WAFER_MAP_ONE_IMAGE_FMT = "{name} · 사진 1장"
 WAFER_MAP_IMAGES_FMT = "사진 {n}장"
 WAFER_MAP_FULLSCREEN = "전체화면"
-WAFER_MAP_FULLSCREEN_EXIT = "전체화면 나가기 (ESC)"
-WAFER_MAP_FULLSCREEN_TIP = (
-    "맵만 남기고 주변 표시(설명·버튼·제목·범례)를 감춘 뒤 앱 창도 전체화면으로 "
-    "바꿉니다. ESC 를 누르면 원래대로 돌아옵니다.")
+WAFER_MAP_FULLSCREEN_EXIT = "전체화면 나가기 (Esc)"
+WAFER_MAP_FULLSCREEN_TIP = "맵만 전체화면 · Esc 로 복귀"
 WAFER_MAP_NO_COORD = "이 사진을 맵에 찍지 못했습니다 — 좌표 또는 die 기하를 읽지 못했습니다."
+# 고른 사진 map 이 떠 있을 때 사진을 더 넣으면 묻는다(사용자 요청 2026-11-24).
+WAFER_MAP_MORE_TITLE_FMT = "사진 {n}장 더"
+WAFER_MAP_MORE_ADD = "현재 map 에 추가"
+WAFER_MAP_MORE_NEW = "새로 그리기"
+WAFER_MAP_MOVED_FMT = "먼저 넣은 사진 {n}장의 위치가 바뀌었습니다."
 
 # ── 왼쪽 메뉴 — [매칭](기본 화면)·메뉴 접기(사용자 요청 2026-10-30) ──
 MATCH_NAV_BUTTON = "매칭"
-MATCH_NAV_TOOLTIP = "기준·검증 폴더를 고르고 매칭을 시작하는 기본 화면"
 RAIL_FOLD_TOOLTIP = "메뉴 접기 (아이콘만)"
 RAIL_UNFOLD_TOOLTIP = "메뉴 펼치기"
 
 # ── Defect 추출 (매칭 없이 한쪽 폴더에서 고른 사진을 엑셀로) ─────────────────
 # 흐름: 설정(한쪽만) → 후보 선별(매칭과 같은 화면) → 요약 → 저장.
 EXTRACT_BUTTON = "Defect 추출"
-EXTRACT_BUTTON_TOOLTIP = (
-    "매칭 없이, wafer 또는 LOT 폴더에서 고른 defect 사진과 그 정보(좌표·계측)를\n"
-    "엑셀로 저장합니다.")
 # ★ 짧게 둔다 — [Defect 추출] 과 같은 자리를 바꿔 쓰므로, 길면 800px 창에서 액션바가
 #   페이지를 창보다 넓게 민다(실측: "← 매칭 검증으로" 일 때 864px > 840px).
 EXTRACT_TITLE = "Defect 추출"
@@ -1419,21 +1385,17 @@ EXTRACT_SLOT_BTN_FMT = "슬롯 {n}/{total}"
 EXTRACT_SLOT_NEED_FOLDER = "먼저 이 줄의 폴더를 선택하세요."
 # 교차검증(양방향) 스위치 — 매칭 모드의 실행 옵션.  앱을 켤 때마다 꺼진 채 시작한다.
 CROSS_SWITCH = "교차검증 (양방향)"
-# 엑셀 — 검증에만 있는 사진 행의 메모.  기준 쪽 미매칭은 예전 그대로 '미매칭'.
-NOTE_ONLY_VAL = "미매칭 (검증에만 있음)"
+# 엑셀 — 검증에만 있는 사진 행의 메모.  기준 쪽은 NOTE_UNMATCHED.
+NOTE_ONLY_VAL = "매치 없음 (검증에만 있음)"
 EXTRACT_WAFER_MAP_SWITCH = "Wafer Map 시트 넣기"
-EXTRACT_WAFER_MAP_SWITCH_DESC = "끄면 엑셀에 Wafer Map 시트를 만들지 않습니다(저장이 빨라집니다)."
 BTN_EXTRACT_START = "추출 시작"
 # 선별 화면을 추출에 쓸 때 바꿔 끼우는 문구(`SelectPage.set_extract_mode`) — 키는 매칭
 # 문구 이름 그대로다.  추출에는 '검증' 이 없다(사용자 지적).  패널 제목은 짧게 둔다
 # (`test_pane_title_fits` — 매칭 제목과 글자 수가 같다).
 EXTRACT_SELECT_TEXT = {
     "PANEL_LEFT_CANDIDATES": "추출 후보",
-    "PANEL_LEFT_CANDIDATES_TOOLTIP": "아직 추출/제외를 결정하지 않은 남은 사진들",
     "PANEL_CENTER_DECIDE": "추출 결정할 사진",
     "PANEL_RIGHT_TARGETS": "추출 대상",
-    "PANEL_RIGHT_TARGETS_TOOLTIP": "엑셀로 저장할 사진들",
-    "PANEL_RIGHT_EMPTY": "→ 또는 [✓ 추출] 로 보낸 사진이 여기에 쌓입니다.",
     "BTN_VERIFY": "추출",
     "BTN_BATCH_EXCLUDE": "선택 항목 추출 제외",
     "BTN_BATCH_VERIFY": "선택 항목 추출 대상 지정",
@@ -1450,57 +1412,51 @@ EXTRACT_LOAD_JOURNEY_STEPS = ("폴더 스캔", "썸네일", "선별 준비")
 EXTRACT_BLOCKED_HINT = "LOT 또는 wafer 폴더를 먼저 지정하세요."
 EXTRACT_AUTOMATION_USER_SELECT = "추출할 사진을 직접 고릅니다"
 EXTRACT_AUTOMATION_AUTO_ALL = "모든 사진 자동 — 선별 없이 전부 추출"
-EXTRACT_SAVE_NAME_BODY = (
-    "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
-    "규칙: 호기 자재_Layer_S/M Defect 추출")
 EXTRACT_NONE_FOUND = "추출할 사진을 찾지 못했습니다.\n폴더를 다시 확인하세요."
 EXTRACT_NONE_CHOSEN_TITLE = "고른 사진이 없습니다"
 EXTRACT_NONE_CHOSEN_BODY = (
-    "추출할 사진을 한 장도 고르지 않았습니다.\n\n"
-    "설정 화면으로 돌아갈까요? (아니오 = 선별 화면에 남기 — Z 로 되돌릴 수 있습니다)")
+    "추출할 사진을 고르지 않았습니다.\n"
+    "\n"
+    "설정 화면으로 돌아갈까요? (아니오 = 선별 화면에 남기)"
+)
 EXTRACT_SUMMARY_TITLE = "Defect 추출"
-EXTRACT_SUMMARY_FMT = "슬롯 {wafers}개에서 defect {n}건을 엑셀로 저장합니다."
+EXTRACT_SUMMARY_FMT = "슬롯 {wafers}개 · Defect {n}개"
 # 저장 방식 — Recipe 로 나눌지(사용자 결정: 시트 분리 / 열 나란히 둘 다, 요약 창에서 고른다).
+# 줄마다 그림이 뜻을 말한다 — 설명문 없음(현택님 2026-11-24, K2 B안).
 EXTRACT_SAVE_SINGLE = "한 시트로 저장"
 EXTRACT_SAVE_SHEETS = "Recipe별 시트로 저장"
 EXTRACT_SAVE_COLUMNS = "Recipe별 열로 저장"
-EXTRACT_SUMMARY_LAYOUT_HINT = (
-    "Recipe별 시트: Recipe 마다 시트를 나눕니다.\n"
-    "Recipe별 열: 한 시트에 Recipe 마다 사진·정보 열을 옆으로 나란히 둡니다.")
 # Recipe 이름(Surface.flt 의 recipe 코드 → RecipesInfo.ini 이름).  못 읽으면 아래로.
 EXTRACT_RECIPE_NONE = "Recipe 없음"
 EXTRACT_RECIPE_CODE_FMT = "Recipe {code}"
 # 저장 첫 단계 — 엑셀에 넣을 사진을 미리 준비한다(로딩 때 만든 것이 있으면 즉시 끝난다).
-EXPORT_PREPARE_IMAGES = "엑셀에 넣을 사진 준비 중…"
-EXTRACT_SUMMARY_BACK = "선별로 돌아가기"
-EXTRACT_SUMMARY_CANCEL = "설정으로 돌아가기"      # 선별을 건너뛴 경우(모든 사진 자동)
+EXPORT_PREPARE_IMAGES = "엑셀에 넣을 사진 준비 중"
+# 저장 방식 창 왼쪽 아래 — 선별에서 왔으면 선별로, 아니면 설정으로(K2 B안: 한 낱말).
+EXTRACT_SUMMARY_BACK = "돌아가기"
 # 저장 파일 이름 — 결과 엑셀 제목 규칙에 '추출' 을 붙인 것(사용자 결정).
 EXTRACT_FILE_TITLE_FMT = "{machine} {tag} Defect 추출.xlsx"
 EXTRACT_FILE_TITLE_FALLBACK_FMT = "AOI {machine} Defect 추출.xlsx"
 # 엑셀 — 요약 시트 D열 머리(C열 사진의 파일명·계측·좌표 칸)와 Wafer Map 시트 머리.
 EXTRACT_INFO_HEADER = "정보"
-EXTRACT_MAP_SHEET_COL = "결함 위치"
+EXTRACT_MAP_SHEET_COL = "Defect 위치"
 
 # 선별 화면 — 사진 가운데만 잘라 크게 보기(결함은 사진 정중앙).
 CENTER_CROP_LABEL = "가운데 확대"
 CENTER_CROP_FULL = "전체"
-CENTER_CROP_TOOLTIP = "사진 가운데(결함 위치)만 잘라 크게 봅니다 — 50% 는 가운데 절반, 30% 는 더 좁게."
 
 # 좌표 보정(KLA ↔ Camtek) — 매칭 직전, 사용자가 '같은 결함' 사진 쌍을 골라 어긋남을 뺀다.
 # 보정은 매칭 계산에만 쓰이고 엑셀·화면 좌표는 바뀌지 않는다(사용자 지시).
 COORD_CAL_TITLE = "좌표 보정 (KLA ↔ Camtek)"
-COORD_CAL_HINT_FMT = (
-    "① 왼쪽에서 {src} 사진을 고르고  ② 오른쪽에서 같은 결함인 {dst} 사진을 누르세요 — 3쌍쯤이면 충분해요. "
-    "두 장비 좌표의 어긋남을 매칭 전에 보정합니다(엑셀·화면 좌표는 그대로).")
+COORD_CAL_HINT_FMT = "왼쪽 {src} 사진 → 오른쪽 같은 Defect 의 {dst} 사진 (3쌍쯤)"
 COORD_CAL_SRC_HEAD_FMT = "{side} 사진 {n}장"
 COORD_CAL_SRC_MORE_FMT = "가까운 짝 후보가 있는 사진만 보여요 · 후보가 많은 {n}장은 생략"
 COORD_CAL_SIDE_REF_FMT = "기준({dev})"
 COORD_CAL_PICK_FIRST = "왼쪽에서 사진을 고르세요."
-COORD_CAL_CANDS_HEAD_FMT = "같은 결함인 {dst} 사진을 누르세요 — 그럴듯한 순서 · 숫자는 보정 전 거리"
+COORD_CAL_CANDS_HEAD_FMT = "같은 Defect 의 {dst} 사진 · 숫자는 보정 전 거리"
 COORD_CAL_ANCHOR_FMT = "기준 ({dev})"
 COORD_CAL_DIST_FMT = "{d:.0f} µm"
 COORD_CAL_PAIRED_FMT = "✓ {i}번 쌍"
-COORD_CAL_PAIRS_NONE = "아직 고른 쌍이 없습니다 — 3쌍쯤 고르면 좋아요."
+COORD_CAL_PAIRS_NONE = "고른 쌍이 없습니다"
 COORD_CAL_PAIR_ROW_FMT = "{i}.  {a}  ↔  {b}      가로 {dx:+.0f} · 세로 {dy:+.0f} µm"
 COORD_CAL_RESULT_FMT = "보정값  가로 {dx:+.0f} µm · 세로 {dy:+.0f} µm   ({n}쌍 · 쌍별 남은 오차 최대 {r:.0f} µm)"
 COORD_CAL_RESIDUAL_WARN_FMT = (
@@ -1508,19 +1464,17 @@ COORD_CAL_RESIDUAL_WARN_FMT = (
 KLA_INFO_BROKEN_FMT = (
     "KLA 정보파일(.001)이 비어 있는 슬롯이 {n}개 있어요:\n{names}\n\n"
     "파일 이름의 WaferID 와 슬롯 번호가 상대 장비와 맞는 {k}개는 짝을 지었어요.\n"
-    "이 슬롯들은 KLA 결함 좌표가 없어 좌표 매칭이 되지 않아요. KLA 결과 파일을 확인해 주세요.")
-COORD_CAL_AUTO_FMT = (
-    "자동 계산값  가로 {dx:+.0f} µm · 세로 {dy:+.0f} µm   (근거 {n}쌍) — "
-    "그대로 '보정 적용' 을 누르거나, 쌍을 골라 직접 정할 수 있어요.")
+    "이 슬롯들은 KLA Defect 좌표가 없어 좌표 매칭이 되지 않아요. KLA 결과 파일을 확인해 주세요.")
+COORD_CAL_AUTO_FMT = "자동 계산값  가로 {dx:+.0f} µm · 세로 {dy:+.0f} µm   (근거 {n}쌍)"
 COORD_CAL_AUTO_WEAK_FMT = (
     "자동 계산은 근거가 부족해요(맞는 짝 {n} / {need}쌍). "
-    "같은 결함 쌍을 직접 골라 주세요.")
+    "같은 Defect 쌍을 직접 골라 주세요.")
 COORD_CAL_AUTO_AMBIGUOUS_FMT = (
     "자동 계산이 한 값으로 모이지 않아요(맞는 짝 {n}쌍 · 다른 후보 무리 {m}쌍). "
-    "같은 결함 쌍을 직접 골라 주세요.")
+    "같은 Defect 쌍을 직접 골라 주세요.")
 COORD_CAL_AUTO_DIFF_FMT = (
     "고른 쌍의 보정값이 자동 계산값(가로 {ax:+.0f} · 세로 {ay:+.0f} µm)과 {d:.0f} µm 달라요. "
-    "같은 결함이 맞는지 확인해 주세요.")
+    "같은 Defect 가 맞는지 확인해 주세요.")
 COORD_CAL_REMOVE = "지우기"
 COORD_CAL_SKIP = "보정 건너뛰기"
 COORD_CAL_APPLY = "보정 적용"
@@ -1530,35 +1484,34 @@ NOTCH_REF = "기준"
 NOTCH_VAL = "검증"
 NOTCH_DIRS = {"up": "위", "left": "왼쪽", "right": "오른쪽", "down": "아래"}
 NOTCH_OK = "확인"
+NOTCH_CANCEL = BTN_CANCEL
 NOTCH_AUTO = "자동 감지"
-NOTCH_CHECKING = "Notch 방향 확인 중…"
-NOTCH_AUTO_BUSY = "검증 폴더를 네 방향으로 돌려 맞춰 보는 중…"
+NOTCH_CHECKING = "Notch 방향 확인 중"
+NOTCH_AUTO_BUSY = "검증 폴더를 네 방향으로 돌려 맞춰 보는 중"
 NOTCH_AUTO_FOUND_FMT = "검증 Notch: {dir} (기준 사진 {hit}장이 짝을 찾았습니다)"
 NOTCH_AUTO_UNSURE = "뚜렷한 방향을 찾지 못했습니다 — 직접 골라 주세요."
 NOTCH_FAIL_FMT = ("Notch 방향을 맞추지 못했습니다 — 웨이퍼 중심·die 크기를 읽을 수 없는 폴더가 있습니다.\n"
                   "{detail}")
 NOTCH_LOG_FMT = "Notch 방향 보정(매칭 전용): {dirs}"
 
-COORD_CAL_LOADING = "좌표 보정 준비 중 — 두 장비의 좌표를 읽고 있습니다…"
+COORD_CAL_LOADING = "좌표 보정 준비 중 — 두 장비의 좌표를 읽는 중"
 
 # ── GL 히스토그램 뷰어 ────────────────────────────────────────────────────
-IMAGE_INFO_GL = "GL 보기"
 GL_BUTTON = "GL 히스토그램"
-GL_BUTTON_TOOLTIP = "사진의 밝기(GL) 분포를 히스토그램으로 봅니다"
+IMAGE_INFO_GL = GL_BUTTON          # 이 화면을 여는 버튼 = 메뉴 이름
 GL_COMING_SOON = "Coming soon"
 GL_COMING_SOON_TOOLTIP = "GL 히스토그램 — 준비 중입니다"
-GL_TITLE = "GL 히스토그램"
-GL_OPEN = "사진 열기"
+GL_TITLE = GL_BUTTON
+GL_OPEN = "사진 선택"
 GL_OPEN_FILTER_FMT = "사진 ({patterns});;모든 파일 (*.*)"
 GL_EMPTY_HINT = "사진을 열거나 이곳에 끌어다 놓으세요"
 GL_LOADING = "사진을 불러오는 중"
-GL_SAVE_XLSX = "엑셀 저장"
+GL_SAVE_XLSX = "엑셀로 저장"
 GL_SAVE_PNG = "색 칠한 PNG 저장"
-GL_SAVE_PNG_SHORT = "PNG 저장"
+GL_SAVE_PNG_SHORT = "그림으로 저장"
 GL_SAVE_XLSX_TITLE = "GL 분석 엑셀 저장"
 GL_SAVE_PNG_TITLE = "색 칠한 PNG 저장"
-GL_SAVED_FMT = "저장했어요: {name}"
-GL_SAVE_FAILED_FMT = "저장하지 못했어요: {why}"
+GL_SAVE_FAILED_FMT = "저장 실패 · {why}"
 GL_NO_IMAGE = "먼저 사진을 열어 주세요."
 GL_OPEN_FAILED_FMT = "사진을 열지 못했어요: {why}"
 GL_COMPARE = "두 사진 비교"
@@ -1572,11 +1525,11 @@ GL_TOOL_MOVE = "이동"
 GL_TOOL_RECT = "사각형"
 GL_TOOL_CIRCLE = "원"
 GL_FIT = "맞춤"
-GL_UNDO = "되돌리기"
+GL_UNDO = BTN_UNDO              # 그림 버튼이라 툴팁으로 뜬다
 GL_CLEAR = "모두 지우기"
 GL_ROI_DEFECT = "Defect"
 GL_DEFECT_GO = "Defect 위치"
-GL_DEFECT_GO_OFF_TIP = "컬러 결함 사진을 열면 쓸 수 있습니다"
+GL_DEFECT_GO_OFF_TIP = "컬러 Defect 사진을 열면 쓸 수 있습니다"
 
 GL_THR_LOW = "하한 이하 = 파랑"
 GL_THR_HIGH = "상한 이상 = 빨강"
@@ -1585,7 +1538,7 @@ GL_SCOPE_ALL = "사진 전체"
 GL_SCOPE_ROI = "ROI 안쪽만"
 GL_SCOPE_OFF = "끄기"
 GL_SCOPE_LABEL = "색칠 범위"
-GL_THR_EDIT_TIP = "손잡이를 끌어 옮기고, 값 칩을 누르면 직접 입력합니다(방향키 ←→ 1, Shift 10)"
+GL_THR_EDIT_TIP = "끌어 옮기기 · 값 칩 눌러 입력 · ←→ 1, Shift 10"
 GL_HIST = "GL 히스토그램"
 GL_HIST_ALL = "사진 전체"
 GL_HIST_BY_ROI = "ROI 별로 보기"
@@ -1612,15 +1565,15 @@ GL_STATUS_ZOOM_FMT = "배율 {zoom}%"
 GL_WARN_COLOR = "컬러 사진 · 밝기(0.299R+0.587G+0.114B)로 분석"
 GL_WARN_JPEG = "JPEG 는 원본 GL 과 조금 다를 수 있음"
 GL_WARN_HUGE = "1억 화소 초과 · 느릴 수 있음"
-GL_SCAN_FOUND_FMT = "Scan 사진 {name} 의 결함 위치(300 µm) · 맞춤(F)으로 전체"
+GL_SCAN_FOUND_FMT = "Scan 사진 {name} 의 Defect 위치(300 µm) · 맞춤(F)으로 전체"
 GL_SCAN_MISSING_FMT = "Scan 사진을 못 찾았습니다 — {why} · 컬러 사진 밝기로 분석"
 GL_SCAN_WHY_UNKNOWN = "원인을 알 수 없음"
 GL_SCAN_WHY = {
     "no_manifest": "폴더에 ScanResultImageList.txt 가 없음",
     "unsupported_version": "Scan 목록 형식(Version)이 다름",
-    "no_coordinates": "이 사진의 결함 좌표를 못 읽음",
+    "no_coordinates": "이 사진의 Defect 좌표를 못 읽음",
     "no_pixel_size": "Scan 픽셀 크기를 못 읽음",
-    "no_candidate": "결함 위치를 담은 Scan 사진이 목록에 없음",
+    "no_candidate": "Defect 위치를 담은 Scan 사진이 목록에 없음",
     "unreadable_scan": "Scan 사진을 읽다가 실패",
 }
 
@@ -1649,7 +1602,7 @@ GL_HIST_HOVER_FMT = "GL {gl:,} · {items}"
 GL_HIST_HOVER_ONE_FMT = "{n:,}개 ({pct:.2f}%)"
 GL_HIST_HOVER_ITEM_FMT = "{name} {n:,}개 ({pct:.2f}%)"
 GL_PNG_ROIS = "ROI 선·이름도 그리기"
-GL_PNG_WRITE_FAILED = "PNG 를 쓰지 못했습니다"
+GL_PNG_WRITE_FAILED = "PNG 파일을 쓸 수 없음"
 GL_INFO_PHOTO = "사진"
 GL_INFO_ANALYZED = "분석한 사진"
 GL_INFO_SIZE = "크기"
@@ -1683,30 +1636,30 @@ DROP_PILL_ONLY_FOLDER_PHOTO = "폴더·사진만 받아요"
 
 # ── Overkill 튜닝 · Defect 고르기 팝업 — 왼쪽 Overkill · 오른쪽 Defect(후보 선별과 같은 짜임) ──
 OVERKILL_PICK_TITLE = "Defect 고르기"
-OVERKILL_PICK_ZONE_TIP = "구역"
+OVERKILL_PICK_ZONE_TIP = "Zone"
 OVERKILL_PICK_COUNTS_FMT = "전체 {total} · 남음 {left}"
 OVERKILL_PICK_PANE_OVERKILL = "Overkill"
 OVERKILL_PICK_PANE_DEFECT = "Defect"
 OVERKILL_PICK_PANE_FMT = "{name}  {n}"
 OVERKILL_PICK_BTN_OVERKILL = "← Overkill"
 OVERKILL_PICK_BTN_DEFECT = "Defect →"
-OVERKILL_PICK_BTN_UNDO = "되돌리기"
+OVERKILL_PICK_BTN_UNDO = BTN_UNDO
 OVERKILL_PICK_BTN_CANCEL = "취소"
 OVERKILL_PICK_BTN_APPLY_FMT = "적용 · Defect {n}"
 OVERKILL_PICK_ALL_PHOTOS = "전체 사진"
 OVERKILL_PICK_DONE = "다 골랐습니다"
-OVERKILL_PICK_LOADING = "불러오는 중…"
+OVERKILL_PICK_LOADING = "불러오는 중"
 OVERKILL_PICK_EMPTY = "사진 없음"
 OVERKILL_PICK_RESULT_FMT = "적용하면 새로 빠짐 {drop} · Overkill로 고른 {n}개 중 {gone}개 빠짐"
 OVERKILL_PICK_MISSED_FMT = "놓침 {k}"
-OVERKILL_NOT_BY_FILTER = "검출 단계({name})가 잡은 Defect 예요 — '검출 단계 (Dark/Bright)' 하한으로만 빠져요"
+OVERKILL_NOT_BY_FILTER = "검출 단계({name})가 잡은 Defect 예요 — ‘검출 단계 (Dark/Bright)’ 하한으로만 빠져요"
 OVERKILL_NOT_BY_FILTER_FIXED = "검출 단계({name})가 잡은 Defect 예요 — 이 종류의 하한은 앱에서 바꿀 수 없어서 기준을 바꿔도 빠지지 않아요"
 
 # ── 어느 Zone에서 왔니?(Defect 분류별 조회, 현택님 이름 2026-11-23) ──────────────────
 ZO_BUTTON = "어느 Zone에서 왔니?"
 ZO_TITLE = "어느 Zone에서 왔니?"
-ZO_ADD_FOLDER = "+ 폴더"
-ZO_ADD_FOLDER_TIP = "웨이퍼 폴더 또는 LOT 폴더 — 여러 번 더하거나 탐색기에서 끌어다 놓기"
+ZO_ADD_FOLDER = "폴더 선택"
+ZO_ADD_FOLDER_TIP = "웨이퍼 폴더 또는 LOT 폴더"
 ZO_EMPTY = "웨이퍼 폴더 또는 LOT 폴더를 더하세요"
 ZO_NO_INFO_FMT = "분류 정보 없음 {n}폴더(Surface.flt 없음): {names}"
 ZO_LOADING = "Defect 읽는 중"
@@ -1717,7 +1670,7 @@ ZO_NO_PIXEL = "픽셀 크기를 못 읽어 크기(µm)는 비웠습니다"
 ZO_CHIP_REMOVE_TIP = "빼기"
 ZO_CAP_FMT = "장비 저장 상한({cap})에서 잘린 웨이퍼 {n}장 — 그 웨이퍼는 Defect 가 일부만 있습니다"
 ZO_FACET_CLASS = "Bin"
-ZO_FACET_CUR = "재 분류"
+ZO_FACET_CUR = "재분류"
 ZO_FACET_TYPE = "검출 종류"
 ZO_FACET_RECIPE = "Recipe"
 ZO_FACET_ZONE = "Zone"
@@ -1725,8 +1678,8 @@ ZO_FACET_WAFER = "웨이퍼"
 ZO_FACET_LOT = "LOT · 웨이퍼"
 ZO_LOT_TOGGLE_TIP = "웨이퍼 목록 펴기 · 접기"
 ZO_COORD_HEAD = "좌표"
-ZO_COORD_COL = "Col"
-ZO_COORD_ROW = "Row"
+ZO_COORD_COL = "col"
+ZO_COORD_ROW = "row"
 ZO_COORD_WARN_FMT = "번호가 확실하지 않은 웨이퍼 {n}장"
 ZO_MIN_AREA = "Area ≥ (µm²)"
 ZO_MIN_WIDTH = "Width ≥ (µm)"
@@ -1738,7 +1691,7 @@ ZO_CLEAR = "고른 것 모두 풀기"
 ZO_CLASS_FMT = "{no} · {name}"
 ZO_CLASS_UNKNOWN = "{no} · (이름 없음)"
 ZO_TYPE_FMT = "Type {bits}"
-ZO_RECIPE_FMT = "레시피 {n}"
+ZO_RECIPE_FMT = "Recipe {n}"
 ZO_ZONE_FMT = "Zone {n}"
 ZO_UNKNOWN = "모름"
 ZO_CAUGHT_FILTER = "기준 묶음"
@@ -1750,37 +1703,40 @@ ZO_SORT_WAFER = "웨이퍼 순"
 ZO_SORT_TIP = "정렬"
 ZO_VIEW_TILES = "사진"
 ZO_VIEW_TABLE = "표"
-ZO_MORE_FMT = "더 보기 (+{n})"
+ZO_MORE_FMT = "더 보기 +{n}"
 ZO_NONE = "고른 조건에 맞는 Defect 가 없습니다"
 ZO_NO_PHOTO = "사진 없음"
-ZO_DETAIL_EMPTY = "사진이나 줄을 누르면\n값이 여기 보입니다"
+ZO_DETAIL_EMPTY = "사진이나 줄을 누르세요"
 ZO_DETAIL_COLOR = "컬러 사진"
 ZO_DETAIL_SCAN = "Scan 300 µm"
-ZO_DETAIL_SCAN_WAIT = "Scan 찾는 중…"
+ZO_DETAIL_SCAN_WAIT = "Scan 찾는 중"
 ZO_DETAIL_SCAN_NONE = "Scan 없음"
 ZO_ROW_LOT = "LOT"
 ZO_ROW_WAFER = "Wafer"
 ZO_ROW_SLOT = "슬롯#"
-ZO_ROW_COLROW = "col, row"
+ZO_ROW_COLROW = "col / row"
 ZO_ROW_NUMBER_WARN = "번호 확실하지 않음 · 장비 화면 확인"
 ZO_ROW_RECIPE = "Recipe"
 ZO_ROW_ZONE = "Zone"
 ZO_ROW_CLASS = "첫 분류"
-ZO_ROW_CUR = "재 분류"
+ZO_ROW_CUR = "재분류"
 ZO_ROW_TYPE = "검출 종류"
 ZO_BTN_ENLARGE = "크게 보기"
-ZO_BTN_INFO = "사진 정보로 보기"
+ZO_BTN_INFO = IMAGE_INFO_BUTTON   # 이 화면을 여는 버튼 = 메뉴 이름
 ZO_BTN_EXCEL = "엑셀로 저장"
-ZO_BTN_EXCEL_TIP = "지금 고른 Defect 중 사진 있는 것을 Defect 추출과 같은 엑셀로 저장"
+ZO_BTN_EXCEL_TIP = "Defect 추출과 같은 양식"
 ZO_EXCEL_NONE = "저장할 사진이 없습니다 — 사진 있는 Defect 를 고르세요"
 ZO_WAFER_FMT = "#{slot} · {name}"
+# 슬롯 번호를 모르면 '#?' 대신 비움 표시 — 엑셀과 같은 '—'(SM-E2f).
+ZO_WAFER_NO_SLOT_FMT = "— · {name}"
+ZO_NO_SLOT = "—"
 ZO_COL_LOT = "LOT"
 ZO_COL_WAFER = "웨이퍼"
-ZO_COL_COLROW = "col, row"
+ZO_COL_COLROW = "col / row"
 ZO_COL_RECIPE = "Recipe"
 ZO_COL_ZONE = "Zone"
 ZO_COL_CLASS = "첫 분류"
-ZO_COL_CUR = "재 분류"
+ZO_COL_CUR = "재분류"
 ZO_COL_TYPE = "검출 종류"
 ZO_COL_AREA = "Area µm²"
 ZO_COL_WIDTH = "Width µm"
@@ -1790,7 +1746,7 @@ ZO_COL_HEIGHT = "Height µm"
 ZO_COL_PHOTO = "사진"
 ZO_CHIP_COUNT_FMT = "웨이퍼 {w} · {n}"
 ZO_SHOWN_FMT = "{shown}개 표시"
-ZO_NOTICE_REMOVED = "{name} 을(를) 뺐습니다"
+ZO_NOTICE_REMOVED = "{name} 뺌"
 ZO_FACET_CAP = "잘림"
 ZO_TABLE_CAP_FMT = "표는 앞 {n}줄까지 보입니다 — 더 좁혀 고르거나 엑셀로 저장하세요"
 ZO_EXCEL_NONE = "저장할 사진이 없습니다 — 사진 있는 Defect 를 고르세요"

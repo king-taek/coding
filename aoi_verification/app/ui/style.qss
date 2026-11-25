@@ -424,6 +424,28 @@ QFrame[role="row"][rule="none"] {
     border-bottom: 1px solid $row_border;
 }
 
+/* Defect 정보 조회 — 묶음마다 밝은 상자(현택님 2026-11-24 안 B).  제목은 상자 위 굵은 글씨. */
+QFrame[role="infoBox"] {
+    background-color: $elev;
+    border: 1px solid $line2;
+    border-radius: $radius_sm;
+}
+QLabel[role="infoGroupTitle"] {
+    color: $ink;
+    font-weight: 700;
+    padding-left: 2px;
+}
+
+/* Defect 정보 조회 — 여러 장 넘겨 보기 띠의 썸네일.  지금 사진은 강조색 테두리. */
+QLabel[role="stripTile"] {
+    background-color: $panel;
+    border: 1px solid $line2;
+    border-radius: $radius_sm;
+}
+QLabel[role="stripTile"][current="true"] {
+    border: 2px solid $accent;
+}
+
 /* 점수 컬럼 눈금 — 이미지 영역과 우측 거리 컬럼을 가르는 1px 눈금.
    score_rule = ink 반투명이라 시트 위에서 또렷. */
 QFrame[role="vrule"] {
@@ -525,6 +547,14 @@ QPushButton[grade="panel"] {
     max-height: 30px;
     padding-top: 0px;
     padding-bottom: 0px;
+}
+/* 도구 화면의 빈 화면 가운데 큰 [사진 선택]/[폴더 선택](`tool_open_save.EmptyOpen`, 현택님 2026-11-24) —
+   화면에 하나뿐인 할 일이라 크게: 내용 42 + 패딩 12 + 보더 2 = 56. */
+QPushButton[grade="hero"] {
+    min-height: 42px;
+    font-size: 16px;
+    padding-left: 32px;
+    padding-right: 32px;
 }
 /* 허용 오차 ± — 입력란과 **같은 높이**여야 중심이 맞는다.  ghost 의 min-height 30
    (+패딩 = 44)이 `setFixedSize(38,38)` 을 이겨 38×44 로 렌더돼 3px 어긋났다(실측).
@@ -754,8 +784,7 @@ QWidget[role="loadingPanel"] {
 /* 패널 안 컨테이너 — 맨 QWidget 은 전역 규칙의 $bg 를 물려받아 패널 면 위에 색이 다른
    띠로 보인다.  투명으로 못 박는다. */
 QWidget[role="loadingBarHost"],
-QWidget[role="rowHost"],
-QWidget[role="switchRowText"] {
+QWidget[role="rowHost"] {
     background: transparent;
 }
 /* ── 로딩 패널(개선안 2a — 원형 웨이퍼 맵) ──────────────────────────────
@@ -1088,6 +1117,14 @@ QSpinBox:disabled, QDoubleSpinBox:disabled {
 QSpinBox::up-button, QDoubleSpinBox::up-button,
 QSpinBox::down-button, QDoubleSpinBox::down-button {
     width: 18px;
+}
+/* 허용 오차(NoButtons + 바깥 ±) — 위 18px 규칙이 NoButtons 와 만나면 입력란이 1px 로
+   눌려 값이 안 보였다(실측).  버튼 자리를 테두리 기준 0 폭으로 둔다. */
+QDoubleSpinBox[stepper="outside"]::up-button,
+QDoubleSpinBox[stepper="outside"]::down-button {
+    subcontrol-origin: border;
+    width: 0px;
+    border: none;
 }
 /* ★ 순서 주의 — Qt 는 `위젯::서브컨트롤:상태` 만 인식한다.
    `QSlider:disabled::sub-page` 처럼 상태를 앞에 쓰면 규칙이 **무시**돼, 무효해진
@@ -1483,19 +1520,21 @@ QPushButton[role="histToggle"]:disabled {
     border: 1px solid $line2;
     background: transparent;
 }
-/* GL 상태줄 읽기값의 구역 글자 — 하한 이하 파랑 · 사이 중립 · 상한 이상 빨강. */
+/* GL 상태줄 읽기값의 구역 글자 — 하한 이하 파랑 · 사이 중립 · 상한 이상 빨강.
+   ★ 파랑·빨강은 **차트 색과 같은 값**이다(`gl_charts._LOW`·`_HIGH`, E2b) — 강조색($accent)을
+     쓰면 차트의 하한 선과 다른 파랑이 된다.  test_gl_zone_colors 가 둘을 맞춰 본다. */
 QLabel[role="glZoneLow"], QLabel[role="glZoneMid"], QLabel[role="glZoneHigh"] {
     font-family: $font_mono;
 }
 QLabel[role="glZoneLow"] {
-    color: $accent;
+    color: #2F6FE0;
     font-weight: 700;
 }
 QLabel[role="glZoneMid"] {
     color: $ink2;
 }
 QLabel[role="glZoneHigh"] {
-    color: $danger;
+    color: #E5322A;
     font-weight: 700;
 }
 
