@@ -1,7 +1,7 @@
 """'어느 Zone에서 왔니?' — LOT · 웨이퍼 폴더의 Defect 를 분류 정보로 골라 사진으로 훑는다(현택님 2026-11-23, 1안).
 
 화면(작동 시안 1안 — 현택님 결정 2026-11-23):
-  * 위 줄 = 폴더 칩(✕ 로 빼기, 5초 [되돌리기]) · [+ 폴더] · [엑셀로 저장] · 지금 고른 수 / 전체.
+  * 위 줄 = [폴더 선택] · 불러온 폴더 요약(폴더는 왼쪽 줄의 ✕ 로 빼기, 5초 [되돌리기]) · [엑셀로 저장] · 지금 고른 수 / 전체.
   * 왼쪽 열 = 고르기 칸(분류 이름 · 검출 종류 · 잡힌 곳 · 레시피 · Zone · 웨이퍼 + 그 밖에).  누르면 바로 줄어든다.
     칸 숫자는 '그걸 누르면 몇 개가 되는지' (:func:`threshold.browse.facet_counts`), 같은 칸 안은 '또는'.
     칸 줄 순서는 폴더를 읽을 때 한 번 정한다 — 누를 때마다 줄이 튀지 않게.
@@ -25,10 +25,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QEvent, QObject, Qt, QThread, QTimer, QUrl, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QDoubleValidator, QImage, QIntValidator, QPixmap
 from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView,
-                             QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QTableWidget,
+                             QLabel, QLayout, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QTableWidget,
                              QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ... import i18n
@@ -175,9 +175,10 @@ class _FacetRow(QFrame):
 
     clicked = pyqtSignal()
     disc_clicked = pyqtSignal()
+    remove_clicked = pyqtSignal()
 
     def __init__(self, name: str, count: int, on: bool, note: str = "", parent=None,
-                 disc: Optional[bool] = None) -> None:
+                 disc: Optional[bool] = None, removable: bool = False) -> None:
         super().__init__(parent)
         self.setProperty("role", "ovRow")
         self.setProperty("selected", "true" if on else "false")
@@ -201,6 +202,17 @@ class _FacetRow(QFrame):
         self.num = QLabel(f"{count:,}", self)
         self.num.setProperty("role", "ovRowCount")
         lay.addWidget(self.num)
+        self.x_btn = None
+        if removable:                                 # 마우스가 줄 위에 있을 때만 보이는 ✕ — 자리는 늘 잡아 둬 이름이 안 튄다
+            self.x_btn = _nf(NeonButton("✕", role="ovRowX"))
+            self.x_btn.setFixedSize(22, 22)
+            self.x_btn.setToolTip(_KO.ZO_CHIP_REMOVE_TIP)
+            sp = self.x_btn.sizePolicy()
+            sp.setRetainSizeWhenHidden(True)
+            self.x_btn.setSizePolicy(sp)
+            self.x_btn.setVisible(False)
+            self.x_btn.clicked.connect(self.remove_clicked.emit)
+            lay.addWidget(self.x_btn)
         self.disc = None
         if disc is not None:                          # LOT 줄 — 맨 끝 ▾/▸ 로 웨이퍼 목록을 펴고 접는다
             lay.setContentsMargins(8, 4, 0, 4)
@@ -215,10 +227,82 @@ class _FacetRow(QFrame):
         if count == 0 and not on:
             self.setProperty("excluded", "true")      # 눌러도 0 개 — 옅게
 
+    def set_hover(self, on: bool) -> None:
+        if self.x_btn is not None:
+            self.x_btn.setVisible(on)
+
+    def enterEvent(self, e):    # noqa: N802
+        self.set_hover(True)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):    # noqa: N802
+        self.set_hover(False)
+        super().leaveEvent(e)
+
     def mousePressEvent(self, e):   # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(e)
+
+
+class _FlowLayout(QLayout):
+    """칸이 모자라면 다음 줄로 넘기는 배치 — 고른 조건 칩이 늘어도 창 폭을 밀지 않는다(heightForWidth)."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._items: list = []
+        self._space = 6
+
+    def setSpacing(self, s: int) -> None:   # noqa: N802
+        self._space = s
+
+    def spacing(self) -> int:
+        return self._space
+
+    def addItem(self, item) -> None:        # noqa: N802
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, i: int):               # noqa: N802
+        return self._items[i] if 0 <= i < len(self._items) else None
+
+    def takeAt(self, i: int):               # noqa: N802
+        return self._items.pop(i) if 0 <= i < len(self._items) else None
+
+    def hasHeightForWidth(self) -> bool:    # noqa: N802
+        return True
+
+    def heightForWidth(self, w: int) -> int:    # noqa: N802
+        return self._place(QRect(0, 0, w, 0), False)
+
+    def setGeometry(self, rect: QRect) -> None:     # noqa: N802
+        super().setGeometry(rect)
+        self._place(rect, True)
+
+    def sizeHint(self) -> QSize:            # noqa: N802
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:         # noqa: N802
+        m = self.contentsMargins()
+        w = max([it.minimumSize().width() for it in self._items] or [0])
+        h = max([it.minimumSize().height() for it in self._items] or [0])
+        return QSize(w + m.left() + m.right(), h + m.top() + m.bottom())
+
+    def _place(self, rect: QRect, apply: bool) -> int:
+        m = self.contentsMargins()
+        x0, right = rect.x() + m.left(), rect.right() - m.right()
+        x, y, row_h = x0, rect.y() + m.top(), 0
+        for it in self._items:
+            sz = it.sizeHint()
+            if x > x0 and x + sz.width() > right + 1:       # 이 칩이 안 들어가면 다음 줄
+                x, y, row_h = x0, y + row_h + self._space, 0
+            if apply:
+                it.setGeometry(QRect(QPoint(x, y), sz))
+            x += sz.width() + self._space
+            row_h = max(row_h, sz.height())
+        return y + row_h + m.bottom() - rect.y()
 
 
 class _Pic(QLabel):
@@ -279,7 +363,7 @@ class ZoneOriginDialog(QDialog):
         self._sel: dict = {k: set() for k, _n in B.FACETS}
         self._flags = B.Flags()
         self._params_open = False         # [파라미터 열기] — 기본 접힘
-        self._lot_open: dict = {}         # LOT → 웨이퍼 목록을 펼쳤나(없으면 LOT 이 하나일 때만 펼침)
+        self._lot_open: dict = {}         # LOT → 웨이퍼 목록을 펼쳤나(없으면 접힘)
         self._sort: Optional[tuple] = None          # (키, 큰 순?)
         self._view = "tiles"
         self._shown = PAGE_TILES
@@ -291,7 +375,7 @@ class ZoneOriginDialog(QDialog):
         self._last_cols = 0                # 타일을 그린 열 수 — 창 폭이 열 수를 바꿀 때만 다시 그린다
         self._keep_pos = 0
         self._scans: dict = {}            # item_key → Scan Crop QImage | None(없음)
-        self._undo_snap: Optional[tuple] = None
+        self._undo_snap: Optional[list] = None      # [(고른 폴더 자리, 폴더)] — 한 번에 뺀 만큼
         self._token = 0
         self._thread: Optional[_Load] = None
         self._overlay_on = False
@@ -335,9 +419,10 @@ class ZoneOriginDialog(QDialog):
         self.pick_btn.setToolTip(_KO.ZO_ADD_FOLDER_TIP)
         self.pick_btn.clicked.connect(self._on_pick)
         hl.addWidget(self.pick_btn)
-        self._chip_lay = QHBoxLayout()
-        self._chip_lay.setSpacing(6)
-        hl.addLayout(self._chip_lay)
+        self.loaded_label = QLabel("", head)         # 불러온 폴더 · 웨이퍼 · 수 — 폴더별 칩 대신 한 줄(2026-11-25)
+        self.loaded_label.setProperty("role", "muted")
+        self.loaded_label.setVisible(False)
+        hl.addWidget(self.loaded_label)
         hl.addStretch(1)
         self.big_count = QLabel("", head)
         self.big_count.setTextFormat(Qt.TextFormat.RichText)
@@ -433,7 +518,7 @@ class ZoneOriginDialog(QDialog):
             self.view_btns[key] = b
         cl.addWidget(bar)
         self.chips_host = QWidget(center)
-        self._sel_lay = QHBoxLayout(self.chips_host)
+        self._sel_lay = _FlowLayout(self.chips_host)
         self._sel_lay.setContentsMargins(14, 6, 14, 6)
         self._sel_lay.setSpacing(6)
         cl.addWidget(self.chips_host)
@@ -540,27 +625,54 @@ class ZoneOriginDialog(QDialog):
             self._start_load()
 
     def remove_folder(self, folder: Path) -> None:
-        if folder not in self._roots:
+        self._remove_roots([folder], folder.name)
+
+    def _remove_roots(self, folders: list, name: str) -> None:
+        """고른 폴더 여럿을 한 번에 뺀다 — [되돌리기] 한 번으로 다 돌아온다."""
+        snap = sorted((self._roots.index(f), f) for f in dict.fromkeys(folders) if f in self._roots)
+        if not snap:
             return
-        i = self._roots.index(folder)
-        self._undo_snap = (i, folder)
-        self._roots.pop(i)
+        self._undo_snap = snap
+        for _i, f in reversed(snap):
+            self._roots.remove(f)
         self._after_roots()
-        self._show_notice(_KO.ZO_NOTICE_REMOVED.format(name=folder.name), undo=True)
+        self._show_notice(_KO.ZO_NOTICE_REMOVED.format(name=name), undo=True)
+
+    def lot_roots(self, lot: str) -> list:
+        """그 LOT 에만 웨이퍼를 내는 고른 폴더들(다른 LOT 웨이퍼가 섞인 폴더는 뺀다)."""
+        out = []
+        for r in self._roots:
+            ws = [self._data[d] for d in self._expand.get(r, ()) if d in self._data]
+            if ws and all(w.lot == lot for w in ws):
+                out.append(r)
+        return out
+
+    def wafer_root(self, n: int) -> Optional[Path]:
+        """웨이퍼 폴더가 곧 고른 폴더(웨이퍼를 바로 넣은 것)일 때만 그 폴더 — LOT 폴더 안 웨이퍼는 None."""
+        f = self._folder_of.get(n)
+        return f if f in self._roots else None
+
+    def remove_lot(self, lot: str) -> None:
+        self._remove_roots(self.lot_roots(lot), lot)
 
     def _undo(self) -> None:
-        if self._undo_snap is None:
+        if not self._undo_snap:
             return
-        i, folder = self._undo_snap
+        snap = self._undo_snap
         self._undo_snap = None
         self.notice.setVisible(False)
-        if folder not in self._roots:
+        reload = False
+        for i, folder in snap:                  # 작은 번호부터 끼워 넣으면 원래 자리로 돌아온다
+            if folder in self._roots:
+                continue
             self._roots.insert(min(i, len(self._roots)), folder)
             # 읽는 중에 뺐다 되돌리면 반만 읽힌 채일 수 있다 — 빠진 웨이퍼가 있으면 마저 읽는다.
             if folder not in self._expand or any(d not in self._data for d in self._expand[folder]):
-                self._start_load()
-            else:
-                self._after_roots()
+                reload = True
+        if reload:
+            self._start_load()
+        else:
+            self._after_roots()
 
     def _after_roots(self) -> None:
         """폴더 목록이 바뀌었다(읽을 것 없음) — 빠진 웨이퍼의 고름을 풀고 다시 그린다."""
@@ -690,7 +802,7 @@ class ZoneOriginDialog(QDialog):
         return (int(slot) if slot.isdecimal() else 1 << 30, n)
 
     def lot_open(self, lot: str) -> bool:
-        return self._lot_open.get(lot, len(self._order.get("lot", [])) <= 1)
+        return self._lot_open.get(lot, False)
 
     def toggle_lot(self, lot: str) -> None:
         self._lot_open[lot] = not self.lot_open(lot)
@@ -756,28 +868,10 @@ class ZoneOriginDialog(QDialog):
 
     def _render_head(self) -> None:
         self._empty_open.set_empty(not self._roots)
-        _clear(self._chip_lay)
-        for r in self._roots:
-            chip = QFrame(self)
-            chip.setProperty("role", "ovRow")
-            chip.setStyleSheet(f"QFrame[role=\"ovRow\"] {{ border: 1px solid {theme.LINE2}; background: {theme.ELEV}; }}")
-            lay = QHBoxLayout(chip)
-            lay.setContentsMargins(10, 2, 2, 2)
-            lay.setSpacing(6)
-            wafers = [self._data[d] for d in self._expand.get(r, ()) if d in self._data]
-            n = sum(1 for w in wafers for it in w.items if not it.good)
-            name = QLabel(f"<b>{html.escape(r.name)}</b>", chip)
-            name.setProperty("role", "ovRowName")
-            lay.addWidget(name)
-            cnt = QLabel(_KO.ZO_CHIP_COUNT_FMT.format(w=len(wafers), n=f"{n:,}"), chip)
-            cnt.setProperty("role", "ovRowCount")
-            lay.addWidget(cnt)
-            x = _nf(NeonButton("✕", role="ovRowX"))
-            x.setFixedSize(24, 24)
-            x.setToolTip(_KO.ZO_CHIP_REMOVE_TIP)
-            x.clicked.connect(lambda _c=False, f=r: self.remove_folder(f))
-            lay.addWidget(x)
-            self._chip_lay.addWidget(chip)
+        wafers = [self._data[d] for r in self._roots for d in self._expand.get(r, ()) if d in self._data]
+        n = sum(1 for w in wafers for it in w.items if not it.good)
+        self.loaded_label.setText(_KO.ZO_LOADED_FMT.format(f=len(self._roots), w=len(wafers), n=f"{n:,}"))
+        self.loaded_label.setVisible(bool(self._roots))
         self.excel_btn.setEnabled(bool(self._roots))
         total = sum(1 for it in self.items() if not it.good or self._flags.good)
         mono = theme.FONT_MONO.split(",")[0].strip('" ')
@@ -832,7 +926,8 @@ class ZoneOriginDialog(QDialog):
             hint.setContentsMargins(8, 0, 8, 0)
             il.addWidget(hint)
         else:
-            for k, title in B.FACETS:
+            # LOT · 웨이퍼 묶음을 맨 위로(B.FACETS 순서는 그대로 — 칩 순서 등에 쓰인다)
+            for k, title in sorted(B.FACETS, key=lambda f: f[0] != "lot"):
                 if k == "wafer":
                     continue                        # LOT 아래에 펼쳐 그린다
                 head = QLabel(title, inner)
@@ -944,8 +1039,9 @@ class ZoneOriginDialog(QDialog):
                   if (w := self.wafer_of(wn)) is not None and w.lot == lot]
         opened = self.lot_open(lot)
         row = _FacetRow(lot, counts["lot"].get(lot, 0),
-                        lot in self._sel["lot"], "", inner, disc=opened)
+                        lot in self._sel["lot"], "", inner, disc=opened, removable=bool(self.lot_roots(lot)))
         row.clicked.connect(lambda lot=lot: self.toggle("lot", lot))
+        row.remove_clicked.connect(lambda lot=lot: self.remove_lot(lot))
         row.disc_clicked.connect(lambda lot=lot: self.toggle_lot(lot))
         il.addWidget(row)
         self.facet_rows[("lot", lot)] = row
@@ -959,8 +1055,12 @@ class ZoneOriginDialog(QDialog):
         for wn in wafers:
             w = self.wafer_of(wn)
             n, on = counts["wafer"].get(wn, 0), wn in self._sel["wafer"]
-            wr = _FacetRow(self.wafer_label(wn), n, on, _KO.ZO_FACET_CAP if w.cap else "", box)
+            root = self.wafer_root(wn)
+            wr = _FacetRow(self.wafer_label(wn), n, on, _KO.ZO_FACET_CAP if w.cap else "", box,
+                           removable=root is not None)
             wr.clicked.connect(lambda wn=wn: self.toggle("wafer", wn))
+            if root is not None:
+                wr.remove_clicked.connect(lambda root=root: self.remove_folder(root))
             bl.addWidget(wr)
             self.facet_rows[("wafer", wn)] = wr
         il.addWidget(box)
@@ -990,7 +1090,6 @@ class ZoneOriginDialog(QDialog):
             c = _nf(NeonButton(_KO.ZO_CLEAR, role="textAction"))
             c.clicked.connect(self.clear_all)
             self._sel_lay.addWidget(c)
-        self._sel_lay.addStretch(1)
         self.chips_host.setVisible(bool(chips))
 
     def _render_bar(self) -> None:
