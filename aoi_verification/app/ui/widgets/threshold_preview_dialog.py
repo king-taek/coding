@@ -793,20 +793,21 @@ class _AxisFoot(QWidget):
 class _Tile(QFrame):
     """사진 한 장 — 테두리 · 캡션 없이 사진만.  누르면 ``clicked``.
 
-    표시는 사진 위 작은 것만: 꼭 잡기 = 오른쪽 위 작은 체크, 펼친 타일 = 3px 강조 테두리, 가리킨 타일 = 옅은 외곽선.
+    표시는 사진 위 작은 것만: 꼭 잡기 = 오른쪽 위 작은 체크(고르는 중인 것은 점선), 펼친 타일 = 3px 강조 테두리, 가리킨 타일 = 옅은 외곽선.
     더블클릭 · 우클릭 [크게 보기] = ``enlarge`` (우클릭 메뉴는 모든 사진과 같은 ``photo_menu``)."""
 
     clicked = pyqtSignal()
     enlarge = pyqtSignal()
 
     def __init__(self, photo, size: int, parent=None, picked: bool = False,
-                 tip: str = "") -> None:
+                 tip: str = "", pending: str = "") -> None:
         super().__init__(parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)   # 덜 찬 줄에서 가로로 늘어나지 않게
         self.setFixedSize(size, size)
         self.setToolTip(tip)
         self.picked = picked
+        self.pending = pending                         # 고르는 중(아직 [적용] 전)인 쪽 — "defect" · "overkill" · "none"(뺄 예정) · "" 바뀜 없음
         self.wait_path = None                          # 썸네일을 아직 기다리는 사진 경로(백그라운드가 채운다)
         self.photo_path = None                         # Color 사진 경로 — 우클릭 [Defect 정보 조회] · [GL 히스토그램] 용
         pic = QLabel(self)
@@ -833,7 +834,12 @@ class _Tile(QFrame):
         self.badge.setFixedSize(16, 16)
         self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.badge.move(size - 22, 6)
-        self.badge.setVisible(picked)
+        self.badge.setVisible(picked or bool(pending))
+        if pending:                                    # 점선 · 속 빈 표시 — 적용된 ✓ 와 구분한다
+            self.badge.setText({"defect": "✓", "overkill": "○"}.get(pending, "–"))
+            self.badge.setProperty("pending", "true")
+            self.badge.style().unpolish(self.badge)    # 이미 꾸며진 부모 밑에서 만들면 속성이 바뀐 걸 다시 읽게 한다
+            self.badge.style().polish(self.badge)
         self.cap = QLabel("", self)                    # 정렬 중일 때만 — 그 정렬 값
         self.cap.setProperty("role", "tileCap")
         self.cap.setGeometry(0, size - CAPTION_H, size, CAPTION_H)
@@ -1417,9 +1423,8 @@ class _WaferList(QWidget):
             self.rows.append(r)
 
 
-def paint_ratio(p: QPainter, x: float, y: float, w: float, h: float, drop: int, total: int, ticks=(),
-                tick_over: float = 3.0) -> None:
-    """가로 비율 막대 — 빠지는 몫은 빨강, 남는 몫은 옅은 잉크.  ``ticks`` = 꼭 잡기 위치(0~1)가 강조색 세로 눈금."""
+def paint_ratio(p: QPainter, x: float, y: float, w: float, h: float, drop: int, total: int) -> None:
+    """가로 비율 막대 — 빠지는 몫은 빨강, 남는 몫은 옅은 잉크."""
     if w <= 0 or h <= 0:
         return
     clip = QPainterPath()
@@ -1432,12 +1437,10 @@ def paint_ratio(p: QPainter, x: float, y: float, w: float, h: float, drop: int, 
     if total > 0 and drop > 0:
         p.fillRect(QRectF(x, y, w * min(1.0, drop / total), h), QColor(theme.DANGER))
     p.restore()
-    for t in ticks:
-        p.fillRect(QRectF(x + min(w - 2, max(0.0, w * t - 1)), y - tick_over, 2, h + 2 * tick_over), QColor(theme.ACCENT))
 
 
 class _RatioBar(QWidget):
-    """요약 줄 아래 가로 비율 막대 하나(빠짐 : 남음, 꼭 잡기 눈금)."""
+    """요약 줄 아래 가로 비율 막대 하나(빠짐 : 남음)."""
 
     BAR_H = 12
     MAX_W = 640
@@ -1447,15 +1450,15 @@ class _RatioBar(QWidget):
         self.setFixedHeight(36)         # 막대 + 아래 범례 한 줄
         self.setMaximumWidth(self.MAX_W)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.drop, self.total, self.ticks = 0, 0, ()
+        self.drop, self.total = 0, 0
 
-    def set_values(self, drop: int, total: int, ticks=()) -> None:
-        self.drop, self.total, self.ticks = drop, total, tuple(ticks)
+    def set_values(self, drop: int, total: int) -> None:
+        self.drop, self.total = drop, total
         self.update()
 
     def paintEvent(self, _e):       # noqa: N802
         p = QPainter(self)
-        paint_ratio(p, 0, 4, self.width(), self.BAR_H, self.drop, self.total, self.ticks, tick_over=4.0)
+        paint_ratio(p, 0, 4, self.width(), self.BAR_H, self.drop, self.total)
         f = QFont(self.font())
         f.setPixelSize(12)
         p.setFont(f)
@@ -1496,11 +1499,11 @@ class _ZoneRow(QAbstractButton):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(self.H)
         self._label, self._count, self._drop, self._total = "", 0, 0, 0
-        self._new, self._picks, self._ticks = 0, 0, ()
+        self._new, self._picks = 0, 0
 
-    def set_data(self, label: str, count: int, drop: int, new: int, picks: int, ticks=()) -> None:
+    def set_data(self, label: str, count: int, drop: int, new: int, picks: int) -> None:
         self._label, self._count, self._drop, self._total = label, count, drop, count
-        self._new, self._picks, self._ticks = new, picks, tuple(ticks)
+        self._new, self._picks = new, picks
         moved = "   ".join(t for t in (f"−{drop:,}" if drop else "", f"+{new:,}" if new else "",
                                        f"✓{picks:,}" if picks else "") if t)
         self.setText(f"{label}\n{_KO.THRESH_PREVIEW_ZONE_COUNT.format(n=count)}" + (f"\n{moved}" if moved else ""))
@@ -1554,7 +1557,7 @@ class _ZoneRow(QAbstractButton):
         cw = max(fm.horizontalAdvance(cnt), 22)
         p.drawText(QRectF(pad, y2, cw, h2), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), cnt)
         bx = pad + cw + 8
-        paint_ratio(p, bx, y2 + 5, max(0, right - bx), 6, self._drop, self._total, self._ticks, tick_over=3.0)
+        paint_ratio(p, bx, y2 + 5, max(0, right - bx), 6, self._drop, self._total)
         p.end()
 
 
@@ -1741,15 +1744,17 @@ class ThresholdPreviewDialog(QDialog):
         self._overlay_on = False
         self._mode = "manual"             # manual(직접 조정) | auto(자동 추천)
         self._picked: dict = {}           # 꼭 잡을 Defect — key_of(d) → Defect
+        self._stage_picked: dict = {}     # 고르는 중인 꼭 잡기 — [적용] 전까지 계산 · 숫자에 안 쓴다(안 고르면 _picked 와 같다)
+        self._stage_over: dict = {}       # 고르는 중인 Overkill
         self._overkill: dict = {}         # Overkill 로 가른 Defect — key_of(d) → Defect (팝업에서 고른다 · 추천에는 안 쓰고 '빠짐 m/n' 만 센다)
         self._pick_bus = _PickBus(self)
         self._pick_bus.done.connect(self._on_pick_computed)
         self._pick_prev: Optional[tuple] = None     # [적용] 직전의 (고른 것, Overkill) — 계산 실패 때 되돌린다
         self._pick_token = 0              # [적용] 계산의 세대 — 늦게 온 옛 결과는 버린다
         self._pick_touched: set = set()   # 마지막 [적용] 에서 고른 것이 바뀐 Zone — 그 Zone 저장분만 고친다
-        self._mark_undo: list = []        # 값 띠 [Defect] · [Overkill] 직전 상태 — Z 로 하나씩 되돌린다
+        self._mark_undo: list = []        # 고르기 · [적용] 직전 상태(고르는 중 2 + 적용된 4) — Z 로 하나씩 되돌린다
         self._keep_open = False           # 다음 다시 그리기에서 펼친 값 띠를 닫지 않는다(띠에서 가른 직후)
-        self._has_classify = False        # 사람이 검토로 바꾼 분류가 있다 — [Classify 가져오기] 를 켠다
+        self._has_classify = False        # 사람이 검토로 바꾼 분류가 있다 — [리뷰 결과 불러오기] 를 켠다
         from .report_options_dialog import ReportOptions
         self._report_opts = ReportOptions()  # 보고서 내보내기 설정 — 이 화면을 닫을 때까지 남는다
         self._pick_dlg: Optional[QDialog] = None   # 열려 있는 [Defect 고르기] 팝업
@@ -1982,6 +1987,15 @@ class ThresholdPreviewDialog(QDialog):
         self.pick_open_btn.clicked.connect(self.open_pick_dialog)
         self.pick_open_btn.setVisible(self._mode == "auto")
         srow.addWidget(self.pick_open_btn)
+        self.apply_btn = NeonButton(_KO.OVERKILL_APPLY, role="primary")           # 고르는 중인 것을 반영 — 바뀐 게 있을 때만 켠다
+        self.apply_btn.clicked.connect(self.apply_pending)
+        self.apply_btn.setVisible(self._mode == "auto")
+        self.apply_btn.setEnabled(False)
+        srow.addWidget(self.apply_btn)
+        self.cancel_btn = NeonButton(_KO.OVERKILL_APPLY_CANCEL, role="textAction")
+        self.cancel_btn.clicked.connect(self.discard_pending)
+        self.cancel_btn.setVisible(False)
+        srow.addWidget(self.cancel_btn)
         self.classify_btn = NeonButton(_KO.OVERKILL_CLASSIFY_OPEN, role="ghost")   # 자동 추천 모드에서만 — 사람이 바꾼 분류가 있을 때
         self.classify_btn.clicked.connect(self.open_classify_dialog)
         self.classify_btn.setVisible(self._mode == "auto")
@@ -2160,7 +2174,9 @@ class ThresholdPreviewDialog(QDialog):
             return
         if snap["reset"] or (snap["lost"] and self._mode == "auto"):    # 자동 추천은 빠진 고름 때문에 다시 추천됐다 — 그 전 값으로
             self._ov = dict(snap["ov"])
-        self._picked.update({key_of(d): d for d in w.defects if (_folder_of(w, d), d.index) in snap["picks"]})
+        back = {key_of(d): d for d in w.defects if (_folder_of(w, d), d.index) in snap["picks"]}
+        self._picked.update(back)
+        self._stage_picked.update(back)
         self._rec_zones = {(d.zone_dir, d.zone) for d in self._picked.values()}
         self._drop_cache = {}
         self._render()
@@ -2598,6 +2614,8 @@ class ThresholdPreviewDialog(QDialog):
         self._keep_open = False
         self._has_classify = w is not None and any(CL.changed(d) for d in w.defects)
         kept_picks = {(_folder_of(prev, d), d.index) for d in self._picked.values()} if prev else set()
+        kept_stage_p = {(_folder_of(prev, d), d.index) for d in self._stage_picked.values()} if prev else set()
+        kept_stage_o = {(_folder_of(prev, d), d.index) for d in self._stage_over.values()} if prev else set()
         both = prev is not None and w is not None and not prev.note and not w.note
         same = both and same_base(prev, w)
         self._base_reset = bool(both and not same)
@@ -2612,6 +2630,9 @@ class ThresholdPreviewDialog(QDialog):
         kept_ov = {(_folder_of(prev, d), d.index) for d in self._overkill.values()} if prev else set()
         self._overkill = {key_of(d): d for d in (w.defects if w else ()) if (_folder_of(w, d), d.index) in kept_ov}
         self._rec_zones = {(d.zone_dir, d.zone) for d in self._picked.values()}
+        ds = w.defects if w else ()          # 고르는 중인 것도 같은 방식으로 이어 간다(기준이 바뀌면 처음으로)
+        self._stage_picked = {} if self._base_reset else {key_of(d): d for d in ds if (_folder_of(w, d), d.index) in kept_stage_p}
+        self._stage_over = {} if self._base_reset else {key_of(d): d for d in ds if (_folder_of(w, d), d.index) in kept_stage_o}
         if (self._mode == "auto" and same and w is not None
                 and {(_folder_of(w, d), d.index) for d in self._picked.values()} != kept_picks):
             # 폴더를 빼서 꼭 잡기가 줄었다 — 사라진 고름에서 나온 추천이 남지 않게 toggle_pick 과 같은 식으로 다시 추천한다
@@ -2881,21 +2902,11 @@ class ThresholdPreviewDialog(QDialog):
             self.zone_btns[key] = b
             self._zone_text(key)
 
-    def _zone_ticks(self, key) -> list:
-        """꼭 잡기 위치(0~1) — 빠지는 Defect 를 앞, 남는 것을 뒤에 놓은 줄에서의 자리(놓친 고름은 빨간 쪽에 놓인다)."""
-        zone = self._in_zone(key)
-        if not zone or not self._picked:
-            return []
-        gone = {key_of(d) for d, _why in self.dropped(key)}
-        order = [key_of(d) for d in zone if key_of(d) in gone] + [key_of(d) for d in zone if key_of(d) not in gone]
-        pos = {k: i for i, k in enumerate(order)}
-        return sorted((pos[k] + 0.5) / len(order) for k in self._picked if k in pos)
-
     def _zone_text(self, key) -> None:
         name, _rec = self._w.label(key)          # 레시피는 머리줄에 있다(:meth:`_render_zones`) — 줄에는 Zone 이름만
         picks = sum(1 for d in self._picked.values() if (d.zone_dir, d.zone) == key)
         self.zone_btns[key].set_data(name, self._count(key),
-                                     len(self.dropped(key)), self.appeared(key), picks, self._zone_ticks(key))
+                                     len(self.dropped(key)), self.appeared(key), picks)
 
     def _render_rules(self) -> None:
         self._clear(self._rules_lay)
@@ -3173,6 +3184,8 @@ class ThresholdPreviewDialog(QDialog):
             self.miss_box.setVisible(False)
             self.ov_box.setVisible(False)
             self.pick_open_btn.setEnabled(False)
+            self.apply_btn.setEnabled(False)
+            self.cancel_btn.setVisible(False)
             self.classify_btn.setEnabled(False)
             self.list_btn.setEnabled(False)
             return 0
@@ -3189,7 +3202,7 @@ class ThresholdPreviewDialog(QDialog):
         self._tone(self.new_value, "ok" if new else "none")
         self.keep_label.setText(f"{n - drop:,}")
         self.all_label.setText(f"{n:,}")
-        self.ratio.set_values(drop, n, self._zone_ticks(self._zone))
+        self.ratio.set_values(drop, n)
         goods = sum(1 for d in w.goods if (d.zone_dir, d.zone) == self._zone)
         picks = sum(1 for d in self._picked.values() if (d.zone_dir, d.zone) == self._zone)
         counts = {"drop": drop, "keep": n - drop, "good": goods, "pick": picks}
@@ -3214,8 +3227,14 @@ class ThresholdPreviewDialog(QDialog):
         self.miss_box.setVisible(bool(missed))
         self.pick_open_btn.setVisible(auto)
         self.pick_open_btn.setEnabled(True)
+        pend = self._pending_count()
+        self.apply_btn.setVisible(auto)
+        self.apply_btn.setEnabled(bool(pend))
+        self.apply_btn.setText(_KO.OVERKILL_APPLY_FMT.format(n=pend) if pend else _KO.OVERKILL_APPLY)
+        self.cancel_btn.setVisible(auto and bool(pend))
         self.classify_btn.setVisible(auto)
         self.classify_btn.setEnabled(self._has_classify)
+        self.classify_btn.setText(_KO.OVERKILL_CLASSIFY_OPEN if self._has_classify else _KO.OVERKILL_CLASSIFY_NONE_BTN)
         self.list_btn.setVisible(auto)
         self.list_btn.setEnabled(True)
         self.list_save_act.setEnabled(bool(self._picked or self._overkill))
@@ -3360,7 +3379,7 @@ class ThresholdPreviewDialog(QDialog):
                 self._tile_rows.append([])
                 for c, (d, why) in enumerate(rows[start:start + cols]):
                     k = key_of(d)
-                    tile = _Tile(self._pic(d), TILE_PX, row, picked=k in self._picked,
+                    tile = _Tile(self._pic(d), TILE_PX, row, picked=k in self._picked, pending=self._pending_side(k),
                                  tip=f"{cname}  {self._why_text(d, why)}".strip())
                     tile.clicked.connect(lambda i=k: self._toggle(i))     # 두 모드 모두 값 펼치기 — 꼭 잡기는 [Defect 고르기] 팝업에서
                     tile.enlarge.connect(lambda i=k: self._enlarge_tile(i))
@@ -3459,8 +3478,8 @@ class ThresholdPreviewDialog(QDialog):
         top.addWidget(sub, 1)
         k = key_of(d)
         self.mark_btns = {}
-        for kind, text, mine in (("defect", _KO.OVERKILL_MARK_DEFECT, self._picked),
-                                 ("overkill", _KO.OVERKILL_MARK_OVERKILL, self._overkill)):
+        for kind, text, mine in (("defect", _KO.OVERKILL_MARK_DEFECT, self._stage_picked),
+                                 ("overkill", _KO.OVERKILL_MARK_OVERKILL, self._stage_over)):
             b = QPushButton(text, box)              # 바로 가른다(현택님 2026-11-24 안 D) — 켜짐은 색으로만
             b.setProperty("role", "ovBoxToggle")
             b.setCheckable(True)
@@ -3880,10 +3899,13 @@ class ThresholdPreviewDialog(QDialog):
         z = self._zone
         if z is None:
             return
-        had = any((d.zone_dir, d.zone) == z for d in (*self._picked.values(), *self._overkill.values()))
+        had = any((d.zone_dir, d.zone) == z for d in (*self._picked.values(), *self._overkill.values(),
+                                                      *self._stage_picked.values(), *self._stage_over.values()))
         self._ov = {k: v for k, v in self._ov.items() if k[:2] != z}
         self._picked = {k: d for k, d in self._picked.items() if (d.zone_dir, d.zone) != z}
         self._overkill = {k: d for k, d in self._overkill.items() if (d.zone_dir, d.zone) != z}
+        self._stage_picked = {k: d for k, d in self._stage_picked.items() if (d.zone_dir, d.zone) != z}
+        self._stage_over = {k: d for k, d in self._stage_over.items() if (d.zone_dir, d.zone) != z}
         self._rec_zones.discard(z)
         self._mark_undo = []
         self._open = None
@@ -3905,11 +3927,14 @@ class ThresholdPreviewDialog(QDialog):
         """꼭 잡을 Defect 를 더하거나 빼고, 고른 것을 전부 남기는 기준을 다시 추천한다."""
         if k in self._picked:
             d = self._picked.pop(k)
+            self._stage_picked.pop(k, None)
         else:
             d = next((x for x in self._w.defects if key_of(x) == k), None)
             if d is None:
                 return
             self._picked[k] = d
+            self._stage_picked[k] = d
+            self._stage_over.pop(k, None)
         self._recommend()
         self._save_picks({(d.zone_dir, d.zone)})
         self._render_zones()
@@ -3930,43 +3955,83 @@ class ThresholdPreviewDialog(QDialog):
         self._rec_zones = zones_now
 
     def mark(self, k: tuple, kind: str) -> None:
-        """값 띠 [Defect] · [Overkill] — 이 사진을 바로 가르고 기준을 다시 계산한다(현택님 2026-11-24 안 D).
+        """값 띠 [Defect] · [Overkill] — 이 사진을 '고르는 중' 에 담는다.  [적용] 해야 기준이 다시 계산된다(현택님 2026-11-25).
 
         같은 버튼을 다시 누르면 뺀다.  한쪽에 넣으면 다른 쪽에서는 빠진다.  Z 로 하나씩 되돌린다."""
         w = self._w
         d = self._tile_defects.get(k) or (next((x for x in w.defects if key_of(x) == k), None) if w else None)
         if w is None or d is None:
             return
-        self._mark_undo.append((dict(self._picked), dict(self._overkill), dict(self._ov), set(self._rec_zones)))
-        picked, over = dict(self._picked), dict(self._overkill)
+        picked, over = dict(self._stage_picked), dict(self._stage_over)
         mine, other = (picked, over) if kind == "defect" else (over, picked)
         if k in mine:
             del mine[k]
         else:
             mine[k] = d
             other.pop(k, None)
+        self._stage(picked, over)
+
+    def _push_undo(self) -> None:
+        self._mark_undo.append((dict(self._stage_picked), dict(self._stage_over), dict(self._picked),
+                                dict(self._overkill), dict(self._ov), set(self._rec_zones)))
+
+    def _stage(self, picked: dict, over: dict) -> None:
+        """고르는 중인 것만 바꾼다 — 계산 · 로딩 · 저장 없이 화면(타일 표시 · [적용] 글자)만 다시 그린다."""
+        self._push_undo()
+        self._stage_picked, self._stage_over = picked, over
         self._keep_open = True
-        self._on_pick_applied(picked, over)
+        self._changed(True)
+
+    @staticmethod
+    def _side(p: dict, o: dict, k: tuple) -> str:
+        return "defect" if k in p else "overkill" if k in o else "none"
+
+    def _pending_side(self, k: tuple) -> str:
+        """적용된 것과 다르면 고르는 중인 쪽(``defect`` · ``overkill`` · ``none``), 같으면 빈 글자."""
+        now = self._side(self._stage_picked, self._stage_over, k)
+        return now if now != self._side(self._picked, self._overkill, k) else ""
+
+    def _pending_count(self) -> int:
+        """적용된 것과 쪽이 다른 Defect 수 — 뺀 것도 센다."""
+        keys = {*self._stage_picked, *self._stage_over, *self._picked, *self._overkill}
+        return sum(1 for k in keys if self._pending_side(k))
+
+    def apply_pending(self) -> None:
+        """[적용] — 고르는 중인 것을 반영한다(추천값 다시 계산 · 로딩).  Z 로 한 번에 되돌린다."""
+        if self._w is None or not self._pending_count():
+            return
+        self._push_undo()
+        self._keep_open = True
+        self._on_pick_applied(dict(self._stage_picked), dict(self._stage_over))
+
+    def discard_pending(self) -> None:
+        """[취소] — 고르는 중인 것을 버리고 적용된 상태로 돌아간다."""
+        if self._w is None or not self._pending_count():
+            return
+        self._stage(dict(self._picked), dict(self._overkill))
 
     def undo_mark(self) -> None:
-        """Z — 값 띠에서 마지막으로 가른 것을 되돌린다(기준값도 그 전으로)."""
+        """Z — 마지막 고르기(또는 [적용])를 되돌린다.  [적용] 은 기준값도 그 전으로."""
         if not self._mark_undo or self._w is None:
             return
-        picked, over, ov, rec_zones = self._mark_undo.pop()
+        sp, so, picked, over, ov, rec_zones = self._mark_undo.pop()
+        applied_changed = (set(picked) != set(self._picked) or set(over) != set(self._overkill) or ov != self._ov)
         touched = {(d.zone_dir, d.zone) for src in (self._picked, self._overkill, picked, over) for d in src.values()}
         self._pick_token += 1                       # 계산 중인 [적용] 결과가 늦게 와도 버린다
         if self._overlay_on:
             self._loading.hide_overlay()
             self._overlay_on = False
+        self._stage_picked, self._stage_over = sp, so
         self._picked, self._overkill, self._ov, self._rec_zones = picked, over, ov, rec_zones
-        self._save_picks(touched)
+        if applied_changed:
+            self._save_picks(touched)
         self._render_zones()
         self._render_rules()
         self._keep_open = True
         self._changed(True)
 
     def open_classify_dialog(self) -> None:
-        """[Classify 가져오기] — 사람이 바꾼 분류를 꼭 잡기 · Overkill 로 한 번에 넣는다(현택님 2026-11-24 안 A)."""
+        """[리뷰 결과 불러오기] — 사람이 바꾼 분류를 꼭 잡기 · Overkill 로 한 번에 고른다(현택님 2026-11-24 안 A) — [적용] 은 따로."""
         w = self._w
         if w is None or w.note or self._pick_dlg is not None:
             return
@@ -3980,18 +4045,17 @@ class ThresholdPreviewDialog(QDialog):
         self._add_marks(picked, over)
 
     def _add_marks(self, picked: dict, over: dict) -> None:
-        """가져온 것(Classify · 선택 목록)을 지금 고른 것에 더한다 — 한 Defect 는 한쪽에만.  Z 로 한 번에 되돌린다."""
+        """가져온 것(리뷰 결과 · 선택 목록 · 저장한 선택)을 고르는 중에 더한다 — 한 Defect 는 한쪽에만.  Z 로 한 번에 되돌린다."""
         if self._w is None or not (picked or over):
             return
-        self._mark_undo.append((dict(self._picked), dict(self._overkill), dict(self._ov), set(self._rec_zones)))
-        new_p, new_o = dict(self._picked), dict(self._overkill)
+        new_p, new_o = dict(self._stage_picked), dict(self._stage_over)
         for k, d in picked.items():
             new_p[k] = d
             new_o.pop(k, None)
         for k, d in over.items():
             new_o[k] = d
             new_p.pop(k, None)
-        self._on_pick_applied(new_p, new_o)
+        self._stage(new_p, new_o)
 
     def _list_rows(self) -> list:
         """고른 것 → CSV 줄(:data:`PL.HEAD` 순서).  꼭 잡기 먼저, 그다음 Overkill."""
@@ -4113,17 +4177,8 @@ class ThresholdPreviewDialog(QDialog):
         self.saved_btn.setEnabled(bool(picked or over))
 
     def load_saved_picks(self) -> None:
-        """[저장한 선택 불러오기] — 저장해 둔 꼭 잡기 · Overkill 을 지금 것에 더하고 추천값을 다시 계산한다."""
-        picked, over = self._saved_picks()
-        if self._w is None or not (picked or over):
-            return
-        self._picked.update(picked)
-        self._overkill.update(over)
-        self._recommend()
-        self._render_zones()
-        self._render_rules()
-        self._changed(True)
-        self._save_picks()
+        """[저장한 선택 불러오기] — 저장해 둔 꼭 잡기 · Overkill 을 고르는 중에 더한다([적용] 해야 추천값이 계산된다)."""
+        self._add_marks(*self._saved_picks())
 
     # ------------------------------------------------------------------ Defect 고르기 팝업
     def _on_mode_clicked(self, key: str) -> None:
@@ -4144,11 +4199,11 @@ class ThresholdPreviewDialog(QDialog):
             zones.append((k, f"{name}" + (f"  · {rec}" if rec else "")))
         dlg = OverkillPickDialog(zones=zones, zone=self._zone, items_of=self._pick_items, key_of=key_of,
                                  pixmap_of=self._pick_pixmap, request_pics=self._pick_request,
-                                 caption_of=self._pick_caption, picked=self._picked, overkill=self._overkill,
+                                 caption_of=self._pick_caption, picked=self._stage_picked, overkill=self._stage_over,
                                  preview=self._pick_preview,
                                  enlarge=lambda d: self._enlarge_tile(key_of(d)),
                                  path_of=self._photo_path, parent=self)
-        dlg.applied.connect(self._on_pick_applied)
+        dlg.applied.connect(self._on_pick_dialog_applied)
         dlg.finished.connect(self._on_pick_closed)
         self._pick_dlg = dlg
         # ★ '폴더 뺐다 [되돌리기 (Z)]' 알림을 걷는다 — 남겨 두면 뒤의 Z 와 시트의 Z 가 둘 다 살아
@@ -4229,10 +4284,18 @@ class ThresholdPreviewDialog(QDialog):
         """Overkill 로 고른 Defect 중 ``ov`` 기준으로 빠지는 수."""
         return sum(1 for d in self._overkill.values() if not P.is_kept(d, self._w.zones, ov))
 
-    def _on_pick_applied(self, picked: dict, overkill: dict) -> None:
-        """팝업 [적용] — 고른 Defect · Overkill 를 받아 추천값을 다시 계산하고 화면을 다시 그린다."""
+    def _on_pick_dialog_applied(self, picked: dict, overkill: dict) -> None:
+        """팝업 [적용] — 팝업은 고르는 중에서 열렸으니, 거기서 확정한 것이 곧 적용할 것이다.  Z 로 되돌린다."""
         if self._w is None:
             return
+        self._push_undo()
+        self._on_pick_applied(picked, overkill)
+
+    def _on_pick_applied(self, picked: dict, overkill: dict) -> None:
+        """고른 Defect · Overkill 를 반영한다 — 추천값을 다시 계산하고 화면을 다시 그린다."""
+        if self._w is None:
+            return
+        self._stage_picked, self._stage_over = dict(picked), dict(overkill)     # 고르는 중 = 적용한 것(실패해도 안 잃는다)
         self._pick_prev = (self._picked, self._overkill)     # 계산이 실패하면 고르기 전으로 되돌린다
         self._pick_touched = {(d.zone_dir, d.zone) for src in (self._picked, self._overkill, picked, overkill)
                               for d in src.values()}     # 팝업에서 비운 Zone 도 — 그 Zone 저장분을 지운다

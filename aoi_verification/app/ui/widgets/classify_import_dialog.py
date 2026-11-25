@@ -1,7 +1,7 @@
-"""Overkill 튜닝 — [Classify 가져오기] 팝업(현택님 2026-11-24 안 A).
+"""Overkill 튜닝 — [리뷰 결과 불러오기] 팝업(현택님 2026-11-24 안 A).
 
 사람이 검토로 바꾼 분류마다 한 줄: 이름 · 개수 · [Defect] [Overkill] [안 씀].  처음 값은 바꾼 분류의 종류로
-정한다(Good → Overkill, 그 밖 → Defect).  [적용] 하면 ``applied(꼭 잡기, Overkill)`` 를 낸다.
+정한다(Good → Overkill, 그 밖 → Defect).  [고르기] 하면 ``applied(꼭 잡기, Overkill)`` 를 낸다.
 순수 로직은 :mod:`...threshold.classify` 에 있다.
 """
 
