@@ -261,7 +261,7 @@ def defect_lines(image_path: Path) -> list[str]:
 def describe(image_path: Path) -> list[InfoGroup]:
     """사진 1장의 정보를 두 덩이로 — **값을 얻은 항목만** 담는다.
 
-    ``파일``   식별 정보(파일명·폴더·WaferID·좌표 출처)
+    ``파일``   식별 정보(파일명·폴더·WaferID)
     ``결함 계측`` 좌표·측정값, 그리고 측정정보 유무를 알리는 판정 스탬프
 
     매칭 상대·점수처럼 짝(기준↔검증)이 있어야 정해지는 값은 원리상 나올 수 없어
@@ -277,12 +277,6 @@ def describe(image_path: Path) -> list[InfoGroup]:
         InfoRow(i18n.KO.IMAGE_INFO_ROW_FOLDER, str(p.parent), mono=True,
                 cluster=CLUSTER_FILE),
     ]
-    coord = _safe(lambda: _resolve_coord(p))
-    if coord is not None:
-        file_rows.append(InfoRow(
-            i18n.KO.IMAGE_INFO_ROW_SOURCE,
-            i18n.KO.IMAGE_INFO_SOURCE_NAMES.get(coord.source, coord.source),
-            cluster=CLUSTER_FILE))
     groups.append(InfoGroup(i18n.KO.IMAGE_INFO_GROUP_FILE, tuple(file_rows)))
 
     defect_rows = [InfoRow(m.label, m.value, mono=True, cluster=m.cluster)
@@ -311,11 +305,9 @@ def describe(image_path: Path) -> list[InfoGroup]:
     if not defect_rows:
         return groups
 
-    if status == "ok":
-        defect_rows.append(InfoRow(
-            "", i18n.KO.IMAGE_INFO_STAMP_MEASURED, stamp="ok",
-            cluster=CLUSTER_STAMP))
-    elif status == "no_flt":
+    # status == "ok"(측정정보 있음)는 스탬프를 띄우지 않는다 — 수치 행이 곧 그 표시다(사용자 지시).
+    #   좌표 출처 행도 이 화면에서는 보이지 않는다.
+    if status == "no_flt":
         defect_rows.append(InfoRow("", i18n.KO.GEOM_NOT_SUPPORTED, stamp="none",
                                    cluster=CLUSTER_STAMP))
     elif status == "no_data":

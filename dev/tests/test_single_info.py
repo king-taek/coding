@@ -214,8 +214,7 @@ def test_describe_kla_includes_wafer_id_and_source(tmp_path):
     files = _group(groups, i18n.KO.IMAGE_INFO_GROUP_FILE)
     by_label = {r.label: r.value for r in files.rows if r.label}
     assert by_label[i18n.KO.IMAGE_INFO_ROW_WAFER_ID] == "W6459076XYG1"
-    assert by_label[i18n.KO.IMAGE_INFO_ROW_SOURCE] == \
-        i18n.KO.IMAGE_INFO_SOURCE_NAMES["kla"]
+    assert "좌표 출처" not in by_label                  # 이 화면에는 좌표 출처 행이 없다
     # geometry 가 없으므로 픽셀 크기 행은 아예 없다.
     assert i18n.KO.IMAGE_INFO_ROW_PIXEL not in _labels(groups)
 
@@ -247,9 +246,8 @@ def test_describe_defect_group_carries_measures_and_stamp(tmp_path, monkeypatch)
     assert i18n.KO.IMAGE_INFO_ROW_PIXEL in labels
     # 수치 행은 모노로 찍힌다(도면 컨셉의 계측 표기).
     assert all(r.mono for r in defect.rows if r.label)
-    # 마지막은 판정 스탬프 — 측정정보가 있으므로 'ok'.
-    assert defect.rows[-1].stamp == "ok"
-    assert defect.rows[-1].value == i18n.KO.IMAGE_INFO_STAMP_MEASURED
+    # 측정정보가 있으면 판정 스탬프를 띄우지 않는다(수치 행이 대신한다).
+    assert not any(r.stamp for r in defect.rows)
 
 
 def test_describe_stamps_unsupported_material(tmp_path, monkeypatch):
@@ -376,8 +374,7 @@ def test_describe_groups_rows_into_clusters(tmp_path, monkeypatch):
     defect = _group(groups, i18n.KO.IMAGE_INFO_GROUP_DEFECT)
     assert _clusters(defect) == [single_info.CLUSTER_WHERE,
                                  single_info.CLUSTER_WHAT,
-                                 single_info.CLUSTER_SIZE,
-                                 single_info.CLUSTER_STAMP]
+                                 single_info.CLUSTER_SIZE]   # 있음 스탬프는 띄우지 않는다
     by_label = {r.label: r.cluster for r in defect.rows if r.label}
     assert by_label[i18n.KO.DEFECT_COLROW_LABEL] == single_info.CLUSTER_WHERE
     assert by_label[i18n.KO.DEFECT_RECIPE_ZONE_LABEL] == single_info.CLUSTER_WHAT

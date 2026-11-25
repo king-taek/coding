@@ -458,10 +458,10 @@ def test_status_message_hides_credit_until_it_clears(qapp, no_sheets, monkeypatc
 
 
 def test_tool_screen_title_is_its_menu_name(styled_qapp, no_sheets):
-    """도구 화면 제목 = 왼쪽 메뉴 이름(현택님 2026-11-24) — 'Defect 정보 조회' · 'Defect Map' …"""
+    """도구 화면 제목 = 왼쪽 메뉴 이름(현택님 2026-11-24) — 'Defect 정보' · 'Defect Map' …"""
     page = _page(styled_qapp)
     try:
-        assert page.image_info_btn.property("_railText") == "Defect 정보 조회"
+        assert page.image_info_btn.property("_railText") == "Defect 정보"
         assert page.wafer_map_btn.property("_railText") == "Defect Map"
         for key, btn in (("image_info", page.image_info_btn),
                          ("wafer_map", page.wafer_map_btn),

@@ -1,4 +1,4 @@
-"""도구 화면(Defect 정보 조회 · Defect Map · GL 히스토그램 · Overkill 튜닝 · 어느 Zone에서 왔니?)의
+"""도구 화면(Defect 정보 · Defect Map · GL 히스토그램 · Overkill 튜닝 · 어느 Zone에서 왔니?)의
 [열기] · [저장] 한 꼴 — 현택님 2026-11-24 결정(B1 안 B · B2 안 A).
 
 - :class:`EmptyOpen` — 아무것도 안 불러온 동안 화면 가운데 큰 파랑 [사진 선택]/[폴더 선택] 하나만 덮는다.
@@ -70,6 +70,12 @@ class EmptyOpen(QWidget):
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hint.setVisible(bool(hint))
         lay.addWidget(self.hint, 0, Qt.AlignmentFlag.AlignHCenter)
+        # 빈 화면이 호스트를 덮는 동안은 호스트의 토스트가 가려진다 — 알릴 말은 여기에 띄운다(:meth:`flash`).
+        self.note = QLabel("", self)
+        self.note.setProperty("role", "muted")
+        self.note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.note.setMinimumHeight(self.note.fontMetrics().height() + 4)   # 자리 예약 — 뜰 때 버튼이 밀리지 않게
+        lay.addWidget(self.note, 0, Qt.AlignmentFlag.AlignHCenter)
         lay.addStretch(1)
         host.installEventFilter(self)
         self.setGeometry(host.rect())
@@ -132,6 +138,11 @@ class EmptyOpen(QWidget):
         if obj is self._host and event.type() == QEvent.Type.Resize:
             self.setGeometry(self._host.rect())
         return super().eventFilter(obj, event)
+
+    def flash(self, text: str, hold_ms: int = 1800) -> None:
+        """빈 화면 위에 짧은 알림 한 줄(사진 없음 등) — 버튼 아래에 잠깐 떴다 지워진다."""
+        from .. import motion
+        motion.flash_text(self.note, text, hold_ms=hold_ms)
 
     def set_empty(self, empty: bool) -> None:
         if empty:
