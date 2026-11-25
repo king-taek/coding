@@ -12,7 +12,7 @@
 * 한 번 읽은 파일은 윈도우가 기억해 두 번째부터 빠르다.  그래서 '처음 읽기' 측정마다 **서로 다른 사진**을
   쓰고, 같은 사진을 다시 읽는 측정을 따로 둬 그 효과를 숫자로 남긴다(오늘 앱에서 본 LOT 은 표시).
 
-개발자용: ``python dev/measure_thumb_speed.py [--minutes 분] [--nas-base 폴더] [<폴더> …]``
+개발자용: ``python dev/measure_thumb_speed.py [--quick] [--minutes 분] [--nas-base 폴더] [<폴더> …]``
 (폴더를 주면 NAS 찾기 없이 그 폴더들만 잰다.  ``--nas-base`` 는 ``AOI-*`` 가 든 폴더 — 합성 트리 시험용.)
 """
 
@@ -71,6 +71,7 @@ SURFACE_NAME = "surface.flt"
 
 # ── 측정 한도 ───────────────────────────────────────────────────────────────────────────────────
 DEFAULT_MINUTES = 30.0
+QUICK_MINUTES, QUICK_LOT_CAP_S = 3.0, 35    # 빠른 확인: 3분, LOT 하나 35초
 DISCOVERY_SHARE = 1 / 6                     # 헛걸음(LOT 을 못 찾은 탐색)에 쓰는 시간 상한 = 전체의 1/6(30분이면 5분)
 MAX_DEPTH = 7
 SCAN_CAP = 5000                             # 폴더 하나에서 훑는 항목 수 — 수십만 개짜리 폴더가 있다
@@ -274,7 +275,7 @@ def scan_dir(d: str):
     if d in SCAN:
         return SCAN[d]
     info = {"dirs": [], "files": [], "entries": 0, "truncated": False, "marker": False, "surface": False,
-            "mtime": None}
+            "exts": {}, "thumbs_db": False}
     deadline = time.perf_counter() + SCAN_CAP_S
     t = time.perf_counter()
     try:
@@ -289,13 +290,19 @@ def scan_dir(d: str):
                         info["dirs"].append((e.name, e.path, e.stat().st_mtime))
                         continue
                     low = e.name.lower()
+                    size = e.stat().st_size                 # 윈도우는 목록에 크기가 딸려 와 추가 왕복이 없다
+                    ext = info["exts"].setdefault(os.path.splitext(low)[1], [0, 0])
+                    ext[0] += 1
+                    ext[1] += size
+                    if low == "thumbs.db":
+                        info["thumbs_db"] = True
                     if low in WAFER_MARK:
                         info["marker"] = True
                     elif low == SURFACE_NAME:
                         info["surface"] = True
                     k = kind_of(e.name)
-                    if k != "other":                        # 윈도우는 목록에 크기가 딸려 와 추가 왕복이 없다
-                        info["files"].append({"path": e.path, "name": e.name, "kind": k, "size": e.stat().st_size})
+                    if k != "other":
+                        info["files"].append({"path": e.path, "name": e.name, "kind": k, "size": size})
                 except OSError as exc:
                     note_error(f"scan {e.name}", exc)
     except OSError as exc:
@@ -624,6 +631,249 @@ def cache_state():
     return out
 
 
+# ── 파일 안 미리보기 사진 찾기(앞부분만 읽는다) ─────────────────────────────────────────────────
+PROBE_COLOR, PROBE_SCAN = 8, 3              # LOT 마다 들여다보는 사진 수
+PREFIX = 65536
+SMALL_IMG = 100 * 1024                      # 이보다 작은 사진 파일 = 썸네일 후보
+preview_rows: list[dict] = []               # → previews.csv
+_SOF_NAME = {0xC0: "baseline", 0xC1: "extended", 0xC2: "progressive", 0xC3: "lossless"}
+
+
+def _ifd(buf, base, off, bo):
+    """TIFF IFD 하나 → ({태그: 값 또는 오프셋}, 다음 IFD 오프셋, 원본 항목)."""
+    n = struct.unpack(bo + "H", buf[base + off:base + off + 2])[0]
+    tags, raw = {}, {}
+    for i in range(min(n, 200)):
+        e = buf[base + off + 2 + 12 * i:base + off + 14 + 12 * i]
+        tag, typ, cnt = struct.unpack(bo + "HHI", e[:8])
+        tags[tag] = struct.unpack(bo + "H", e[8:10])[0] if typ == 3 and cnt == 1 else struct.unpack(bo + "I", e[8:12])[0]
+        raw[tag] = (typ, cnt)
+    nxt = struct.unpack(bo + "I", buf[base + off + 2 + 12 * n:base + off + 6 + 12 * n])[0]
+    return tags, nxt, raw
+
+
+def parse_jpeg_head(buf: bytes, file_size: int) -> dict:
+    """JPEG 앞부분의 마커를 훑는다 — 조각 목록 · SOS 앞 바이트 수 · 들어 있는 미리보기 사진(위치 · 크기)."""
+    out = {"segments": [], "previews": [], "header_bytes": None, "sof": "", "width": None, "height": None,
+           "dri": None, "need_more": False, "notes": []}
+    if buf[:2] != b"\xff\xd8":
+        out["notes"].append("JPEG 아님")
+        return out
+    i, n = 2, len(buf)
+    while True:
+        if i + 4 > n:
+            out["need_more"] = n < file_size
+            break
+        if buf[i] != 0xFF:
+            i += 1
+            continue
+        m = buf[i + 1]
+        if m == 0xFF:
+            i += 1
+            continue
+        if m in (0x01, 0xD8) or 0xD0 <= m <= 0xD7:
+            i += 2
+            continue
+        if m == 0xD9:
+            break
+        seg = struct.unpack(">H", buf[i + 2:i + 4])[0]
+        if m == 0xDA:                                       # SOS — 여기부터 그림 데이터
+            out["header_bytes"] = i
+            break
+        p = buf[i + 4:i + 2 + seg]                          # 조각 내용(잘렸을 수 있다)
+        cut = i + 2 + seg > n
+        name = f"APP{m - 0xE0}" if 0xE0 <= m <= 0xEF else {0xFE: "COM", 0xDB: "DQT", 0xC4: "DHT", 0xDD: "DRI"}.get(m, f"x{m:02X}")
+        ident = ""
+        try:
+            if 0xE0 <= m <= 0xEF:
+                ident = p[:28].split(b"\x00")[0].decode("ascii", "replace")[:28]
+            if m == 0xDD:
+                out["dri"] = struct.unpack(">H", p[:2])[0]
+            elif 0xC0 <= m <= 0xCF and m not in (0xC4, 0xC8, 0xCC):
+                name = "SOF"
+                out["height"], out["width"] = struct.unpack(">HH", p[1:5])
+                out["sof"] = _SOF_NAME.get(m, f"SOF{m - 0xC0}")
+            elif m == 0xE0 and p[:5] == b"JFIF\x00" and len(p) >= 14 and p[12] and p[13]:
+                out["previews"].append({"source": "jfif_rgb", "offset": i + 4 + 14, "size": 3 * p[12] * p[13],
+                                        "width": p[12], "height": p[13]})
+            elif m == 0xE0 and p[:5] == b"JFXX\x00" and len(p) > 6:
+                if p[5] == 0x10:
+                    out["previews"].append({"source": "jfxx_jpeg", "offset": i + 4 + 6, "size": seg - 2 - 6})
+                else:
+                    out["previews"].append({"source": "jfxx_raw", "offset": i + 4 + 8, "size": seg - 2 - 8,
+                                            "width": p[6], "height": p[7]})
+            elif m == 0xE1 and p[:6] == b"Exif\x00\x00" and not cut:
+                base = i + 4 + 6
+                bo = "<" if buf[base:base + 2] == b"II" else ">"
+                _t0, nxt, _ = _ifd(buf, base, struct.unpack(bo + "I", buf[base + 4:base + 8])[0], bo)
+                if nxt:
+                    t1, _, _ = _ifd(buf, base, nxt, bo)
+                    if t1.get(0x0201) and t1.get(0x0202):
+                        out["previews"].append({"source": "exif_ifd1", "offset": base + t1[0x0201], "size": t1[0x0202]})
+            elif m == 0xE2 and p[:4] == b"MPF\x00" and not cut:
+                base = i + 4 + 4
+                bo = "<" if buf[base:base + 2] == b"II" else ">"
+                tags, _, raw = _ifd(buf, base, struct.unpack(bo + "I", buf[base + 4:base + 8])[0], bo)
+                if 0xB002 in tags:
+                    cnt = raw[0xB002][1] // 16
+                    for k in range(min(cnt, 16)):
+                        e = buf[base + tags[0xB002] + 16 * k:base + tags[0xB002] + 16 * k + 16]
+                        _attr, size, off = struct.unpack(bo + "III", e[:12])
+                        if off:                             # 0 = 본 사진 자신
+                            out["previews"].append({"source": "mpf", "offset": base + off, "size": size})
+            elif m == 0xED and p[:14] == b"Photoshop 3.0\x00" and not cut:
+                j = 14
+                while j + 12 <= len(p) and p[j:j + 4] == b"8BIM":
+                    rid = struct.unpack(">H", p[j + 4:j + 6])[0]
+                    nl = p[j + 6] + 1
+                    j2 = j + 6 + nl + (nl % 2)
+                    size = struct.unpack(">I", p[j2:j2 + 4])[0]
+                    if rid in (0x0409, 0x040C) and size > 28:
+                        w, h = struct.unpack(">II", p[j2 + 8:j2 + 16])
+                        out["previews"].append({"source": "photoshop", "offset": i + 4 + j2 + 4 + 28, "size": size - 28,
+                                                "width": w, "height": h})
+                    j = j2 + 4 + size + (size % 2)
+        except Exception as exc:                            # noqa: BLE001 — 깨진 조각은 적고 넘어간다
+            out["notes"].append(f"{name}: {type(exc).__name__}")
+        if len(out["segments"]) < 60:
+            out["segments"].append((name, ident, seg + 2))
+        i += 2 + seg
+    out["scans_in_prefix"] = buf.count(b"\xff\xda", out["header_bytes"]) if out["header_bytes"] else 0
+    return out
+
+
+def probe_preview(f, label):
+    """사진 하나: 앞부분만 읽어 미리보기 사진이 들었는지 보고, 그것만 가져오는 시간과 통째로 읽는 시간을 견준다."""
+    row = {"lot": CUR["lot"], "kind": label, "name": f["name"], "size": f["size"]}
+    try:
+        t0 = time.perf_counter()
+        with open(f["path"], "rb", buffering=0) as fh:
+            buf = fh.read(PREFIX)
+            info = parse_jpeg_head(buf, f["size"])
+            while info["need_more"] and len(buf) < 1024 * 1024:     # SOS 가 64KB 뒤에 있다(머리가 크다)
+                more = fh.read(PREFIX * 4)
+                if not more:
+                    break
+                buf += more
+                info = parse_jpeg_head(buf, f["size"])
+            prefix_s = time.perf_counter() - t0
+            best = None
+            for pv in info["previews"]:
+                end = pv["offset"] + pv["size"]
+                pv["in_prefix"] = end <= len(buf)
+                data, extra = (buf[pv["offset"]:end], 0.0) if pv["in_prefix"] else (b"", 0.0)
+                if not pv["in_prefix"] and 0 < pv["size"] <= 8 * 1024 * 1024 and end <= f["size"]:
+                    t = time.perf_counter()
+                    fh.seek(pv["offset"])
+                    data = fh.read(pv["size"])
+                    extra = time.perf_counter() - t
+                pv["fetch_ms"] = ms(prefix_s + extra)
+                if "width" not in pv:
+                    dims = image_dims(data)
+                    if dims:
+                        pv["width"], pv["height"] = dims[0], dims[1]
+                if Image is not None and data and pv["source"] in ("exif_ifd1", "jfxx_jpeg", "mpf", "photoshop"):
+                    try:
+                        pv["pillow_size"] = list(Image.open(io.BytesIO(data)).size)
+                    except Exception:                       # noqa: BLE001
+                        pv["pillow_size"] = None
+                edge = max(pv.get("width") or 0, pv.get("height") or 0)
+                pv["usable"] = edge >= 100                   # 120px 타일에 쓸 만한 크기
+                if pv["usable"] and (best is None or pv["size"] < best["size"]):
+                    best = pv
+            rest_s = None
+            if f["size"] <= MAX_READ_BYTES:
+                t = time.perf_counter()
+                fh.seek(len(buf))
+                fh.read()
+                rest_s = time.perf_counter() - t
+        row.update(width=info["width"], height=info["height"], sof=info["sof"], header_bytes=info["header_bytes"],
+                   dri=info["dri"], scans_in_prefix=info["scans_in_prefix"], prefix_bytes=len(buf), prefix_ms=ms(prefix_s),
+                   full_ms=ms(prefix_s + rest_s) if rest_s is not None else None,
+                   segments=";".join(f"{n}:{i}:{s}" if i else f"{n}:{s}" for n, i, s in info["segments"]),
+                   preview_n=len(info["previews"]),
+                   previews=";".join(f"{p['source']}@{p['offset']}+{p['size']}={p.get('width')}x{p.get('height')}"
+                                     for p in info["previews"]),
+                   notes=";".join(info["notes"]))
+        if best:
+            row.update(preview_source=best["source"], preview_bytes=best["size"], preview_w=best.get("width"),
+                       preview_h=best.get("height"), preview_in_prefix=best["in_prefix"],
+                       preview_fetch_ms=best["fetch_ms"], preview_pillow_size=best.get("pillow_size"))
+    except Exception as exc:                                # noqa: BLE001
+        row["error"] = f"{type(exc).__name__}: {exc}"
+    with _lock:
+        preview_rows.append(row)
+    return row
+
+
+def companions(infos):
+    """폴더 목록에서 '작은 사진 파일'(썸네일 후보)을 찾는다 — 열어 보지 않고 이름 · 크기만."""
+    key = lambda name: ".".join(name.split(".")[:2]).lower()    # noqa: E731 — Camtek 이름의 좌표 두 토막
+    files = [f for i in infos for f in i["files"] if f["kind"] != "overview"]
+    big = {key(f["name"]) for f in files if f["size"] >= SMALL_IMG}
+    small = [f for f in files if 0 < f["size"] < SMALL_IMG]
+    exts: dict = {}
+    for i in infos:
+        for e, (c, b) in i["exts"].items():
+            v = exts.setdefault(e, [0, 0])
+            v[0] += c
+            v[1] += b
+    top = sorted(exts.items(), key=lambda kv: -kv[1][1])[:8]
+    return {"small_img_n": len(small), "small_img_paired": sum(1 for f in small if key(f["name"]) in big),
+            "small_img_med_kb": stats([f["size"] / 1024 for f in small]).get("median"),
+            "small_img_names": " | ".join(f["name"] for f in small[:5]),
+            "thumbs_db": any(i["thumbs_db"] for i in infos),
+            "exts": " ".join(f"{e or '(없음)'}:{c}개/{b / 1e6:.1f}MB" for e, (c, b) in top)}
+
+
+def preview_summary(add):
+    """요약 맨 위: 파일 안 미리보기 사진이 있는가."""
+    add("[가장 먼저 — 원본을 다 읽지 않고 작은 미리보기만 가져올 수 있나]")
+    out = {}
+    for label, title in (("color", "Color 사진"), ("scan", "Scan 사진(.t.)")):
+        rows = [r for r in preview_rows if r["kind"] == label and not r.get("error")]
+        if not rows:
+            continue
+        have = [r for r in rows if r.get("preview_source")]
+        m = lambda rs, k: (round(statistics.median([r[k] for r in rs if r.get(k) is not None]), 1)    # noqa: E731
+                           if any(r.get(k) is not None for r in rs) else "-")
+        sof = Counter(r.get("sof") or "?" for r in rows)
+        full60 = m(rows, "full_ms")
+        line = f"- {title}: 파일 안 미리보기 사진 "
+        if have:
+            src = Counter(r["preview_source"] for r in have).most_common(1)[0][0]
+            dim = Counter(f"{r.get('preview_w')}x{r.get('preview_h')}" for r in have).most_common(1)[0][0]
+            line += (f"있음 ({len(rows)}장 중 {len(have)}장, {m(have, 'preview_bytes')} 바이트, {dim}, 종류 {src}, "
+                     f"앞 64KB 안에 있음 {sum(1 for r in have if r.get('preview_in_prefix'))}장)")
+        else:
+            line += f"없음 ({len(rows)}장 중 0장)"
+        add(line)
+        add(f"    원본 {m(rows, 'size')} 바이트 · 그림 앞 머리 {m(rows, 'header_bytes')} 바이트 · 형식 {dict(sof)} · "
+            f"DRI {sum(1 for r in rows if r.get('dri'))}장 · 조각 예: {rows[0].get('segments', '')[:150]}")
+        add(f"    한 장 가져오기: 앞부분만 {m(rows, 'prefix_ms')} ms / 통째로 {full60} ms"
+            + (f" / 미리보기만 {m(have, 'preview_fetch_ms')} ms" if have else ""))
+        if have and m(have, "preview_fetch_ms") != "-" and full60 != "-":
+            a, b = m(have, "preview_fetch_ms") * PAGE_TILES / APP_WORKERS / 1000, full60 * PAGE_TILES / APP_WORKERS / 1000
+            add(f"    → 60칸 어림(일꾼 {APP_WORKERS}, 디코드 제외): 미리보기만 {a:.1f}초 / 통째로 {b:.1f}초")
+        if not have and label == "color":
+            prog = sum(n for k, n in sof.items() if k == "progressive")
+            add("    → 이 사진들은 통째로 읽어야 한다(기본형 JPEG 는 앞부분만으로는 그림 윗부분만 나온다)"
+                + (f". 단, progressive 형식 {prog}장은 앞부분만으로 흐린 전체 그림이 가능하다" if prog else ""))
+        out[label] = {"probed": len(rows), "with_preview": len(have)}
+    lots = [r for r in _LOTS_FLAT if r.get("measured") or r.get("small_img_n") is not None]
+    sm = [r for r in lots if r.get("small_img_n")]
+    add(f"- 폴더 안 작은 사진 파일(100KB 미만, 썸네일 후보): LOT {len(lots)}곳 중 {len(sm)}곳"
+        + (f" (예: {sm[0]['small_img_names'][:120]}; 큰 사진과 이름이 짝인 것 {sum(r['small_img_paired'] for r in sm)}개)" if sm else "")
+        + f" / Thumbs.db 가 있는 곳 {sum(1 for r in lots if r.get('thumbs_db'))}곳")
+    if lots:
+        add(f"    폴더 안 파일 종류(첫 LOT): {lots[0].get('exts', '')}")
+    add("")
+    return out
+
+
+_LOTS_FLAT: list[dict] = []
+
+
 # ── LOT 하나 재기 ───────────────────────────────────────────────────────────────────────────────
 def best_workers(curve):
     """curve = [(일꾼 수, 초당 장수)] — 가장 빠른 속도의 90% 를 처음 넘는 일꾼 수(더 늘려도 이득이 작은 지점)."""
@@ -694,11 +944,21 @@ def measure_lot(n, lot, wafers, lot_mtime, start, pick, tmpdir):
                entries=ent, list_ms=round(lms, 1), list_ms_per_1000=round(lms / ent * 1000, 1) if ent else None,
                color_n=len(color), scan_n=len(scan_files), color_med_kb=ckb.get("median"), color_max_kb=ckb.get("max"),
                scan_total_mb=round(sum(f["size"] for f in scan_files) / 1e6, 1))
+    row.update(companions(used))
     pool = [f for f in color if 0 < f["size"] <= MAX_READ_BYTES]
+    RND.shuffle(pool)
+    n_probe = min(PROBE_COLOR, len(pool) // 4)              # 가장 먼저: 미리보기 사진이 들었나(이 사진들은 다른 측정에 안 쓴다)
+    probe, pool = pool[:n_probe], pool[n_probe:]
+    cap = limit(20)
+    for f, label in [(f, "color") for f in probe] + [(f, "scan") for f in RND.sample(scan_files, min(PROBE_SCAN, len(scan_files)))]:
+        if expired(cap):
+            break
+        probe_preview(f, label)
+    got = [r for r in preview_rows if r["lot"] == lot_id and r["kind"] == "color"]
+    row.update(preview_probed=len(got), preview_found=sum(1 for r in got if r.get("preview_source")))
     if len(pool) < MIN_PHOTOS:
         row["note"] = f"사진 부족({len(pool)}장) — 재지 않음"
         return row, detail
-    RND.shuffle(pool)
     want = [w for w in WANT if Image is not None or not w[0].startswith("first60")]
     need = sum(k for _, k in want)
     scale = min(1.0, len(pool) / need)
@@ -800,6 +1060,11 @@ def write_summary(R) -> str:
         + ", ".join(f"{f.get('machine', '')}({f['type']})" for f in env["folders"]))
     if not env["pillow"]:
         add("  ※ Pillow 가 없어 PC 계산 · 첫 화면 흉내 측정은 건너뛰었습니다. NAS 읽기 측정은 정상입니다.")
+    _LOTS_FLAT[:] = R.get("lots_flat", [])
+    try:
+        R["preview_verdict"] = preview_summary(add)
+    except Exception:                                       # noqa: BLE001
+        add("  (미리보기 요약 오류) " + traceback.format_exc(limit=1))
     lots = [r for r in R.get("lots_flat", []) if r.get("measured")]
     skipped = [r for r in R.get("lots_flat", []) if not r.get("measured")]
     d = R.get("discovery", {})
@@ -952,7 +1217,7 @@ def measure(starts, conder, R, tmpdir):
         R["lots"].append(detail)
         if row.get("measured"):
             start["fails"] = consec = 0
-            say(f"  → 사진 {row['color_n']}장, 처음 읽기 {row.get('cold_med_ms')} ms/장, "
+            say(f"  → 사진 {row['color_n']}장, 파일 안 미리보기 {row.get('preview_found')}/{row.get('preview_probed')}장, 처음 읽기 {row.get('cold_med_ms')} ms/장, "
                 f"60칸 {row.get('est60_w3_s')}초(일꾼 3) → {row.get('est60_w8_s')}초(일꾼 8), {row['took_s']}초 걸림")
             parent = os.path.dirname(lot)
             if lot != start["path"] and all(x["path"] != parent for x in near):
@@ -1002,6 +1267,7 @@ def write_zip(R) -> Path:
         z.writestr("요약.txt", summary)
         z.writestr("result.json", json.dumps(R, ensure_ascii=False, indent=1, default=str))
         z.writestr("lots.csv", to_csv(R.get("lots_flat", [])))
+        z.writestr("previews.csv", to_csv(preview_rows))
         z.writestr("folders.csv", to_csv(folder_rows))
         z.writestr("timings.csv", to_csv(timings))
     print()
@@ -1043,20 +1309,20 @@ def manual_starts(folders):
 
 
 def main() -> int:
-    global END
+    global END, LOT_CAP_S
     try:
         sys.stdout.reconfigure(errors="replace")            # 콘솔이 못 찍는 글자로 멈추지 않게
     except Exception:                                       # noqa: BLE001
         pass
     ap = argparse.ArgumentParser(description="썸네일 속도 측정(읽기 전용)")
     ap.add_argument("folders", nargs="*", help="직접 잴 폴더(주면 NAS 를 찾지 않는다)")
-    ap.add_argument("--minutes", type=float, default=DEFAULT_MINUTES, help="전체 시간 한도(분)")
+    ap.add_argument("--minutes", type=float, default=None, help="전체 시간 한도(분, 기본 30)")
+    ap.add_argument("--quick", action="store_true", help="빠른 확인(약 3분)")
     ap.add_argument("--nas-base", action="append", default=[], help="AOI-* 가 든 폴더(시험용)")
     args = ap.parse_args()
-    END = T0 + max(0.2, args.minutes) * 60
     seed = int(time.time())                                 # 돌릴 때마다 다른 LOT · 다른 사진
     RND.seed(seed)
-    R: dict = {"tool": "measure_thumb_speed", "version": 2, "seed": seed, "budget_min": args.minutes}
+    R: dict = {"tool": "measure_thumb_speed", "version": 3, "seed": seed}
 
     root, conder, ui = None, None, False
     folders = [f for f in args.folders if os.path.isdir(f)]
@@ -1073,8 +1339,26 @@ def main() -> int:
     if not starts and not conder:
         print("잴 폴더가 없어 끝냅니다.")
         return 1
-    END = time.perf_counter() + max(0.2, args.minutes) * 60 if root else END      # 창에서 보낸 시간은 빼 준다
-    say(f"측정을 시작합니다(최대 {args.minutes:g}분, 읽기만 합니다). 시작 폴더: "
+    quick = args.quick
+    if ui and not quick and args.minutes is None:           # 묻는 창 — 못 띄우면 전체 측정
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            if root is None:
+                root = tk.Tk()
+                root.withdraw()
+                root.attributes("-topmost", True)
+            quick = messagebox.askyesno("썸네일 속도 측정", "현택님, 빠른 확인만 할까요? (약 3분)\n\n"
+                                        "예 = 빠른 확인(미리보기 사진이 있는지 + LOT 몇 곳)\n"
+                                        "아니오 = 전체 측정(최대 30분, 그냥 두시면 됩니다)", parent=root)
+        except Exception:                                   # noqa: BLE001
+            pass
+    minutes = args.minutes if args.minutes is not None else (QUICK_MINUTES if quick else DEFAULT_MINUTES)
+    if quick:
+        LOT_CAP_S = QUICK_LOT_CAP_S                         # LOT 을 짧게 여러 곳
+    R.update(budget_min=minutes, quick=quick)
+    END = time.perf_counter() + max(0.2, minutes) * 60      # 창에서 보낸 시간은 빼 준다
+    say(f"{'빠른 확인' if quick else '측정'}을 시작합니다(최대 {minutes:g}분, 읽기만 합니다). 시작 폴더: "
         + ", ".join(s["machine"] for s in starts + ([conder] if conder else [])))
     tmpdir = tempfile.mkdtemp(prefix="aoi_thumb_speed_")
     try:
@@ -1098,7 +1382,7 @@ def main() -> int:
         except OSError:
             pass
     if ui or root is not None:
-        try:
+        try:                                                # 끝났다고 알리는 창
             import tkinter as tk
             from tkinter import messagebox
             if root is None:
