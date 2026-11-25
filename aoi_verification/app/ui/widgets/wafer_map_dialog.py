@@ -285,7 +285,7 @@ class WaferMapDialog(QDialog):
         self._build()
         if result is None:      # 폴더를 고르기 전엔 가운데 큰 [폴더 선택] 하나(현택님 2026-11-24)
             self._empty_open = EmptyOpen(self, i18n.KO.WAFER_MAP_PICK_FOLDER, self._on_pick,
-                                         i18n.KO.EMPTY_DROP_HINT)
+                                         i18n.KO.EMPTY_DROP_HINT, preview="map")
             self._empty_open.set_empty(not folder)
         self._loading = LoadingOverlay(self)
         if result is not None:

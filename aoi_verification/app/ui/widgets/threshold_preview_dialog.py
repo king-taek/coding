@@ -2075,7 +2075,8 @@ class ThresholdPreviewDialog(QDialog):
         self.empty_label.setProperty("role", "muted")
         main.addWidget(self.empty_label)
         main.addStretch(1)
-        self._empty_open = EmptyOpen(self, _KO.OVERKILL_ADD_FOLDER, self._on_pick, _KO.EMPTY_DROP_HINT)
+        self._empty_open = EmptyOpen(self, _KO.OVERKILL_ADD_FOLDER, self._on_pick, _KO.EMPTY_DROP_HINT,
+                                     preview="overkill")
         self._sync_empty()
         body.addLayout(main, 1)
         root.addLayout(body, 1)

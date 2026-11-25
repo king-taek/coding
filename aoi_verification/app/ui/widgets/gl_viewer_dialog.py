@@ -240,7 +240,8 @@ class GlViewerDialog(QDialog):
         body.addWidget(self._build_right())
         root.addLayout(body, 1)
         root.addWidget(self._build_status())
-        self._empty_open = EmptyOpen(self, _KO.GL_OPEN, self._on_pick, _KO.EMPTY_DROP_HINT)
+        self._empty_open = EmptyOpen(self, _KO.GL_OPEN, self._on_pick, _KO.EMPTY_DROP_HINT,
+                                     preview="gl")
         self._sync_empty_state()
 
     def _build_head(self) -> QHBoxLayout:
