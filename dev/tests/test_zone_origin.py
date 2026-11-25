@@ -241,6 +241,7 @@ def test_visible_tiles_are_hot_after_scroll(dlg_photos):
     last = str(dlg._tiles[dlg._tile_order[-1]].wait_path)
     assert first <= dlg._hot and last not in dlg._hot
     dlg.grid_scroll.verticalScrollBar().setValue(dlg.grid_scroll.verticalScrollBar().maximum())
+    assert dlg._hot_timer.interval() == 40              # 스크롤 위치가 기다림(ms)으로 들어가지 않는다
     dlg._update_hot()
     assert last in dlg._hot
 

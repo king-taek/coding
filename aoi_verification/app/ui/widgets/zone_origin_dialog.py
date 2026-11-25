@@ -548,7 +548,8 @@ class ZoneOriginDialog(QDialog):
         self.grid.setContentsMargins(14, 10, 14, 24)
         self.grid.setSpacing(TILE_GAP)
         self.grid_scroll.setWidget(self.grid_host)
-        self.grid_scroll.verticalScrollBar().valueChanged.connect(self._hot_timer.start)
+        # 인자 없이 켠다 — valueChanged 의 값(스크롤 위치)이 QTimer.start(ms) 로 들어가 기다림이 수 초가 됐다(Codex 리뷰).
+        self.grid_scroll.verticalScrollBar().valueChanged.connect(lambda _v: self._hot_timer.start())
         self.grid_scroll.viewport().installEventFilter(self)      # 폭이 바뀌면 한 줄 사진 수를 다시 맞춘다
         self._relayout_timer = QTimer(self)
         self._relayout_timer.setSingleShot(True)
