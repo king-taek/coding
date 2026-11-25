@@ -144,12 +144,20 @@ def test_thumb_grid_caption_is_elided_in_the_middle(styled_qapp, tmp_path):
         tile.close()
 
 
-def test_both_tile_captions_use_the_same_elide_mode(styled_qapp):
-    """같은 내용(파일명)을 두 화면이 **같은 방식**으로 줄인다."""
+def test_failed_review_tile_caption_keeps_first_six_chars(styled_qapp):
+    """W51 — 매치 없음 검토 타일은 가운데 줄임 대신 **앞 6자 + …** (전체는 툴팁).
+
+    썸네일 그리드(가운데 줄임)와 일부러 다르다: 후보 3열 칸이 좁아 이름 앞부분만
+    남겨도 후보끼리 구분된다."""
     from pathlib import Path
 
-    from aoi_verification.app.ui.widgets import (thumb_grid,
-                                                 unmatched_review_dialog)
-    for mod in (thumb_grid, unmatched_review_dialog):
-        src = Path(mod.__file__).read_text(encoding="utf-8")
-        assert "ElideMiddle" in src, f"{mod.__name__} 이 가운데 줄임을 쓰지 않는다"
+    from aoi_verification.app.models.slot import ImageItem
+    from aoi_verification.app.ui.widgets import unmatched_review_dialog as U
+
+    tile = U._CandidateTile(
+        ImageItem(slot="S1", path=Path("/tmp/" + _LONG_NAME), side="val"), 0.5)
+    try:
+        assert tile._cap.text() == _LONG_NAME[:6] + "…"
+        assert tile._cap.toolTip() == _LONG_NAME
+    finally:
+        tile.close()

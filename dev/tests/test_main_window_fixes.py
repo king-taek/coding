@@ -132,6 +132,7 @@ def test_ocr_done_slot_survives_merge_error(styled_qapp, monkeypatch, caplog):
     win._loading = SimpleNamespace(show_overlay=lambda *a, **k: None,
                                    set_progress=lambda *a, **k: None)
     win._journey_steps = lambda: None
+    win._read_kla_info = lambda jobs, then: then({})   # 백그라운드 읽기는 동기로 대신한다
     win._kla_broken = []
     done: list = []
     with caplog.at_level(logging.ERROR, logger="aoi.ui"):

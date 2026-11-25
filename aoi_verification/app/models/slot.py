@@ -129,6 +129,37 @@ def _list_images(folder: Path) -> list[Path]:
     return out
 
 
+def has_any_image(root: Path) -> bool:
+    """폴더(또는 그 바로 아래 슬롯 폴더)에 결함 사진이 **하나라도** 있는가.
+
+    스캔(:func:`_one_side_dirs`)이 사진을 찾는 깊이와 같다 — 폴더 바로 안, 아니면 하위 폴더 바로 안.
+    첫 사진을 찾으면 멈춘다(NAS 대용량 폴더).  워커 스레드에서 부른다 — UI 스레드 금지."""
+    def _first_image_in(folder: str) -> bool:
+        try:
+            with os.scandir(folder) as it:
+                for e in it:
+                    if (config.CONFIG.is_image(e.name) and not is_ignored_name(e.name)
+                            and e.is_file()):
+                        return True
+        except OSError:
+            return False
+        return False
+
+    if _first_image_in(str(root)):
+        return True
+    try:
+        with os.scandir(root) as it:
+            for e in it:
+                try:
+                    if e.is_dir() and _first_image_in(e.path):
+                        return True
+                except OSError:
+                    continue
+    except OSError:
+        return False
+    return False
+
+
 def count_images(folder: Path) -> int:
     """폴더의 결함 사진 수 — **앱이 실제로 처리하는 수와 같다.**
 

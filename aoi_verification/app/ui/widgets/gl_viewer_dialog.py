@@ -30,7 +30,7 @@ from ...config import CONFIG
 from ...gl import analysis, loader
 from ...gl import roi as R
 from ...gl.export import build_workbook, save_workbook
-from .. import theme
+from .. import motion, theme
 from ..deferred import call_later
 from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import guess_kinds, install_paste, local_paths
@@ -353,7 +353,7 @@ class GlViewerDialog(QDialog):
         self.zoom_label = QLabel("", zoom)
         self.zoom_label.setProperty("role", "viewerZoom")
         row.addWidget(self.zoom_label)
-        row.addWidget(self._tool_button(_KO.GL_FIT, lambda: self.canvas.fit(), tip="F"))
+        row.addWidget(self._tool_button(_KO.GL_FIT, lambda: self.canvas.fit(animate=True), tip="F"))
         self.defect_btn = self._tool_button(_KO.GL_DEFECT_GO, self._go_defect,
                                             tip=_KO.GL_DEFECT_GO_OFF_TIP)
         self.defect_btn.setEnabled(False)
@@ -363,6 +363,18 @@ class GlViewerDialog(QDialog):
         over.setContentsMargins(12, 12, 12, 12)
         over.addWidget(tools, 0, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         over.addWidget(zoom, 0, 0, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
+
+    @staticmethod
+    def _corner_tag(text: str, color: str, canvas) -> QLabel:
+        """캔버스 오른쪽 위 꼬리표 — 비교 중에만 보인다.  마우스는 캔버스로 통과시킨다."""
+        tag = QLabel(text, canvas)
+        tag.setStyleSheet(f"background: {color}; color: white; font-weight: 700; border-radius: 4px; padding: 1px 9px;")
+        tag.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        lay = canvas.layout() or QGridLayout(canvas)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.addWidget(tag, 0, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
+        tag.setVisible(False)
+        return tag
 
     def _build_left(self) -> QWidget:
         self.canvas = GlCanvas(self)
@@ -375,6 +387,8 @@ class GlViewerDialog(QDialog):
             c.viewStateChanged.connect(self._sync_views)
         self.canvas.viewChanged.connect(self._update_status)
         self._build_overlays()
+        self.tag_a = self._corner_tag("A", _CMP_A, self.canvas)       # 비교 중 어느 쪽이 A · B 인지 캔버스 모서리에
+        self.tag_b = self._corner_tag("B", _CMP_B, self.canvas_b)
         self.cap_a = QLabel("", self)
         self.cap_b = QLabel("", self)
         for cap in (self.cap_a, self.cap_b):
@@ -714,6 +728,8 @@ class GlViewerDialog(QDialog):
         self.cap_b.setText(self._cap_html("B", _CMP_B, Path(v.source_path or b.path).name))
         self.cap_a.setVisible(True)
         self.cap_b.setVisible(True)
+        self.tag_a.setVisible(True)
+        self.tag_b.setVisible(True)
         self.compare_btn.setText(_KO.GL_COMPARE_CLOSE)
         self._sync_hist_controls()
         self.split.setSizes([1, 1])
@@ -724,6 +740,8 @@ class GlViewerDialog(QDialog):
         self.pane_b.setVisible(False)
         self.cap_a.setVisible(False)
         self.cap_b.setVisible(False)
+        self.tag_a.setVisible(False)
+        self.tag_b.setVisible(False)
         self.compare_btn.setText(_KO.GL_COMPARE)
         self._sync_hist_controls()
 
@@ -965,8 +983,8 @@ class GlViewerDialog(QDialog):
         self.zoom_label.setText(f"{zoom}%")
 
     def _toast(self, text: str, *, error: bool = False) -> None:
-        self.toast.setText(text)
-        call_later(self, 6000 if error else 4000, lambda: self.toast.setText(""))
+        # 라벨이 타이머를 하나만 쓴다 — 새 알림이 오면 다시 시작해 앞 예약이 뒤 오류를 지우지 않는다.
+        motion.flash_text(self.toast, text, hold_ms=6000 if error else 4000)
 
     # ------------------------------------------------------------------
     # 저장

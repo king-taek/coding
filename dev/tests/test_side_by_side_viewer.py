@@ -282,3 +282,16 @@ def test_action_button_text_is_legible(qapp, big_source):
         assert ratio >= 4.5, f"대비 {ratio:.2f}:1 (배경 {bg.name()} / 글자 {fg.name()})"
     finally:
         v.close()
+
+
+def test_candidate_title_has_number_and_caption(qapp):
+    """V28 — 오른쪽 제목은 '검증 후보 n · 캡션'."""
+    cands = [(ImageItem("A", Path("/tmp/a.png"), "val"), "240 µm"),
+             (ImageItem("A", Path("/tmp/b.png"), "val"), "")]
+    v = sbs.SideBySideViewer(Path("/tmp/r.png"), cands, 0, ref_caption="기준")
+    assert v._cand_pane._title.text() == "검증 후보 1 · 240 µm"
+    v._idx = 1
+    v._render_candidate()
+    assert v._cand_pane._title.text() == "검증 후보 2"
+    assert v._ref_pane._title.maximumHeight() == v._cand_pane._title.maximumHeight()
+    v.close()

@@ -105,6 +105,20 @@ class ReviewContext:
     number_risk: tuple = ()
 
 
+# 중지·다음 사진으로 넘길 때 아직 도는 MatcherWorker 의 수명을 잡아 둔다(끝나면 놓음).
+_LIVE_MATCHERS: set = set()
+
+
+def stop_live_matchers(wait_ms: int = 500) -> None:
+    """창을 닫을 때 남은 매칭 스레드를 멈춘다."""
+    for w in list(_LIVE_MATCHERS):
+        try:
+            w.stop()
+            w.wait(wait_ms)
+        except RuntimeError:
+            pass
+
+
 class MatchPage(ProgressRowMixin, QWidget):
     """Stage 2 의 메인 페이지."""
 
@@ -284,6 +298,8 @@ class MatchPage(ProgressRowMixin, QWidget):
         size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, center)
         size_label.setProperty("role", "muted")
         self.size_slider = NoWheelSlider(Qt.Orientation.Horizontal, center)
+        # 시작부터 포커스 테두리가 뜨지 않게 — 눌러 만질 때만 포커스를 받는다.
+        self.size_slider.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.size_slider.setRange(ScalableImage.MIN_LONG_EDGE,
                                    ScalableImage.MAX_LONG_EDGE)
         # 모니터 크기에 맞춰 자동 시작값 — 세션 한정 (재시작 시 다시 자동맞춤).
@@ -647,7 +663,7 @@ class MatchPage(ProgressRowMixin, QWidget):
             getattr(self, "_precompute_phase", "") or self._default_phase(),
             cancelable=True,
         )
-        if self._precompute_total > 0:
+        if self._precompute_total > 0 and not self._streaming_precompute:
             self._loading.set_progress(
                 self._precompute_done, self._precompute_total,
                 getattr(self, "_precompute_phase", "") or self._default_phase(),
@@ -713,8 +729,13 @@ class MatchPage(ProgressRowMixin, QWidget):
         self._precompute_total = total
         if self._current is None:
             phase = getattr(self, "_precompute_phase", "") or self._default_phase()
-            # 라벨엔 현재 작업명, 진행도는 처리 갯수(done / total)로 표시.
-            self._loading.set_progress(done, total, phase)
+            if self._streaming_precompute:
+                # 직접 고르기 — 이 덮개는 '첫 슬롯' 하나만 기다린다.  전체 실행 진행값은
+                # 그 슬롯의 것이 아니라 5~10% 에서 닫히는 것처럼 보이므로 busy 로 둔다.
+                self._loading.set_progress(0, 0, phase)
+            else:
+                # 라벨엔 현재 작업명, 진행도는 처리 갯수(done / total)로 표시.
+                self._loading.set_progress(done, total, phase)
 
     def _on_precompute_slot_finished(self,
                                       slot: str,
@@ -766,8 +787,10 @@ class MatchPage(ProgressRowMixin, QWidget):
         self._waiting_for_slot = None
         self._streaming_precompute = False
         # 좌표 매칭 모드에서 좌표 없음 오류 — 사용자에게 안내 후 설정 화면 복귀.
-        if self._coord_mode and msg and i18n.KO.COORD_MISSING in msg:
-            sheets.warn(self, i18n.KO.APP_TITLE, msg)
+        # 좌표 모드는 어떤 실패든(Notch · 예외 포함) 멈춘다 — 사진 유사도로 몰래 넘어가지 않는다.
+        if self._coord_mode:
+            sheets.warn(self, i18n.KO.APP_TITLE,
+                        msg or i18n.KO.COORD_MISSING)
             self.cancelled.emit()
             return
         if self.bg_status_label is not None:
@@ -999,6 +1022,10 @@ class MatchPage(ProgressRowMixin, QWidget):
         if w.isRunning():
             w.stop()
             w.wait(500)
+        if w.isRunning():
+            # 아직 도는 QThread 는 참조를 버리면 파괴돼 앱이 꺼진다 — 끝날 때까지 붙든다.
+            _LIVE_MATCHERS.add(w)
+            w.finished.connect(lambda x=w: _LIVE_MATCHERS.discard(x))
 
     def _stop_precompute_worker(self) -> None:
         """현재 precompute 워커의 시그널을 모두 끊고 중단 + 대기.

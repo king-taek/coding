@@ -428,9 +428,7 @@ class CoordCalibrationDialog(QDialog):
                     dx=off[0], dy=off[1], n=self._auto.support))
             else:
                 self._result.setText("")
-            self._warn.setText("" if self._auto_weak is None else
-                               i18n.KO.COORD_CAL_AUTO_WEAK_FMT.format(
-                                   n=self._auto_weak.support, m=self._auto_weak.runner_up))
+            self._warn.setText(self._weak_text())
         else:
             res = cal.residuals([d for _v, d in self._pairs.values()], off)
             r = max(res) if res else 0.0
@@ -447,6 +445,15 @@ class CoordCalibrationDialog(QDialog):
                     warn = i18n.KO.COORD_CAL_AUTO_DIFF_FMT.format(ax=ax, ay=ay, d=d)
             self._warn.setText(warn)
         self._apply.setEnabled(off is not None)
+
+    def _weak_text(self) -> str:
+        """자동값을 못 믿는 이유 — 짝이 모자라면 '지금 / 필요' 숫자로, 모자라지 않으면 후보가 갈린 것."""
+        w = self._auto_weak
+        if w is None:
+            return ""
+        if w.support < cal.MIN_AUTO_SUPPORT:
+            return i18n.KO.COORD_CAL_AUTO_WEAK_FMT.format(n=w.support, need=cal.MIN_AUTO_SUPPORT)
+        return i18n.KO.COORD_CAL_AUTO_AMBIGUOUS_FMT.format(n=w.support, m=w.runner_up)
 
     def _on_apply(self) -> None:
         self.offset = self.current_offset()

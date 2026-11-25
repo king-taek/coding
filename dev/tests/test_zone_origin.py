@@ -603,3 +603,37 @@ def test_arrows_still_move_after_clicking_sort(dlg):
     first = dlg.current()
     QTest.keyClick(dlg.focusWidget() or dlg, Qt.Key.Key_Right)
     assert dlg.current() is not first
+
+
+def test_closing_dialog_stops_running_excel_save(styled_qapp):
+    """B3 — 창을 닫으면 도는 엑셀 저장을 멈추고(stop) 끝 안내가 닫힌 창에 뜨지 않게 신호를 끊는다."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from PyQt6.QtCore import QObject, pyqtSignal
+    from aoi_verification.app.ui.widgets.zone_origin_dialog import ZoneOriginDialog
+
+    class _Sig(QObject):
+        progress = pyqtSignal(int, int, str)
+        done = pyqtSignal(str)
+        failed = pyqtSignal(str)
+
+    class _Fake:
+        def __init__(self):
+            self.signals, self.stopped = _Sig(), False
+
+        def isRunning(self):
+            return True
+
+        def stop(self):
+            self.stopped = True
+
+    d = ZoneOriginDialog()
+    try:
+        fake, got = _Fake(), []
+        fake.signals.done.connect(got.append)
+        d._exporter = fake
+        d.done(0)
+        assert fake.stopped
+        fake.signals.done.emit("x.xlsx")
+        assert got == []
+    finally:
+        d.deleteLater()

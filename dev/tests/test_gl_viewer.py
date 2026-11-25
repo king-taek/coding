@@ -925,6 +925,13 @@ def test_compare_shows_two_stacked_rows_with_own_ratios_and_no_legend(dlg):
     dlg.show_compare(loader.ViewLoad(b, source_path="b.tif"))
     _pump()
     assert GLV._CMP_A in dlg.cap_a.text() and GLV._CMP_B in dlg.cap_b.text() and "■" in dlg.cap_a.text()
+    assert dlg.tag_a.text() == "A" and dlg.tag_b.text() == "B"       # W17 — 캔버스 모서리 꼬리표
+    assert dlg.tag_a.parent() is dlg.canvas and dlg.tag_b.parent() is dlg.canvas_b
+    assert not dlg.tag_a.isHidden() and not dlg.tag_b.isHidden()
+    dlg._close_compare()
+    assert dlg.tag_a.isHidden() and dlg.tag_b.isHidden()
+    dlg.show_compare(loader.ViewLoad(b, source_path="b.tif"))
+    _pump()
     h = dlg.hist
     assert h.compare_mode() and not h._series
     rows = h.rows()

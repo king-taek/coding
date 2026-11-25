@@ -63,9 +63,18 @@ _TOAST_MS = 1800
 
 
 _LIST_THUMB_PX = 56     # 좌측 ‘실패 목록’ 항목 썸네일 한 변(px).
-_REF_PX = config.Sizing.DIALOG_REF_PX    # 좌측 기준 사진 기본 크기 (= 420)
-_CAND_PX = config.Sizing.DIALOG_CAND_PX  # 우측 후보 타일 기본 크기 (= 260)
+_REF_PX = 320           # 좌측 기준 사진 기본 크기 — 후보를 3열로 놓으려고 줄였다(W51).
+_CAND_PX = 165          # 우측 후보 타일 기본 크기(3열 기준)
+_LIST_PANEL_W = 236     # 좌측 실패 목록 폭
+_CAND_COLS = 3          # 후보 목표 열 수(폭이 모자라면 줄어든다)
+_NAME_KEEP = 6          # 후보·목록 이름은 앞 6자만 보인다(전체는 툴팁)
 _CAND_CAP_PX = 28       # 캡션 한 줄
+_CAND_SCORE_PX = 28     # 사진 아래 % 한 줄
+
+
+def _short_name(name: str) -> str:
+    """이름 앞 ``_NAME_KEEP`` 자 + '…' (짧으면 그대로)."""
+    return name if len(name) <= _NAME_KEEP else name[:_NAME_KEEP] + "…"
 # 크기 슬라이더 범위 (기준 사진 한 변, px) — 후보 타일은 비율로 파생 (#1).
 _SIZE_MIN_PX = 250
 _SIZE_MAX_PX = 700
@@ -236,7 +245,8 @@ class _CandidateTile(QFrame):
         self.setObjectName("candTile")
         self.setProperty("role", "card-soft")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedSize(self._size + 16, self._size + _CAND_CAP_PX + 32)
+        self.setFixedSize(self._size + 16,
+                          self._size + _CAND_CAP_PX + _CAND_SCORE_PX + 24)
         # 우클릭 → 좌우 비교 크게보기 (#1e).
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
@@ -255,22 +265,19 @@ class _CandidateTile(QFrame):
 
         self._score_label = QLabel(self.score_text(), self)
         self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._score_label.setFixedHeight(_CAND_SCORE_PX)   # 사진과 이름 사이에 또렷이
         # ★ 후보 유사도는 '합격 판정' 이 아니다 — 매치 검토 화면과 같은 중립색을 쓴다
         #   (성공색은 판정 칩 전용).
         self._score_label.setProperty("role", "tileScore")
         lay.addWidget(self._score_label)
 
-        from PyQt6.QtGui import QFontMetrics
         cap = QLabel(self)
         cap.setFixedHeight(_CAND_CAP_PX)
         cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # 파일명 캡션 등급 — 썸네일 그리드와 같은 role 을 쓴다(대비·크기 한 자리에서).
         cap.setProperty("role", "fileCaption")
         cap.setWordWrap(False)
-        fm = QFontMetrics(cap.font())
-        cap.setText(fm.elidedText(
-            item.filename, Qt.TextElideMode.ElideMiddle, self._size - 4,
-        ))
+        cap.setText(_short_name(item.filename))
         cap.setToolTip(item.filename)
         self._cap = cap
         lay.addWidget(cap)
@@ -302,14 +309,10 @@ class _CandidateTile(QFrame):
     def set_display_size(self, size: int) -> None:
         """슬라이더로 타일 크기 변경 (#1) — 재생성/재디코드 없이 보관 픽스맵 재스케일."""
         self._size = int(size)
-        self.setFixedSize(self._size + 16, self._size + _CAND_CAP_PX + 32)
+        self.setFixedSize(self._size + 16,
+                          self._size + _CAND_CAP_PX + _CAND_SCORE_PX + 24)
         self._img_label.setFixedSize(self._size, self._size)
         self._apply_scaled()
-        from PyQt6.QtGui import QFontMetrics
-        fm = QFontMetrics(self._cap.font())
-        self._cap.setText(fm.elidedText(
-            self.item.filename, Qt.TextElideMode.ElideMiddle, self._size - 4,
-        ))
 
     def score_text(self) -> str:
         """타일·비교뷰가 함께 쓰는 점수 표기 — **한 곳에서만** 만든다.
@@ -559,7 +562,7 @@ class UnmatchedReviewDialog(QDialog):
         self.fail_list.setProperty("role", "pickList")
         self.fail_list.itemClicked.connect(self._on_list_item_clicked)
         lpl.addWidget(self.fail_list, stretch=1)
-        list_panel.setFixedWidth(260)
+        list_panel.setFixedWidth(_LIST_PANEL_W)
         body.addWidget(list_panel)
         # display-row → self._unmatched 인덱스 매핑 (#14 분리 정렬용).
         self._row_to_idx: dict[int, int] = {}
@@ -682,19 +685,14 @@ class UnmatchedReviewDialog(QDialog):
         return False
 
     def _list_label(self, idx: int) -> str:
-        """`[슬롯]` + 파일명 2줄.  (확정 항목은 목록에서 빠지므로 ✓ 표시는 없다.)
+        """파일명 앞 6자 + 슬롯 2줄.  (확정 항목은 목록에서 빠지므로 ✓ 표시는 없다.)
 
         ★ 슬롯 태그만 적던 시절엔 같은 슬롯의 실패가 여러 장일 때 항목들이 **같은
           이름**으로 보여, 특정 사진으로 돌아가려면 썸네일을 육안 대조하거나 항목마다
-          호버해 툴팁을 봐야 했다.  파일명은 앞뒤가 다 정보라 가운데를 줄인다(전체
-          이름은 툴팁이 계속 보여 준다)."""
+          호버해 툴팁을 봐야 했다.  파일명은 앞 6자만 보이고(전체
+          이름은 툴팁이 계속 보여 준다) 슬롯은 전체를 적는다."""
         entry = self._unmatched[idx]
-        name = Path(entry.path).name
-        fm = self.fail_list.fontMetrics()
-        # 목록 고정폭(260) − 패널 마진 − 아이콘 − 항목 패딩/스크롤바 여유.
-        avail = 260 - 24 - _LIST_THUMB_PX - 28
-        short = fm.elidedText(name, Qt.TextElideMode.ElideMiddle, max(40, avail))
-        return f"[{entry.slot}]\n{short}"
+        return f"{_short_name(Path(entry.path).name)}\n{entry.slot}"
 
     def _populate_list(self) -> None:
         """전체 실패 목록을 채운다 — 일반 → 구분선 → 매칭 취소 (#12/#14)."""
@@ -956,9 +954,8 @@ class UnmatchedReviewDialog(QDialog):
     def _relayout_candidates(self) -> None:
         """viewport 폭에 맞춰 후보 열 수를 계산해 기존 타일을 재배치.
 
-        **항상 가로 2개 이상**이 보이도록, 슬라이더가 설정한 ``_cand_px`` 가
-        창에 비해 크면 2열이 들어갈 크기까지 자동 축소한다(#1). 타일 위젯은
-        재사용(재생성/재디코드 없음)."""
+        목표는 ``_CAND_COLS``(3)열이고, 창이 좁으면 타일을 줄여 **최소 2열**은
+        유지한다(가로 스크롤 없음).  타일 위젯은 재사용(재생성/재디코드 없음)."""
         if not self._cand_tiles:
             return
         while self._grid.count():
@@ -967,11 +964,12 @@ class UnmatchedReviewDialog(QDialog):
         margins = 8                      # 그리드 좌우 contentsMargins(4+4)
         frame = 16                       # 타일 1개의 chrome (set_display_size: size+16)
         vp = self._scroll.viewport().width() or self.width()
-        # 2열이 들어갈 최대 타일 한 변 — 부족하면 슬라이더 값보다 축소.
-        two_col_px = (vp - margins - spacing) // 2 - frame
-        display_px = max(60, min(self._cand_px, two_col_px))
+        # 3열이 들어가는 최대 타일 한 변 — 부족하면 줄이되 2열 한도까지만.
+        fit3 = (vp - margins - spacing * (_CAND_COLS - 1)) // _CAND_COLS - frame
+        fit2 = (vp - margins - spacing) // 2 - frame
+        display_px = max(60, min(self._cand_px, max(fit3, fit2)))
         tile_w = display_px + frame + spacing
-        cols = max(2, max(1, vp // tile_w))
+        cols = max(2, min(_CAND_COLS, vp // tile_w))
         for t in self._cand_tiles:
             if t._size != display_px:
                 t.set_display_size(display_px)

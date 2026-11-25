@@ -309,6 +309,28 @@ class WaferMapDialog(QDialog):
         self.empty.setWordWrap(True)
         root.addWidget(self.empty)
 
+        # 폴더를 찾을 수 없을 때 — 가운데에 안내 · 경로 · [다른 폴더 선택]
+        self.missing = QWidget(self)
+        mlay = QVBoxLayout(self.missing)
+        mlay.setSpacing(8)
+        mlay.addStretch(1)
+        self.missing_title = QLabel(i18n.KO.WAFER_MAP_FOLDER_MISSING, self.missing)
+        self.missing_title.setProperty("role", "muted")
+        self.missing_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mlay.addWidget(self.missing_title)
+        self.missing_path = QLabel("", self.missing)
+        self.missing_path.setProperty("role", "monoMuted")
+        self.missing_path.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.missing_path.setWordWrap(True)
+        mlay.addWidget(self.missing_path)
+        self.missing_btn = NeonButton(i18n.KO.WAFER_MAP_PICK_OTHER_FOLDER, role="primary")
+        self.missing_btn.setAutoDefault(False)
+        self.missing_btn.clicked.connect(self._on_pick)
+        mlay.addWidget(self.missing_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        mlay.addStretch(1)
+        self.missing.hide()
+        root.addWidget(self.missing, stretch=1)
+
         maps = QHBoxLayout()
         maps.setSpacing(theme.PROFILE.card_pad)
         self.left = _MapPanel(self)
@@ -338,6 +360,7 @@ class WaferMapDialog(QDialog):
         self.exit_btn.clicked.connect(lambda: self.set_fullscreen(False))
         self.exit_btn.hide()
         self.resize(1100, 720)
+        self._set_view_enabled(False)           # 지도가 생기기 전에는 보기 옵션을 끈다
 
     def _add_view_options(self, top) -> None:
         """보기 옵션 — die 색칠 · 점 크기 · 노치 방향.  두 단계 모두, 두 맵에 **함께** 건다."""
@@ -384,12 +407,23 @@ class WaferMapDialog(QDialog):
     def _views(self):
         return (self.left.view, self.right.view)
 
+    def _set_view_enabled(self, on: bool) -> None:
+        """지도가 있을 때만 보기 옵션(die 색칠 · 점 크기 · 노치 · 전체화면)을 켠다."""
+        self._map_shown = on
+        self.fill_btn.setEnabled(on)
+        self.unmatched_first_btn.setEnabled(on)
+        self.notch_btn.setEnabled(on)
+        self.full_btn.setEnabled(on)
+        dots = on and not self.fill_btn.isChecked()
+        self.dot_label.setEnabled(dots)
+        self.dot_slider.setEnabled(dots)
+
     def _on_fill_toggled(self, on: bool) -> None:
         for view in self._views():
             view.set_fill_dies(on)
         self.unmatched_first_btn.setVisible(on and self._result is not None)
-        self.dot_label.setEnabled(not on)
-        self.dot_slider.setEnabled(not on)
+        self.dot_label.setEnabled(self._map_shown and not on)
+        self.dot_slider.setEnabled(self._map_shown and not on)
 
     def _on_dot_size(self, r: int) -> None:
         for view in self._views():
@@ -478,9 +512,13 @@ class WaferMapDialog(QDialog):
         super().keyPressEvent(event)
 
     # ------------------------------------------------------------------
-    def _render_empty(self, text: str = "") -> None:
+    def _render_empty(self, text: str = "", missing: Optional[Path] = None) -> None:
+        self._set_view_enabled(False)
+        self.missing.setVisible(missing is not None)
+        if missing is not None:
+            self.missing_path.setText(str(missing))
         self.empty.setText(text or i18n.KO.WAFER_MAP_NO_FOLDER)
-        self.empty.show()
+        self.empty.setVisible(missing is None)
         self.warn_banner.hide()
         self.disclaimer.hide()
         self.left.hide()
@@ -490,6 +528,8 @@ class WaferMapDialog(QDialog):
     def _show_maps(self, left: tuple[str, MapData],
                    right: Optional[tuple[str, MapData]]) -> None:
         self.empty.hide()
+        self.missing.hide()
+        self._set_view_enabled(True)
         sides = [left] + ([right] if right is not None else [])
         text = self.warning_text(sides)
         # 칸·번호가 틀렸을 가능성이 크면 빨간 큰 배너로 — 주황 한 줄은 지나치기 쉽다.
@@ -607,6 +647,8 @@ class WaferMapDialog(QDialog):
 
         def job(report):
             report(i18n.KO.WAFER_MAP_LOADING_SCAN)
+            if not folder.is_dir():
+                return MapData(None, (), ()), None, ("missing", {})
             kind, slots = classify_folder(folder)
             if kind == "empty":
                 return MapData(None, (), ()), None, (kind, slots)
@@ -620,7 +662,9 @@ class WaferMapDialog(QDialog):
             kind, slots = extra or ("empty", {})
             self._lot_slots = slots
             self.slots_btn.setVisible(kind == "lot")
-            if kind == "empty":
+            if kind == "missing":
+                self._render_empty(missing=folder)
+            elif kind == "empty":
                 self._render_empty(i18n.KO.WAFER_MAP_NO_IMAGES)
             else:
                 self._show_folder_map(data)

@@ -464,7 +464,7 @@ class SelectPage(ProgressRowMixin, QWidget):
         #   붙어 있으면 한 칸 옆을 잘못 눌러 파괴 흐름의 확인창으로 들어간다.
         top.addSpacing(24)
         self.btn_end_selection = NeonButton(
-            i18n.KO.BTN_END_SELECTION, role="warn",
+            i18n.KO.BTN_END_SELECTION, role="primary",
         )
         self.btn_end_selection.clicked.connect(self._end_selection_now)
         self.btn_end_selection.setEnabled(False)
@@ -477,13 +477,6 @@ class SelectPage(ProgressRowMixin, QWidget):
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setVisible(False)
         root.addWidget(self.progress_bar)
-
-        # LOT(slot)별 전체 장수 — 참고용으로 작게 한 줄 (#2).  세션 내 불변이라
-        # load_state 에서 1회만 채운다.  슬롯이 많으면 elide + 전체는 툴팁.
-        self.lot_counts_label = QLabel("", self)
-        self.lot_counts_label.setProperty("role", "mutedSmall")
-        self.lot_counts_label.setWordWrap(False)
-        root.addWidget(self.lot_counts_label)
 
         # 중앙 3-pane — QSplitter 로 사용자 조절 + 상태 영속 -------------
         self._h_splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -747,11 +740,9 @@ class SelectPage(ProgressRowMixin, QWidget):
     def resizeEvent(self, event):                       # noqa: N802
         super().resizeEvent(event)
         self._update_splitter_orientation()
-        self._elide_lot_counts()
 
     def showEvent(self, event):                         # noqa: N802
         super().showEvent(event)
-        self._elide_lot_counts()
         # 실제로 보여질 때의 너비로 방향을 한 번 확정한다. 구성 중 잠깐 좁아졌다
         # 다시 넓어지는 과도기 때문에 세로로 굳는 버그를 방지 — 히스테리시스는
         # 그 이후의 사용자 리사이즈에만 적용된다.
@@ -856,49 +847,8 @@ class SelectPage(ProgressRowMixin, QWidget):
             history=list(history or []),
         )
         self._phase_b_already_matched = phase_b_already_matched or {}
-        self._update_lot_counts()
         self._refresh_all()
         self._advance_to_next()
-
-    def _update_lot_counts(self) -> None:
-        """LOT(slot)별 전체 장수 라벨 갱신 (#2) — 세션 내 불변이라 1회만."""
-        if self._state is None:
-            self._lot_counts_full = ""
-            self.lot_counts_label.setText("")
-            return
-        totals: dict[str, int] = defaultdict(int)
-        for it in self._state.queue:
-            totals[it.slot] += 1
-        for pool in (self._state.targets, self._state.excluded):
-            for slot, items in pool.items():
-                totals[slot] += len(items)
-        if not totals:
-            self._lot_counts_full = ""
-            self.lot_counts_label.setText("")
-            return
-        parts = [f"{slot} {totals[slot]}" for slot in sorted(totals)]
-        self._lot_counts_full = i18n.KO.LOT_COUNTS_PREFIX + "  ·  ".join(parts)
-        self.lot_counts_label.setToolTip(self._lot_counts_full)
-        self._elide_lot_counts()
-
-    def _elide_lot_counts(self) -> None:
-        """전체 문자열을 지금 폭에 맞춰 **가운데** 생략.  원본은 툴팁이 갖는다.
-
-        ★ 폭을 잴 수 있을 때마다 **다시** 부른다.  `load_state` 시점에는 이 페이지가 아직
-        레이아웃되지 않아 라벨 폭이 QLabel 기본값(100px)이다 — 그때 한 번만 자르면 슬롯이
-        한두 개인 평범한 세션에서도 라벨이 통째로 잘린 채 **영원히** 복구되지 않는다
-        (창을 키워도 그대로다).  `_MatchRow._elide_slot` 이 `resizeEvent` 에서 다시 부르는
-        것과 같은 이유다.
-        """
-        full = getattr(self, "_lot_counts_full", "")
-        if not full:
-            return
-        avail = self.lot_counts_label.contentsRect().width()
-        if avail <= 0:
-            avail = self.lot_counts_label.width()
-        fm = QFontMetrics(self.lot_counts_label.font())
-        self.lot_counts_label.setText(
-            fm.elidedText(full, Qt.TextElideMode.ElideMiddle, max(80, avail)))
 
     def get_state(self) -> Stage1State | None:
         return self._state

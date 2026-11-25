@@ -139,7 +139,7 @@ class ToggleSwitch(QWidget):
         # ★ off 트랙을 LINE2 로 칠하면 시트 면에서 1.5~1.7:1 밖에 안 돼 '꺼진 스위치가
         #   안 보인다'(WCAG 1.4.11 실패, 실측).  LINE_STRONG 으로 3:1 을 확보한다.
         if enabled:
-            off_c = QColor(theme.LINE_STRONG)
+            off_c = QColor(theme.LINE2)       # 꺼짐 = 옅은 회색(짙은 회갈색은 켜진 듯 보였다)
             on_c = QColor(theme.ACCENT)
         else:
             off_c = QColor(theme.LINE)
@@ -163,7 +163,7 @@ class ToggleSwitch(QWidget):
             #   링은 **트랙 위에** 그려지므로 두 트랙 색(OFF=line_strong, ON=accent)
             #   모두와 대비되는 하나의 색을 쓴다: ON_ACCENT — OFF 3.59/6.24,
             #   ON 6.50/8.57(실측).
-            ring = QColor(theme.ON_ACCENT)
+            ring = QColor(theme.ON_ACCENT if on >= 0.5 else theme.INK2)
             p.setBrush(Qt.BrushStyle.NoBrush)
             fp = QPen(ring)
             fp.setWidth(2)

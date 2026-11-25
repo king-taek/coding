@@ -180,6 +180,7 @@ class _OriginalLoader(QThread):
 
     class _Signals(QObject):
         loaded = pyqtSignal(QImage)
+        failed = pyqtSignal()
 
     def __init__(self, path: Path) -> None:
         super().__init__()                  # 부모 없음(위 주석)
@@ -190,9 +191,11 @@ class _OriginalLoader(QThread):
         try:
             img = QImage(str(self._path))
         except Exception:
-            return
+            img = QImage()
         if not img.isNull():
             self.signals.loaded.emit(img)
+        else:
+            self.signals.failed.emit()          # 복사·자르기 대기를 풀어 준다
 
 
 def _spawn_original_loader(path: Path) -> "_OriginalLoader":
@@ -253,6 +256,7 @@ class FullscreenViewer(QDialog):
         self._overlay = overlay
         # 복사는 항상 원본 픽셀로 한다 — 화면용 `_pix` 는 상한 때문에 줄어 있을 수 있다.
         self._orig: Optional[QImage] = image
+        self._wait_orig = None            # 원본이 아직일 때 복사·자르기 — 도착하면 이어서 한다(UI 스레드에서 디코드하지 않는다)
         self._crop_mode = False
         self._crop_a: Optional[QPoint] = None      # 크롭 드래그 시작/현재(라벨 좌표)
         self._crop_b: Optional[QPoint] = None
@@ -353,11 +357,15 @@ class FullscreenViewer(QDialog):
             self._on_original_loaded(late)
 
     # -- 복사(원본 화질) -------------------------------------------------
-    def _original_image(self) -> QImage:
-        """복사할 원본 픽셀.  원본 디코드가 아직이면 여기서 한 번 읽는다."""
-        if self._orig is None or self._orig.isNull():
-            self._orig = QImage(str(self._path))
-        return self._orig
+    def _after_original(self, action) -> bool:
+        """원본이 있으면 True(바로 진행).  아직이면 백그라운드 디코드가 끝난 뒤 ``action`` 을 부르게 맡기고 False."""
+        if self._orig is not None and not self._orig.isNull():
+            return True
+        self._wait_orig = action
+        self._hint.setText(i18n.KO.VIEWER_ORIG_WAIT)
+        if self._loader is None or not self._loader.isRunning():
+            self._start_original_load(force=True)
+        return False
 
     def _flash(self, text: str) -> None:
         """조작 힌트 줄을 잠깐 알림으로 쓴다(부모 있는 타이머 — 창과 함께 죽는다)."""
@@ -368,10 +376,9 @@ class FullscreenViewer(QDialog):
         t.start(1600)
 
     def _copy_original(self) -> None:
-        img = self._original_image()
-        if img.isNull():
+        if not self._after_original(self._copy_original):
             return
-        QApplication.clipboard().setImage(img)
+        QApplication.clipboard().setImage(self._orig)
         self._flash(i18n.KO.VIEWER_COPIED_FULL)
 
     def _toggle_crop(self) -> None:
@@ -385,49 +392,48 @@ class FullscreenViewer(QDialog):
                            else i18n.KO.VIEWER_HINT)
         self._redraw()
 
-    def _crop_to_original(self) -> Optional[QImage]:
-        """드래그한 사각형을 **원본 픽셀 좌표**로 바꿔 잘라 낸다(화면 배율·상한과 무관)."""
+    def _crop_fraction(self) -> Optional[tuple]:
+        """드래그한 사각형을 화면용 사진의 비율 좌표 ``(왼, 위, 오른, 아래)`` 로 — 원본이 늦게 와도 같은 자리를 자른다."""
         if self._crop_a is None or self._crop_b is None:
             return None
-        orig = self._original_image()
         pw, ph = self._pix.width(), self._pix.height()
-        if orig.isNull() or pw <= 0 or ph <= 0:
+        if pw <= 0 or ph <= 0:
             return None
         cw, ch = self._view_size()
         sc = float(self._scale)
         x0 = (cw - pw * sc) / 2 + self._offset_x
         y0 = (ch - ph * sc) / 2 + self._offset_y
-        fx, fy = orig.width() / pw, orig.height() / ph
+        ax, ay = (self._crop_a.x() - x0) / sc / pw, (self._crop_a.y() - y0) / sc / ph
+        bx, by = (self._crop_b.x() - x0) / sc / pw, (self._crop_b.y() - y0) / sc / ph
+        return min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)
 
-        def to_src(pt: QPoint) -> tuple[float, float]:
-            return ((pt.x() - x0) / sc * fx, (pt.y() - y0) / sc * fy)
-
-        ax, ay = to_src(self._crop_a)
-        bx, by = to_src(self._crop_b)
+    def _copy_crop(self, frac: tuple) -> None:
+        """비율 좌표를 **원본 픽셀 좌표**로 바꿔 잘라 클립보드에 넣는다(화면 배율·상한과 무관)."""
+        if not self._after_original(lambda: self._copy_crop(frac)):
+            return
+        orig = self._orig
         import math
-        left = max(0, int(math.floor(min(ax, bx))))
-        top = max(0, int(math.floor(min(ay, by))))
-        right = min(orig.width(), int(math.ceil(max(ax, bx))))
-        bottom = min(orig.height(), int(math.ceil(max(ay, by))))
+        left = max(0, int(math.floor(frac[0] * orig.width())))
+        top = max(0, int(math.floor(frac[1] * orig.height())))
+        right = min(orig.width(), int(math.ceil(frac[2] * orig.width())))
+        bottom = min(orig.height(), int(math.ceil(frac[3] * orig.height())))
         if right - left < 2 or bottom - top < 2:
-            return None
-        return orig.copy(QRect(left, top, right - left, bottom - top))
+            return
+        crop = orig.copy(QRect(left, top, right - left, bottom - top))
+        if not crop.isNull():
+            QApplication.clipboard().setImage(crop)
+            self._flash(i18n.KO.VIEWER_COPIED_CROP.format(w=crop.width(), h=crop.height()))
 
     def _finish_crop(self) -> None:
-        crop = self._crop_to_original()
-        if crop is not None and not crop.isNull():
-            QApplication.clipboard().setImage(crop)
-            msg = i18n.KO.VIEWER_COPIED_CROP.format(w=crop.width(), h=crop.height())
-        else:
-            msg = ""
+        frac = self._crop_fraction()
         self._crop_mode = False
         self._crop_a = self._crop_b = None
         self._btn_crop.setText(i18n.KO.VIEWER_CROP)
         self._label.setCursor(Qt.CursorShape.ArrowCursor)
         self._hint.setText(i18n.KO.VIEWER_HINT)
         self._redraw()
-        if msg:
-            self._flash(msg)
+        if frac is not None:
+            self._copy_crop(frac)
 
     def _toggle_box(self) -> None:
         self._show_box = not self._show_box
@@ -437,13 +443,20 @@ class FullscreenViewer(QDialog):
         self._redraw()
 
     # -- 원본 화질로 교체 ------------------------------------------------
-    def _start_original_load(self) -> None:
-        """원본을 백그라운드에서 디코드.  헤드리스면 건너뛴다(테스트 결정성)."""
+    def _start_original_load(self, force: bool = False) -> None:
+        """원본을 백그라운드에서 디코드.  헤드리스면 건너뛴다(테스트 결정성) — 복사·자르기가 기다릴 때(``force``)만 돈다."""
         import os
-        if os.environ.get("QT_QPA_PLATFORM", "") == "offscreen":
+        if not force and os.environ.get("QT_QPA_PLATFORM", "") == "offscreen":
             return
         self._loader = _spawn_original_loader(self._path)
         self._loader.signals.loaded.connect(self._on_original_loaded)
+        self._loader.signals.failed.connect(self._on_original_failed)
+
+    def _on_original_failed(self) -> None:
+        """원본을 못 읽었다 — 기다리던 복사·자르기를 그만두고 힌트를 되돌린다."""
+        if self._wait_orig is not None:
+            self._wait_orig = None
+            self._hint.setText(i18n.KO.VIEWER_HINT)
 
     def closeEvent(self, e):  # noqa: N802
         """닫힐 때 로더 연결을 끊는다 — 죽어 가는 위젯으로 tick 이 들어가지 않게.
@@ -454,6 +467,7 @@ class FullscreenViewer(QDialog):
         if ld is not None:
             try:
                 ld.signals.loaded.disconnect(self._on_original_loaded)
+                ld.signals.failed.disconnect(self._on_original_failed)
             except (TypeError, RuntimeError):
                 pass
             self._loader = None
@@ -470,6 +484,9 @@ class FullscreenViewer(QDialog):
             self._late_orig = img
             return
         self._orig = img                # 복사용 — 아래 상한 축소 전의 원본
+        act, self._wait_orig = self._wait_orig, None
+        if act is not None:             # 원본을 기다리던 복사·자르기를 이어서 한다
+            act()
         # 지나치게 큰 원본은 뷰포트의 몇 배 선까지만 — 휠 줌 응답을 지키기 위해.
         cap = self._WORK_OVERSAMPLE * max(1, self.width(), self.height())
         if max(img.width(), img.height()) > cap:

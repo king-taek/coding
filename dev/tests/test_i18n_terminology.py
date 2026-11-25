@@ -70,8 +70,12 @@ def test_one_action_has_one_button_name() -> None:
 def test_screen_says_slot_in_korean() -> None:
     """화면 문구는 '슬롯' 이다 — 엑셀 표기(SLOT_MISMATCH_SHEET)만 'Slot' 을 남긴다."""
     # `{slot}` 은 포맷 자리표시자(코드 식별자)이지 화면에 보이는 낱말이 아니다.
+    # 예외: 직접 짝짓는 기능의 이름은 사용자 결정(2026-11-24)으로 'Slot 매핑' 하나다.
+    mapping = {"SLOT_MAP_TITLE", "SLOT_MAP_HINT", "SLOT_MAP_ASK",
+               "SLOT_MAP_PAIRS_LABEL", "SLOT_MAP_UNREAD_LINE", "WARN_SLOT_MISMATCH_FMT"}
     offenders = [f"{k}: {v[:40]}" for k, v in _screen_strings().items()
-                 if "Slot" in v or "slot" in v.replace("{slot}", "")]
+                 if k not in mapping
+                 and ("Slot" in v or "slot" in v.replace("{slot}", ""))]
     assert offenders == [], (
         "화면 문구에 영문 Slot 이 남아 있다(엑셀 시트 이름만 예외):\n  "
         + "\n  ".join(offenders))
