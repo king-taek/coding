@@ -1,4 +1,4 @@
-"""사진 우클릭 메뉴 한 벌 — [크게 보기] / [Defect 정보 조회] / [GL 히스토그램].
+"""사진 우클릭 메뉴 한 벌 — [크게 보기] / [Defect 정보] / [GL 히스토그램].
 
 현택님 2026-11-24 결정(D1b·D1c·D1d): 사진이 있는 모든 화면(매치 검토 · 후보 선별 ·
 Overkill · Zone · 매치 없음 검토 …)이 **같은 메뉴**를 띄운다.  화면마다 메뉴를 따로 만들지
@@ -76,7 +76,7 @@ def _host(owner: QWidget) -> Optional[QWidget]:
 
 
 def open_info(owner: QWidget, path) -> None:
-    """[Defect 정보 조회] — Defect Map 의 점 더블클릭과 같은 창."""
+    """[Defect 정보] — Defect Map 의 점 더블클릭과 같은 창."""
     if path is None:
         return
     from .image_info_dialog import ImageInfoDialog

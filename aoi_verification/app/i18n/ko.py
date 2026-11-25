@@ -963,31 +963,28 @@ IMAGE_INFO_ROW_LOT = "LOT"
 IMAGE_INFO_ROW_WAFER_ID = "Wafer ID"
 IMAGE_INFO_ROW_SLOT = "슬롯"
 IMAGE_INFO_UNKNOWN = "—"              # LOT · Wafer ID · Slot# 를 장비 파일에서 못 읽었을 때
-IMAGE_INFO_ROW_SOURCE = "좌표 출처"
 IMAGE_INFO_ROW_ABS_XY = "절대 X / Y"
 IMAGE_INFO_ROW_PIXEL = "픽셀 크기"
 IMAGE_INFO_ABS_XY_FMT = "{x:.0f} / {y:.0f} µm"
 IMAGE_INFO_PIXEL_FMT = "{v:.3f} µm/px"
-# 판정 스탬프 — 측정정보 유무를 한눈에.  미지원/없음은 GEOM_* 를 그대로 쓴다.
-IMAGE_INFO_STAMP_MEASURED = "측정정보 있음"
-# DefectCoord.source 코드 → 사람이 읽는 이름.
-IMAGE_INFO_SOURCE_NAMES = {
-    "camtek_live": "Camtek LIVE 파일명",
-    "camtek_ini": "Camtek 정보파일(INI)",
-    "camtek_abs": "Camtek 정보파일(INI) — 절대 wafer 좌표",
-    "kla": "KLA 정보파일",
-}
+# 판정 스탬프 — 측정정보 미지원/없음만 띄운다(GEOM_*).  '있음' 은 수치 행이 대신한다.
 
 # 다이얼로그.
 # ★ 메뉴 이름 = 화면 제목 = 이 화면을 여는 다른 버튼 이름(현택님 2026-11-24).
-IMAGE_INFO_BUTTON = "Defect 정보 조회"
+IMAGE_INFO_BUTTON = "Defect 정보"
 IMAGE_INFO_TITLE = IMAGE_INFO_BUTTON
 IMAGE_INFO_PICK = "사진 선택"
 # 도구 화면 빈 화면 — 가운데 큰 [사진 선택]/[폴더 선택] 아래 짧은 한 줄(현택님 2026-11-24 B1 안 B).
 EMPTY_DROP_HINT = "끌어다 놓기 가능"
 IMAGE_INFO_LISTING = "사진 목록 읽는 중"
 IMAGE_INFO_NO_PHOTOS = "사진 없음"
-IMAGE_INFO_PHOTO_POS_FMT = "{i} / {n}"        # 여러 장 넘겨 보기 — 지금 사진 / 전체
+IMAGE_INFO_PHOTO_POS_FMT = "{i} / {n}   ← →"  # 여러 장 넘겨 보기 — 지금 사진 / 전체 + 방향키 힌트
+# 여러 폴더(LOT 폴더 · 사진을 여러 폴더에서 고름)를 열었을 때 위 '폴더 고르기' 버튼과 목록.
+IMAGE_INFO_GROUP_ALL_FMT = "전체 · {n}장"
+IMAGE_INFO_GROUP_FMT = "{name} · {n}장"
+IMAGE_INFO_GROUP_SLOT_FMT = "#{slot} · {name} · {n}장"
+IMAGE_INFO_GROUP_BTN_FMT = "{label}  ▾"
+IMAGE_INFO_STRIP_DEFECTS_FMT = "Defect {n}개"   # 띠 썸네일 툴팁 — Scan 사진 한 장에 Defect 가 여럿
 IMAGE_INFO_FILE_FILTER_FMT = "사진 파일 ({patterns})"
 IMAGE_INFO_NO_FILE = "사진을 끌어다 놓거나 ‘사진 선택’(Ctrl+O) 을 누르세요"
 IMAGE_INFO_EMPTY = "이 사진의 정보파일을 찾지 못했습니다"
@@ -1010,9 +1007,10 @@ SCAN_IMAGE_UNREADABLE = "Scan 이미지를 읽을 수 없음"
 SCAN_IMAGE_OPEN_TIP = "전체 Scan 이미지 보기"
 IMAGE_INFO_OPEN_TIP = "크게 보기"
 # ── 흑백 Scan 사진만 넣었을 때 — 그 안에 찍힌 Defect 를 찾아 잘라 보인다(사용자 요청 2026-11-24) ──
-IMAGE_INFO_ROW_SCAN = "Scan 사진"
-IMAGE_INFO_ROW_DEFECT_PHOTO = "Defect 사진"
-SCAN_DEFECT_TITLE_FMT = "Defect 위치 ({um:.0f} µm)"
+IMAGE_INFO_ROW_SCAN = "Scan image"
+IMAGE_INFO_ROW_DEFECT_PHOTO = "Color image"
+SCAN_DEFECT_COLOR_TITLE = "Color image"          # Scan 사진을 열었을 때 아래 칸 — 고른 Defect 의 Color 사진
+SCAN_DEFECT_COLOR_MISSING = "이 Defect 의 Color 사진 파일이 없습니다"
 SCAN_DEFECT_STEP_FMT = "Defect {i} / {n}"
 SCAN_DEFECT_PREV = "◀"
 SCAN_DEFECT_NEXT = "▶"
@@ -1045,7 +1043,7 @@ GROUP_HEADER_NO_FMT = "{slot}\n#{no} · {count}장"
 # ── UI 개선 (#11 / #13 / #16) ─────────────────────────────────────────────
 # 사진 우클릭 메뉴 — 어느 화면이든 같은 세 항목(현택님 2026-11-24, ``widgets/photo_menu``).
 CTX_VIEW_LARGER = "크게 보기"
-CTX_PHOTO_INFO = "Defect 정보 조회"
+CTX_PHOTO_INFO = "Defect 정보"
 CTX_PHOTO_GL = "GL 히스토그램"
 # 매치 검토 각 행 slot 라벨 아래 ‘크게 보기’ 버튼 — 좌우 비교 뷰어를 연다.
 # ★ 확대 글리프(⤢/⧉ 등)를 **붙이지 않는다.**  이 글자들은 폰트 폴백이 플랫폼마다 달라
