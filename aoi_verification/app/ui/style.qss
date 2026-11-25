@@ -1727,6 +1727,12 @@ QLabel[role="tileBadge"] {
     font-size: 11px;
     font-weight: 700;
 }
+/* 고르는 중(아직 [적용] 전) — 속 빈 점선 표시로 적용된 ✓ 와 구분한다. */
+QLabel[role="tileBadge"][pending="true"] {
+    background-color: $panel;
+    color: $accent;
+    border: 1px dashed $accent;
+}
 /* 사진 칸 정렬 줄 — 고르지 않은 글자는 보통 굵기(고른 것만 강조색 · 굵게). */
 QPushButton[role="ovView"][sort="true"]:!checked {
     font-weight: 400;
