@@ -420,14 +420,8 @@ class ImageInfoDialog(QDialog):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(theme.PROFILE.section_gap // 2)
 
-        # [사진 선택] — 사진을 연 뒤에는 위 왼쪽 회색, 비어 있는 동안은 가운데 큰 파랑(``EmptyOpen``).
-        top = QHBoxLayout()
-        self.pick_btn = NeonButton(i18n.KO.IMAGE_INFO_PICK, role="ghost")
-        self.pick_btn.setMinimumWidth(120)
-        self.pick_btn.clicked.connect(self._on_pick)
-        top.addWidget(self.pick_btn)
-        top.addStretch(1)
-        root.addLayout(top)
+        # [사진 선택] 은 비어 있는 동안 가운데 큰 파랑(``EmptyOpen``) 하나뿐이다.  사진을 연 뒤의
+        # 위 왼쪽 회색 버튼은 뺐다(사용자 결정 2026-11-25) — 다른 사진은 끌어다 놓기 · 붙여넣기 · Ctrl+O.
 
         body = QHBoxLayout()
         body.setSpacing(theme.PROFILE.card_pad)
@@ -439,7 +433,7 @@ class ImageInfoDialog(QDialog):
         root.addLayout(body, stretch=1)
 
         root.addWidget(self._build_strip())
-        root.addLayout(self._build_actions())
+        self._build_actions()      # 레이아웃 밖에 떠 있는 버튼 — 시트가 바닥까지 쓴다
 
         # 파워 유저 경로 — 사진 열기를 손에서 떼지 않고.  ★ Ctrl+C 는 묶지 않는다:
         # 값 라벨이 선택 복사를 지원하므로, 창 단축키로 가로채면 사용자가 고른 수치
@@ -456,7 +450,7 @@ class ImageInfoDialog(QDialog):
         QTimer.singleShot(0, self._focus_pick)
 
     def _focus_pick(self) -> None:
-        (self._empty_open.btn if self._path is None else self.pick_btn).setFocus()
+        (self._empty_open.btn if self._path is None else self.copy_btn).setFocus()
 
     def _build_preview(self) -> QWidget:
         host = QWidget(self)
@@ -548,24 +542,28 @@ class ImageInfoDialog(QDialog):
         bar.setVisible(False)
         return bar
 
-    def _build_actions(self) -> QHBoxLayout:
-        bar = QHBoxLayout()
+    def _build_actions(self) -> QWidget:
+        # ★ 루트 레이아웃에 넣지 않는다 — 가로 한 줄을 통째로 차지해 시트 높이를 깎았다.
+        #   오른쪽 아래에 버튼 크기만큼만 떠 있고(`_place_float`), 스크롤해 가려져도
+        #   필요한 정보는 다 보인다(사용자 결정).  EmptyOpen 보다 먼저 만들어 그 아래에 깔린다.
+        self._float = QWidget(self)
+        bar = QHBoxLayout(self._float)
+        bar.setContentsMargins(0, 0, 0, 0)
         # 복사 확인 — 모달 대신 버튼 옆에서 잠깐 뜨는 줄(자리는 늘 예약).
-        self._toast = QLabel("", self)
+        self._toast = QLabel("", self._float)
         self._toast.setProperty("role", "muted")
         self._toast.setMinimumWidth(96)
         bar.addWidget(self._toast)
-        bar.addStretch(1)
         # 지금 보고 있는 사진을 그대로 GL 히스토그램 뷰어로 넘긴다(컬러 결함 사진이면 Scan 의
         # 결함 영역이 확대돼 열린다).  사진이 없거나, Scan 없는 컬러 사진이면 누를 수 없다
         # (`_ScanLoader` 가 판정한다).
-        self.gl_btn = NeonButton(i18n.KO.IMAGE_INFO_GL, role="ghost")
+        self.gl_btn = NeonButton(i18n.KO.IMAGE_INFO_GL, role="ghost", parent=self._float)
         self.gl_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
         self.gl_btn.setEnabled(False)
         self.gl_btn.clicked.connect(self._on_open_gl)
         bar.addWidget(self.gl_btn)
         self.gl_btn.setVisible(config.GL_HISTOGRAM_READY)   # 준비 전에는 숨긴다
-        self.copy_btn = NeonButton(i18n.KO.IMAGE_INFO_COPY, role="ghost")
+        self.copy_btn = NeonButton(i18n.KO.IMAGE_INFO_COPY, role="ghost", parent=self._float)
         self.copy_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
         bar.addWidget(self.copy_btn)
         self.copy_btn.clicked.connect(self._on_copy)
@@ -577,10 +575,19 @@ class ImageInfoDialog(QDialog):
         #   때는 닫기 대신 메뉴로 나가므로 Esc 를 삼킨다(`SetupPage._make_tool_page`).
         # ★ Enter 를 autoDefault 에 맡기지 않는다 — 마지막으로 눌린 버튼이 다시
         #   실행돼 '복사'가 뜻하지 않게 재발동한다(slot_select_dialog 와 같은 함정).
-        self.pick_btn.setDefault(True)
         self.copy_btn.setAutoDefault(False)
         self.gl_btn.setAutoDefault(False)
-        return bar
+        self._place_float()
+        return self._float
+
+    def _place_float(self) -> None:
+        """떠 있는 버튼 묶음을 오른쪽 아래(여백 16)에 붙인다.  여러 장 띠가 보이면 그 위에."""
+        f = self._float
+        f.adjustSize()
+        bottom = self.height() - 16
+        if self.strip_bar.isVisible():
+            bottom -= self.strip_bar.sizeHint().height() + theme.PROFILE.section_gap // 2
+        f.move(self.width() - 16 - f.width(), bottom - f.height())
 
     # ------------------------------------------------------------------
     # 입력 — 파일 선택 / 드래그&드롭
@@ -634,6 +641,7 @@ class ImageInfoDialog(QDialog):
 
     def _flash(self, text: str) -> None:
         motion.flash_text(self._toast, text, hold_ms=_TOAST_MS)
+        self._place_float()
 
     def _style_preview(self) -> None:
         """미리보기 프레임 — 비어 있으면 점선, 사진이 들어오면 실선(검토 화면 썸네일과 같은 관습).
@@ -703,6 +711,7 @@ class ImageInfoDialog(QDialog):
         """띠를 지금 사진 앞뒤 :data:`_STRIP_HALF` 장으로 다시 만든다(위젯 수가 사진 수와 무관)."""
         n = len(self._paths)
         self.strip_bar.setVisible(n > 1)
+        self._place_float()
         while self._strip_tiles.count():
             w = self._strip_tiles.takeAt(0).widget()
             if w is not None:
@@ -983,6 +992,7 @@ class ImageInfoDialog(QDialog):
 
     def resizeEvent(self, event):           # noqa: N802
         super().resizeEvent(event)
+        self._place_float()
         self._refresh_preview()
 
     def _refresh_preview(self) -> None:
@@ -1194,3 +1204,4 @@ class ImageInfoDialog(QDialog):
         QApplication.clipboard().setText(self.as_text())
         motion.flash_text(self._toast, i18n.KO.IMAGE_INFO_COPIED,
                           hold_ms=_TOAST_MS)
+        self._place_float()

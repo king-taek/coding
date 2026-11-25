@@ -44,8 +44,15 @@ def _check_empty(dlg, text: str) -> None:
     assert abs(c.x() - dlg.width() / 2) <= 2 and abs(c.y() - dlg.height() / 2) <= 40
     assert eo.btn.width() >= 240 and eo.btn.height() >= 56
     assert eo.hint.text() == i18n.KO.EMPTY_DROP_HINT
-    pick = _pick(dlg)
-    assert pick.text() == text and pick.property("role") == "ghost"
+    if not _no_top_pick(dlg):
+        pick = _pick(dlg)
+        assert pick.text() == text and pick.property("role") == "ghost"
+
+
+def _no_top_pick(dlg) -> bool:
+    """Defect 정보 는 위 왼쪽 [사진 선택] 을 뺐다(사용자 결정 2026-11-25) — 빈 화면 큰 버튼만."""
+    from aoi_verification.app.ui.widgets.image_info_dialog import ImageInfoDialog
+    return isinstance(dlg, ImageInfoDialog)
 
 
 def _pick(dlg):
@@ -74,7 +81,7 @@ def test_button_names_follow_one_pattern():
     assert not hasattr(K, "IMAGE_INFO_PICK_ANOTHER") and not hasattr(K, "WAFER_MAP_PICK_FOLDER_ANOTHER")
 
 
-def test_defect_info_empty_then_top_left(styled_qapp, tmp_path):
+def test_defect_info_empty_then_no_top_left(styled_qapp, tmp_path):
     from aoi_verification.app.ui.widgets.image_info_dialog import ImageInfoDialog
     dlg = _show(ImageInfoDialog())
     try:
@@ -83,8 +90,8 @@ def test_defect_info_empty_then_top_left(styled_qapp, tmp_path):
         img.write_bytes(b"x")
         dlg.show_image(img)
         _pump()
-        _check_loaded(dlg)
-        assert dlg.pick_btn.text() == "사진 선택"           # '다른 사진' 으로 바뀌지 않는다
+        assert not dlg._empty_open.isVisibleTo(dlg)
+        assert not hasattr(dlg, "pick_btn")                 # 위 왼쪽 [사진 선택] 없음(2026-11-25)
     finally:
         dlg.deleteLater()
 

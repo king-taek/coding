@@ -126,7 +126,7 @@ def test_enter_does_not_refire_the_last_button(qapp, isolated_cache):
 
     맡기면 포커스가 '전체 복사'/'닫기' 에 있을 때 Enter 가 그 동작을 재발동한다."""
     dlg = ImageInfoDialog()
-    assert dlg.pick_btn.isDefault() is True
+    assert not hasattr(dlg, "pick_btn"), "위 왼쪽 [사진 선택] 은 뺐다(2026-11-25)"
     assert dlg.copy_btn.autoDefault() is False
     dlg.deleteLater()
 
@@ -422,3 +422,25 @@ def test_qss_hides_divider_inside_cluster():
     body = qss.split(head, 1)[1].split("}", 1)[0]
     assert "border-bottom: 1px solid" in body
     assert theme.TOKENS["row_border"] in body
+
+
+def test_action_buttons_float_bottom_right_and_sheet_uses_full_height(qapp, isolated_cache):
+    """[GL 히스토그램]·[전체 복사] 는 레이아웃 밖에 떠 있다 — 가로 줄이 시트 높이를 깎지 않는다."""
+    dlg = ImageInfoDialog()
+    try:
+        dlg.resize(1000, 700)
+        dlg.show()
+        qapp.processEvents()
+        f = dlg._float
+        assert f.parentWidget() is dlg
+        assert dlg.copy_btn.parentWidget() is f and dlg._toast.parentWidget() is f
+        assert f not in [dlg.layout().itemAt(i).widget() for i in range(dlg.layout().count())]
+        assert not dlg.strip_bar.isVisible()
+        assert f.geometry().right() + 1 == dlg.width() - 16
+        assert f.geometry().bottom() + 1 == dlg.height() - 16
+        # 시트 영역이 바닥 여백 바로 위까지 내려온다(예전엔 버튼 줄 높이만큼 위에서 끝났다).
+        scroll_bottom = dlg._scroll.mapTo(dlg, dlg._scroll.rect().bottomLeft()).y() + 1
+        assert scroll_bottom >= dlg.height() - 16 - 2
+        assert dlg.copy_btn.autoDefault() is False
+    finally:
+        dlg.deleteLater()
