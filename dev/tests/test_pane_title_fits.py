@@ -96,17 +96,15 @@ def test_the_guard_would_catch_the_old_long_titles(styled_qapp, monkeypatch,
         page.close()
 
 
-def test_pane_titles_keep_the_explanation_in_a_tooltip(styled_qapp):
-    """제목에서 뺀 괄호 부연은 **툴팁으로 남는다** — 정보를 버린 게 아니다."""
+def test_pane_titles_carry_no_explanation_tooltip(styled_qapp):
+    """제목을 되풀이하던 부연 툴팁은 지웠다(현택님 2026-11-24: 설명문 금지)."""
     page = _page(styled_qapp, 1024, 720)
     try:
         tips = {t.text(): t.toolTip() for t in _pane_titles(page)}
-        assert tips.get(i18n.KO.PANEL_RIGHT_TARGETS) == \
-            i18n.KO.PANEL_RIGHT_TARGETS_TOOLTIP
-        assert tips.get(i18n.KO.PANEL_LEFT_CANDIDATES) == \
-            i18n.KO.PANEL_LEFT_CANDIDATES_TOOLTIP
-        assert i18n.KO.PANEL_RIGHT_TARGETS_TOOLTIP.strip()
-        assert i18n.KO.PANEL_LEFT_CANDIDATES_TOOLTIP.strip()
+        assert tips.get(i18n.KO.PANEL_RIGHT_TARGETS) == ""
+        assert tips.get(i18n.KO.PANEL_LEFT_CANDIDATES) == ""
+        assert not hasattr(i18n.KO, "PANEL_LEFT_CANDIDATES_TOOLTIP")
+        assert not hasattr(i18n.KO, "PANEL_RIGHT_TARGETS_TOOLTIP")
     finally:
         page.close()
 

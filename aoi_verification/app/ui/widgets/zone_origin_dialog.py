@@ -39,16 +39,21 @@ from .. import motion, theme
 from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import guess_kinds, install_paste, local_paths, split_paths
 from ..folder_picker import FolderPicker
+from . import photo_menu
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
+from .tool_open_save import EmptyOpen, SavedLine
 from ..deferred import call_later
 from ..teardown import tolerate_teardown
+from ..undo_keys import bind_undo
 from .threshold_preview_dialog import (_CountBar, _OnMark, _ThumbBus, _Tile, _mid_key, _tile_key, expand_root,
                                        no_flt_dirs, scan_crops)
 
 _LOG = logging.getLogger("aoi.zone_origin")
 _KO = i18n.KO
+# 알림·경고 줄 모양 — Overkill 튜닝(`threshold_preview_dialog`)의 줄과 같은 둥근 안쪽 줄(E2a).
+_INNER_BAR = "border-radius: 6px; margin: 4px 12px 0 12px;"
 
 LOAD_WORKERS = 6            # 웨이퍼를 동시에 읽는 수(Overkill 튜닝과 같다 — NAS 왕복 지연을 겹친다)
 THUMB_WORKERS = 3
@@ -217,21 +222,42 @@ class _FacetRow(QFrame):
 
 
 class _Pic(QLabel):
-    """오른쪽 값 칸의 사진 한 장 — 누르면 크게."""
+    """오른쪽 값 칸의 사진 한 장 — 누르면 크게.  우클릭은 모든 사진과 같은 메뉴(``photo_menu``).
+
+    ``path_of`` 는 지금 보이는 사진의 경로(우클릭 [Defect 정보 조회] · [GL 히스토그램]) — Scan Crop 은 없다."""
 
     clicked = pyqtSignal()
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, path_of=None) -> None:
         super().__init__(parent)
+        self._path_of = path_of
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
         self.setFixedSize(DETAIL_PIC, DETAIL_PIC)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet(f"background: #000; color: {theme.MUTE};")
         self.setWordWrap(True)
 
+    def setPixmap(self, pm) -> None:    # noqa: N802 — 사진이 있으면 손가락(누르면 크게)
+        super().setPixmap(pm)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def setText(self, text: str) -> None:   # noqa: N802 — 자리 글('없음'·'…')에는 손가락을 주지 않는다
+        super().setText(text)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
     def mousePressEvent(self, e):   # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(e)
+
+    def _on_context_menu(self, pos) -> None:
+        pm = self.pixmap()
+        if pm is None or pm.isNull():               # 자리 글('없음'·'…')뿐이면 메뉴도 없다
+            return
+        path = self._path_of() if self._path_of is not None else None
+        if photo_menu.ask(self, self.mapToGlobal(pos), path):
+            self.clicked.emit()
 
 
 class ZoneOriginDialog(QDialog):
@@ -282,11 +308,12 @@ class ZoneOriginDialog(QDialog):
         self._scan_timer.setInterval(SCAN_WAIT_MS)
         self._scan_timer.timeout.connect(self._scan_current)
         self._pending: set = set()
-        self._picker = FolderPicker(self)
+        self._picker = FolderPicker(self, purpose="zone_origin")
         self._picker.picked.connect(lambda p: p and self.add_folders([Path(p)]))
         self._build()
         for b in self.findChildren(QPushButton):
             b.setAutoDefault(False)
+        self._empty_open = EmptyOpen(self, _KO.ZO_ADD_FOLDER, self._on_pick, _KO.EMPTY_DROP_HINT)
         self._loading = LoadingOverlay(self)
         self._loading.cancel_requested.connect(self._cancel_load)
         self._render()
@@ -302,26 +329,30 @@ class ZoneOriginDialog(QDialog):
         hl = QHBoxLayout(head)
         hl.setContentsMargins(16, 10, 16, 10)
         hl.setSpacing(8)
-        self._chip_lay = QHBoxLayout()
-        self._chip_lay.setSpacing(6)
-        hl.addLayout(self._chip_lay)
+        # 위 왼쪽 회색 [폴더 선택] · 오른쪽 위 파랑 [엑셀로 저장](현택님 2026-11-24)
         self.pick_btn = _nf(NeonButton(_KO.ZO_ADD_FOLDER, role="ghost"))
         self.pick_btn.setToolTip(_KO.ZO_ADD_FOLDER_TIP)
         self.pick_btn.clicked.connect(self._on_pick)
         hl.addWidget(self.pick_btn)
-        self.excel_btn = _nf(NeonButton(_KO.ZO_BTN_EXCEL, role="ghost"))
-        self.excel_btn.setToolTip(_KO.ZO_BTN_EXCEL_TIP)
-        self.excel_btn.clicked.connect(self.save_excel)
-        hl.addWidget(self.excel_btn)
+        self._chip_lay = QHBoxLayout()
+        self._chip_lay.setSpacing(6)
+        hl.addLayout(self._chip_lay)
         hl.addStretch(1)
         self.big_count = QLabel("", head)
         self.big_count.setTextFormat(Qt.TextFormat.RichText)
         hl.addWidget(self.big_count)
+        self.saved_line = SavedLine(head)
+        hl.addWidget(self.saved_line)
+        self.excel_btn = _nf(NeonButton(_KO.ZO_BTN_EXCEL, role="primary"))
+        self.excel_btn.setToolTip(_KO.ZO_BTN_EXCEL_TIP)
+        self.excel_btn.clicked.connect(self.save_excel)
+        hl.addWidget(self.excel_btn)
         root.addWidget(head)
 
         self.notice = QFrame(self)
         self.notice.setObjectName("notice")
-        self.notice.setStyleSheet(f"QFrame#notice {{ background: {theme.ACCENT_TINT}; }}")
+        # 알림·경고 줄은 Overkill 튜닝과 같은 '둥근 안쪽 줄'(E2a) — 창 가장자리에 붙지 않게 좌우 12 를 띄운다.
+        self.notice.setStyleSheet(f"QFrame#notice {{ background: {theme.ACCENT_TINT}; {_INNER_BAR} }}")
         nl = QHBoxLayout(self.notice)
         nl.setContentsMargins(16, 4, 8, 4)
         self.notice_label = QLabel("", self.notice)
@@ -329,6 +360,7 @@ class ZoneOriginDialog(QDialog):
         nl.addWidget(self.notice_label, 1)
         self.undo_btn = _nf(NeonButton(_KO.OVERKILL_UNDO, role="ghost"))
         self.undo_btn.clicked.connect(self._undo)
+        bind_undo(self.undo_btn, self._undo)         # Z — 버튼이 보일 때(되돌릴 것이 있을 때)만 산다
         nl.addWidget(self.undo_btn)
         self.notice.setVisible(False)
         root.addWidget(self.notice)
@@ -338,7 +370,7 @@ class ZoneOriginDialog(QDialog):
 
         self.alert = QFrame(self)
         self.alert.setObjectName("alert")
-        self.alert.setStyleSheet(f"QFrame#alert {{ background: {theme.DANGER_TINT}; }}")
+        self.alert.setStyleSheet(f"QFrame#alert {{ background: {theme.DANGER_TINT}; {_INNER_BAR} }}")
         al = QHBoxLayout(self.alert)
         al.setContentsMargins(16, 6, 16, 6)
         self.alert_label = QLabel("", self.alert)
@@ -448,7 +480,7 @@ class ZoneOriginDialog(QDialog):
         dl.setSpacing(10)
         pics = QHBoxLayout()
         pics.setSpacing(6)
-        self.color_pic, self.scan_pic = _Pic(det), _Pic(det)
+        self.color_pic, self.scan_pic = _Pic(det, path_of=self._current_photo), _Pic(det)
         self.color_pic.clicked.connect(self.enlarge_open)
         self.scan_pic.clicked.connect(self._enlarge_scan)
         for pic, cap in ((self.color_pic, _KO.ZO_DETAIL_COLOR), (self.scan_pic, _KO.ZO_DETAIL_SCAN)):
@@ -636,9 +668,13 @@ class ZoneOriginDialog(QDialog):
     def wafer_label(self, n: int) -> str:
         folder = self._folder_of.get(n)
         if folder is None:
-            return "?"
+            return _KO.ZO_NO_SLOT
         w = self._data.get(folder)
-        return _KO.ZO_WAFER_FMT.format(slot=w.slot or "?", name=w.wafer_id or folder.name) if w else folder.name
+        if w is None:
+            return folder.name
+        name = w.wafer_id or folder.name
+        return (_KO.ZO_WAFER_FMT.format(slot=w.slot, name=name) if w.slot
+                else _KO.ZO_WAFER_NO_SLOT_FMT.format(name=name))
 
     def wafer_of(self, n: int) -> Optional[B.WaferItems]:
         return self._data.get(self._folder_of.get(n))
@@ -715,6 +751,7 @@ class ZoneOriginDialog(QDialog):
             top.setUpdatesEnabled(frozen)
 
     def _render_head(self) -> None:
+        self._empty_open.set_empty(not self._roots)
         _clear(self._chip_lay)
         for r in self._roots:
             chip = QFrame(self)
@@ -1437,6 +1474,10 @@ class ZoneOriginDialog(QDialog):
         sheets.run(viewer, full_bleed=True)
         viewer.deleteLater()
 
+    def _current_photo(self):
+        it = self.current()
+        return it.photo if it is not None else None
+
     def open_info(self) -> None:
         it = self.current()
         if it is None or it.photo is None:
@@ -1507,11 +1548,12 @@ class ZoneOriginDialog(QDialog):
         if not self._overlay_on:        # 저장 중에 폴더를 더 넣어 읽기 막이 떠 있으면 그 막은 읽기가 끝날 때 걷는다
             self._loading.hide_overlay()
         self._saved = Path(path)
+        self.saved_line.show_saved(path)
         QTimer.singleShot(0, self._offer_open)
 
     def _offer_open(self) -> None:
         path = self._saved
-        choice = sheets.choose(self, _KO.ZO_BTN_EXCEL, _KO.SAVE_SUCCESS_FMT.format(path=path),
+        choice = sheets.choose(self, _KO.SAVE_SUCCESS_TITLE, _KO.SAVE_SUCCESS_FMT.format(path=path),
                                [("open_file", _KO.BTN_OPEN_SAVED_FILE, "primary"),
                                 ("open_dir", _KO.BTN_OPEN_SAVED_FOLDER, "ghost"),
                                 ("close", _KO.MSG_BTN_CLOSE, "ghost")], default="open_file")
@@ -1521,7 +1563,7 @@ class ZoneOriginDialog(QDialog):
     def _on_excel_failed(self, msg: str) -> None:
         if not self._overlay_on:
             self._loading.hide_overlay()
-        sheets.info(self, _KO.ZO_BTN_EXCEL, _KO.SAVE_FAIL_FMT.format(error=msg))
+        sheets.info(self, _KO.SAVE_FAIL_TITLE, _KO.SAVE_FAIL_FMT.format(error=msg))
 
     # ------------------------------------------------------------------ 끌어다 놓기
     def hideEvent(self, event):         # noqa: N802
@@ -1588,7 +1630,7 @@ def _class_name(name: str) -> str:
 
 
 def _colrow(it: B.Item) -> str:
-    return f"{it.col}, {it.row}" if it.col is not None and it.row is not None else "—"
+    return f"{it.col} / {it.row}" if it.col is not None and it.row is not None else "—"
 
 
 def _int_or_none(text: str) -> Optional[int]:

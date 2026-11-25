@@ -53,7 +53,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
-from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QFrame,
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFrame,
                              QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget)
 
 from ..folder_picker import FolderPicker
@@ -72,6 +72,7 @@ from ..drop_paths import guess_kinds, install_paste, local_paths, split_paths
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
+from .tool_open_save import EmptyOpen
 from .no_wheel_slider import NoWheelSlider
 from .wafer_map_view import DOT_R, DOT_R_MAX, DOT_R_MIN, WaferMapView, count_text
 from .window_controls import set_window_fullscreen
@@ -269,7 +270,7 @@ class WaferMapDialog(QDialog):
         self.setWindowTitle(i18n.KO.WAFER_MAP_TITLE)
         self._result = result
         self._folder: Optional[Path] = None
-        self._folder_picker = FolderPicker(self)
+        self._folder_picker = FolderPicker(self, purpose="wafer_map")
         self._folder_picker.picked.connect(self._on_folder_picked)
         self._images: list[Path] = []                 # 끌어놓은 사진만 볼 때
         self._pending_images: list[Path] = []         # 추가 / 새로 그리기를 물을 사진
@@ -282,6 +283,10 @@ class WaferMapDialog(QDialog):
         self._token = 0
         self._build_thread: Optional[_MapBuild] = None
         self._build()
+        if result is None:      # 폴더를 고르기 전엔 가운데 큰 [폴더 선택] 하나(현택님 2026-11-24)
+            self._empty_open = EmptyOpen(self, i18n.KO.WAFER_MAP_PICK_FOLDER, self._on_pick,
+                                         i18n.KO.EMPTY_DROP_HINT)
+            self._empty_open.set_empty(not folder)
         self._loading = LoadingOverlay(self)
         if result is not None:
             self._on_slot_changed()
@@ -295,11 +300,6 @@ class WaferMapDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(theme.PROFILE.section_gap // 2)
-
-        self.sub = QLabel(i18n.KO.WAFER_MAP_SUBTITLE, self)
-        self.sub.setProperty("role", "subtitle")
-        self.sub.setWordWrap(True)
-        root.addWidget(self.sub)
 
         # ★ 상단줄을 **위젯으로 싼다** — 전체화면에서 줄 하나를 통째로 감추려면
         #   레이아웃이 아니라 위젯이어야 한다(QHBoxLayout 에는 setVisible 이 없다).
@@ -319,7 +319,7 @@ class WaferMapDialog(QDialog):
             self.slot_combo.currentIndexChanged.connect(self._on_slot_changed)
             top.addWidget(self.slot_combo)
         else:
-            self.pick_btn = NeonButton(i18n.KO.WAFER_MAP_PICK_FOLDER, role="primary")
+            self.pick_btn = NeonButton(i18n.KO.WAFER_MAP_PICK_FOLDER, role="ghost")
             self.pick_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
             self.pick_btn.clicked.connect(self._on_pick)
             self.pick_btn.setAutoDefault(False)
@@ -383,20 +383,18 @@ class WaferMapDialog(QDialog):
         self.resize(1100, 720)
 
     def _add_view_options(self, top) -> None:
-        """보기 옵션 — die 색칠 · 점 크기 · 노치 방향.  두 단계 모두, 두 맵에 **함께** 건다."""
-        self.fill_btn = NeonButton(i18n.KO.WAFER_MAP_FILL_DIES, role="ghost")
-        self.fill_btn.setCheckable(True)
+        """보기 옵션 — die 색칠 · 점 크기 · 노치 방향.  두 단계 모두, 두 맵에 **함께** 건다.
+
+        켜기/끄기는 체크박스다(F10, 현택님 2026-11-24) — 누르는 버튼이면 눌린 상태가
+        잘 안 보이고, 설정·결과 화면의 같은 일과 모양이 달랐다."""
+        self.fill_btn = QCheckBox(i18n.KO.WAFER_MAP_FILL_DIES, self)
         self.fill_btn.setToolTip(i18n.KO.WAFER_MAP_FILL_DIES_TIP)
-        self.fill_btn.setAutoDefault(False)
         self.fill_btn.toggled.connect(self._on_fill_toggled)
         top.addWidget(self.fill_btn)
         # 결과 단계에서만, die 색칠이 켜졌을 때만 보인다(_on_fill_toggled).
-        self.unmatched_first_btn = NeonButton(i18n.KO.WAFER_MAP_UNMATCHED_FIRST,
-                                              role="ghost")
-        self.unmatched_first_btn.setCheckable(True)
+        self.unmatched_first_btn = QCheckBox(i18n.KO.WAFER_MAP_UNMATCHED_FIRST, self)
         self.unmatched_first_btn.setChecked(True)
         self.unmatched_first_btn.setToolTip(i18n.KO.WAFER_MAP_UNMATCHED_FIRST_TIP)
-        self.unmatched_first_btn.setAutoDefault(False)
         self.unmatched_first_btn.toggled.connect(self._on_unmatched_first_toggled)
         self.unmatched_first_btn.hide()
         top.addWidget(self.unmatched_first_btn)
@@ -407,7 +405,6 @@ class WaferMapDialog(QDialog):
         self.dot_slider.setRange(DOT_R_MIN, DOT_R_MAX)
         self.dot_slider.setValue(int(DOT_R))
         self.dot_slider.setFixedWidth(120)
-        self.dot_slider.setToolTip(i18n.KO.WAFER_MAP_DOT_SIZE_TIP)
         self.dot_slider.valueChanged.connect(self._on_dot_size)
         top.addWidget(self.dot_slider)
         self.notch_btn = NeonButton("", role="ghost")
@@ -469,7 +466,6 @@ class WaferMapDialog(QDialog):
         if on == self._fullscreen:
             return
         self._fullscreen = on
-        self.sub.setVisible(not on)
         self._top_host.setVisible(not on)
         # 경고 배너는 전체화면에서도 남긴다 — 맵만 크게 볼 때가 칸을 세는 때다.
         self.disclaimer.setVisible(not on and self.left.isVisibleTo(self))
@@ -643,7 +639,7 @@ class WaferMapDialog(QDialog):
         self._folder = folder
         self._images = []
         self.folder_label.setText(str(folder))
-        self.pick_btn.setText(i18n.KO.WAFER_MAP_PICK_FOLDER_ANOTHER)
+        self._empty_open.set_empty(False)
         self._lot_slots = {}
         self._selected = None
         self.slots_btn.hide()
@@ -848,6 +844,7 @@ class WaferMapDialog(QDialog):
         paths = list(dict.fromkeys(paths))          # 같은 사진 두 번은 한 번으로
         self._images = paths
         self._folder = paths[0].parent
+        self._empty_open.set_empty(False)
         self._lot_slots = {}
         self._selected = None
         self.slots_btn.hide()

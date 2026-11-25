@@ -1,6 +1,6 @@
 """후보 선택/실패 검토 UX 수정 회귀 테스트.
 
-- 메인 후보 패널: 헤더 인라인 툴바 제거(‘선택 모드’ 버튼만), 타일 더블클릭=해제,
+- 메인 후보 패널: 헤더 인라인 툴바 제거(‘선택 모드’ 버튼만), 타일 더블클릭=크게 보기,
   ThumbGrid 반응형 컬럼(가로 스크롤 방지), 우측 패널 중복 버튼 제거.
 - 선택 모드 팝업: 드래그(러버밴드) 다중선택.
 - 매치 실패 검토: 확정 시 목록에서 제거 + 다음으로 이동, 후보 테두리 셀렉터
@@ -59,24 +59,21 @@ def test_right_panel_dropped_redundant_remove_action(qapp):
     assert action_ids == ["to_exclude", "recenter"]
 
 
-def test_tile_double_click_deselects(qapp):
+def test_tile_double_click_opens_large_and_keeps_selection(qapp, monkeypatch):
+    """더블클릭 = 크게 보기(현택님 2026-11-24 결정으로 바꿈 — 예전엔 '선택 해제').
+    선택 상태는 더블클릭이 건드리지 않는다(첫 누름이 토글한 그대로)."""
+    from aoi_verification.app.ui.widgets import photo_menu
     from aoi_verification.app.ui.widgets.thumb_grid import _ThumbTile, ThumbEntry
+    opened: list = []
+    monkeypatch.setattr(photo_menu, "open_large", lambda owner, path: opened.append(path))
     tile = _ThumbTile(
         ThumbEntry(item=ImageItem(slot="A1", path=Path("/tmp/c.jpg"), side="ref")),
         inline_select=True,
     )
-    emitted: list[bool] = []
-    tile.sel_toggled.connect(lambda ent, sel: emitted.append(sel))
-
     tile.set_inline_selected(True)
     tile.mouseDoubleClickEvent(_dbl_event())
-    assert tile.is_inline_selected() is False     # 선택→더블클릭=해제
-    assert emitted[-1] is False
-
-    # 미선택 상태에서 더블클릭해도 선택되지 않는다(항상 해제로 끝).
-    tile.set_inline_selected(False)
-    tile.mouseDoubleClickEvent(_dbl_event())
-    assert tile.is_inline_selected() is False
+    assert opened == [Path("/tmp/c.jpg")]
+    assert tile.is_inline_selected() is True
 
 
 def test_thumbgrid_responsive_columns_shrink_when_narrow(qapp):

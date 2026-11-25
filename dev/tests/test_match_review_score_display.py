@@ -100,7 +100,7 @@ def test_val_score_uses_similarity_in_legacy_mode(qapp):
     page = _page(qapp, coord_mode=False, score=0.873)
     try:
         row = page._rows[0]
-        assert row._val_score_label.text() == "87.3 %"
+        assert row._val_score_label.text() == "87.3%"
     finally:
         page.close()
 

@@ -1,6 +1,6 @@
 """Notch 방향 고르기 — 좌표 매칭 직전, 기준·검증 폴더의 notch 가 어느 쪽인지.
 
-두 줄(기준 / 검증)에 위·왼쪽·오른쪽·아래 네 칸.  매칭 전에 자동 감지를 먼저 돌려 둘 다
+두 줄(기준 / 검증)에 위·왼쪽·오른쪽·아래 네 칸.  [취소]·Esc·✕ 는 ``Rejected`` — 매칭을 시작하지 않는다.  매칭 전에 자동 감지를 먼저 돌려 둘 다
 아래면 이 창은 뜨지 않는다(사용자 지시 2026-10-28) — 뜨면 감지 결과가 처음 값으로 들어 있다.  방향이 다르면 매칭이 그 폴더의 좌표를 돌려서
 (`coords.notch`) 계산한다 — 엑셀·화면 좌표는 그대로다.  결과는 :attr:`dirs` (기준, 검증).
 """
@@ -13,12 +13,16 @@ from ... import i18n
 from ...coords import notch
 from .. import theme
 from .neon_button import NeonButton
+from . import popup_layout
 from .option_group import OptionGroup
 
 __all__ = ["NotchDialog"]
 
 
 class NotchDialog(QDialog):
+    #: 작은 팝업 — 시트 제목줄 ✕ 를 뺀다(자기 [취소] 가 있다, `sheet_host.POPUP_SMALL_ATTR`).
+    POPUP_SMALL = True
+
     def __init__(self, ref_label: str, val_label: str, ref_dir: str, val_dir: str,
                  parent=None, *, auto_args=None, auto_result=None) -> None:
         """``auto_args`` = ``(groups, ref_root, val_root, tol)`` — 있으면 [자동 감지] 가 생긴다.
@@ -33,27 +37,28 @@ class NotchDialog(QDialog):
         root.setContentsMargins(m, m, m, m)
         root.setSpacing(12)
 
-        head = QLabel(i18n.KO.NOTCH_TITLE, self)
-        head.setProperty("role", "title")
-        root.addWidget(head)
-
+        # 제목은 시트 제목줄이 보인다 — 본문에 또 크게 쓰지 않는다.
         opts = [(d, i18n.KO.NOTCH_DIRS[d]) for d in notch.DIRECTIONS]
         self.ref_group = self._row(root, i18n.KO.NOTCH_REF, ref_label, opts, ref_dir)
         self.val_group = self._row(root, i18n.KO.NOTCH_VAL, val_label, opts, val_dir)
 
-        bar = QHBoxLayout()
         self.status = QLabel("", self)
         self.status.setProperty("role", "muted")
         self.status.setWordWrap(True)
-        bar.addWidget(self.status, 1)
         self.auto_btn = NeonButton(i18n.KO.NOTCH_AUTO, role="ghost", parent=self)
         self.auto_btn.setAutoDefault(False)
         self.auto_btn.setVisible(auto_args is not None)
         self.auto_btn.clicked.connect(self._run_auto)
-        bar.addWidget(self.auto_btn)
-        ok = NeonButton(i18n.KO.NOTCH_OK, role="primary", parent=self)
-        ok.clicked.connect(self.accept)
-        bar.addWidget(ok)
+        # [취소]·Esc·✕ = 매칭을 시작하지 않고 설정 화면으로(부르는 쪽이 결과를 본다).
+        self.cancel_btn = NeonButton(i18n.KO.NOTCH_CANCEL, role="ghost", parent=self)
+        self.cancel_btn.setAutoDefault(False)
+        self.cancel_btn.clicked.connect(self.reject)
+        self.ok_btn = NeonButton(i18n.KO.NOTCH_OK, role="primary", parent=self)
+        self.ok_btn.clicked.connect(self.accept)
+        # [자동 감지]·결과 글은 왼쪽, [취소][확인] 은 오른쪽 아래(현택님 2026-11-24, P4 A안).
+        bar = popup_layout.dialog_row(QHBoxLayout(), left=[self.auto_btn],
+                                      cancels=[self.cancel_btn], primaries=[self.ok_btn])
+        bar.insertWidget(1, self.status, 1)
         root.addLayout(bar)
         self.setMinimumWidth(460)
         if auto_result is not None:

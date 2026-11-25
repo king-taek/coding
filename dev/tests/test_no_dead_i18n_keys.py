@@ -23,10 +23,7 @@ _ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 # `getattr(i18n.KO, …)` 로 이름을 조립해 쓰는 자리 — grep 으로는 안 보인다.
 # 여기 추가하려면 **어디가 어떻게 조립하는지** 를 함께 적어라.
-_DYNAMIC = {
-    # select_page.py: getattr(i18n.KO, f"PANEL_{name.upper()}_EMPTY")
-    "PANEL_RIGHT_EMPTY",
-}
+_DYNAMIC: set[str] = set()
 
 # 앱 코드가 부르지 않는 '휴면' 키 — 지우지 않고 남겨 두는 이유를 적는다.
 _DORMANT = {

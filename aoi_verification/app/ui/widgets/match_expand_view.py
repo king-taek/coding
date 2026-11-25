@@ -106,6 +106,7 @@ class MatchExpandView(QWidget):
 
         # 이미지 영역 ---------------------------------------------------
         self._img = ScalableImage(self)
+        self._img.enable_photo_mouse()             # 더블클릭 = 크게 · 우클릭 = 사진 메뉴(현택님 2026-11-24)
         self._img.set_target_size(self._size_slider.value())
         self._scroll = QScrollArea(self)
         self._scroll.setWidgetResizable(False)

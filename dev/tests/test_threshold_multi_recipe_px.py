@@ -127,7 +127,7 @@ def test_zone_label_shows_recipe_when_multi():
     assert zone_label("Zones", None, 1) == ("Zone 1", "")
     assert zone_label("Zones", None, 1, names, True) == ("Zone 1", "Align")
     assert zone_label("Recipe3-Zones", None, 1, names, True) == ("Zone 1", "x20")
-    assert zone_label("Recipe2-Zones", None, 1, names, True) == ("Zone 1", "레시피 2")
+    assert zone_label("Recipe2-Zones", None, 1, names, True) == ("Zone 1", "Recipe 2")
 
 
 def test_defect_whose_bin_has_no_bundle_is_never_dropped():

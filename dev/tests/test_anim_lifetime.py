@@ -12,7 +12,7 @@
 를 내고, PyQt6 는 슬롯 안의 미처리 예외를 ``qFatal()`` 로 처리하므로 **앱이 그대로
 죽는다**(파이썬 traceback 만 남고 종료).  재현된 두 경로:
 
-- ``ToggleSwitch`` 두 번째 토글        → 구형 모드 on/off 시 강제종료
+- (옛) 커스텀 스위치 두 번째 토글     → 구형 모드 on/off 시 강제종료(스위치는 체크박스로 바뀌어 없어졌다)
 - ``LoadingOverlay`` 두 번째 show_overlay → 실패목록 두 번째 클릭 시 강제종료
 
 ★ 이 테스트는 **모션을 켜야** 재현된다.  ``motion.enabled()`` 는 offscreen 에서 False 를
@@ -39,8 +39,6 @@ from PyQt6.QtWidgets import QApplication, QWidget             # noqa: E402
 from aoi_verification.app.ui import motion                    # noqa: E402
 from aoi_verification.app.ui.widgets.loading_overlay import (  # noqa: E402
     LoadingOverlay)
-from aoi_verification.app.ui.widgets.switch_row import (       # noqa: E402
-    SwitchRow, ToggleSwitch)
 
 _UI_DIR = (Path(__file__).resolve().parents[2] / "aoi_verification" / "app" / "ui")
 
@@ -87,34 +85,6 @@ def _spin(qapp, ms: int) -> None:
     t.start()
     while t.elapsed() < ms:
         qapp.processEvents()
-
-
-# ── 재현 1: 구형 모드 스위치를 두 번 토글 ────────────────────────────────
-def test_toggle_switch_survives_second_toggle(qapp, motion_on):
-    sw = ToggleSwitch(False)
-    sw.resize(48, 28)
-    try:
-        sw._toggle()                       # 1회 — 애니메이션 시작
-        _spin(qapp, 400)                   # dur(140) 을 충분히 넘겨 자연 종료
-        sw._toggle()                       # 2회 — 여기서 죽었다
-        _spin(qapp, 200)
-        assert sw.is_on() is False          # off → on → off
-    finally:
-        sw.deleteLater()
-
-
-def test_switch_row_survives_repeated_toggles(qapp, motion_on):
-    """구형 모드 카드가 실제로 쓰는 형태(SwitchRow)로도 확인."""
-    row = SwitchRow("구형(유사도) 모드", description="설명", checked=False)
-    seen: list[bool] = []
-    row.toggled.connect(seen.append)
-    try:
-        for _ in range(4):
-            row.switch._toggle()
-            _spin(qapp, 300)
-        assert seen == [True, False, True, False]
-    finally:
-        row.deleteLater()
 
 
 # ── 재현 2: 로딩 오버레이를 두 번 표시 ──────────────────────────────────
