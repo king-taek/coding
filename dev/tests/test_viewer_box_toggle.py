@@ -92,3 +92,41 @@ def test_copy_before_original_loaded_waits_on_background_decode(styled_qapp, tmp
     got = QApplication.clipboard().image()
     assert (got.width(), got.height()) == (400, 300)
     v.close()
+
+
+def _count(v, color):
+    im = v._label.pixmap().toImage()
+    want = QColor(color).rgb()
+    return sum(1 for x in range(im.width()) for y in range(im.height())
+               if im.pixelColor(x, y).rgb() == want)
+
+
+def test_box_is_drawn_at_half_size(styled_qapp):
+    """노랑 박스는 Crop 범위의 50% — 같은 중심(`scan_image.mark_box`)."""
+    v = _viewer(styled_qapp, (100, 100, 100, 100))
+    im = v._label.pixmap().toImage()
+    want = QColor(theme.VIEWER_BOX).rgb()
+    xs = [x for x in range(im.width()) for y in range(im.height())
+          if im.pixelColor(x, y).rgb() == want]
+    ys = [y for x in range(im.width()) for y in range(im.height())
+          if im.pixelColor(x, y).rgb() == want]
+    sc = v._scale
+    assert (max(xs) - min(xs)) <= 50 * sc + 4          # 100 → 50 이미지 픽셀(+선 두께)
+    assert (max(xs) - min(xs)) >= 50 * sc - 4
+    assert (max(ys) - min(ys)) >= 50 * sc - 4
+
+
+def test_others_drawn_in_accent_and_toggle_hides_all(styled_qapp):
+    img = QImage(400, 300, QImage.Format.Format_Grayscale8)
+    img.fill(QColor(120, 120, 120))
+    v = FullscreenViewer(Path("scan.jpg"), image=img, overlay=(100, 100, 40, 40),
+                         others=[(100, 100, 40, 40), (250, 150, 40, 40)])
+    v.resize(800, 600)
+    v.show()
+    v._redraw()
+    assert _count(v, theme.VIEWER_BOX) > 0
+    assert _count(v, theme.VIEWER_ACCENT) > 0           # 다른 Defect 박스(고른 것과 같은 범위는 건너뜀)
+    v._btn_box.click()
+    assert _count(v, theme.VIEWER_BOX) == 0 and _count(v, theme.VIEWER_ACCENT) == 0
+    v._btn_box.click()
+    assert _count(v, theme.VIEWER_ACCENT) > 0

@@ -127,6 +127,17 @@ def crop_box(uv, pixel_xy, side_um: float = CROP_SIDE_UM) -> tuple[int, int, int
             cw, ch)
 
 
+def mark_box(box, frac: float = 0.5) -> tuple[int, int, int, int]:
+    """Scan 전체 위에 그리는 Defect 표시 네모 — Crop 범위 ``box`` 와 **중심은 같고** 폭·높이만 ``frac`` 배.
+
+    화면 표시 전용이다 — Crop 범위(:func:`crop_box`) · 잘라내는 크기 · 엑셀은 그대로 둔다.
+    정수 (left, top, w, h), 폭·높이는 최소 1px."""
+    left, top, w, h = box
+    nw, nh = max(1, round(w * frac)), max(1, round(h * frac))
+    cx, cy = left + w / 2.0, top + h / 2.0
+    return (math.floor(cx - nw / 2.0 + 0.5), math.floor(cy - nh / 2.0 + 0.5), nw, nh)
+
+
 def _coverage(box, size_wh) -> float:
     left, top, cw, ch = box
     ix = max(0, min(left + cw, size_wh[0]) - max(left, 0))
