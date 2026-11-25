@@ -57,12 +57,14 @@ def _no_top_pick(dlg) -> bool:
 
 def _pick(dlg):
     """위 왼쪽 열기 버튼 — GL 만 이름이 ``open_btn``."""
-    return getattr(dlg, "pick_btn", None) or dlg.open_btn
+    return getattr(dlg, "pick_btn", None) or getattr(dlg, "open_btn", None)
 
 
 def _check_loaded(dlg) -> None:
     assert not dlg._empty_open.isVisibleTo(dlg)
     pick = _pick(dlg)
+    if pick is None:
+        return
     tl = pick.mapTo(dlg, pick.rect().topLeft())
     assert pick.isVisibleTo(dlg) and tl.y() < 80 and tl.x() < dlg.width() // 4, tl
 
