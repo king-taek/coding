@@ -57,7 +57,13 @@ APP_WORKERS, PAGE_TILES = 3, 60
 CACHE_DIRNAME = ".aoi_verification_cache"
 
 # ── NAS 위치(dev/coord_lab.py nas_default_roots 와 같은 규칙) ───────────────────────────────────
-UNC_SHARES = [r"\\10.142.80.91\nas3-1"]
+UNC_SHARES = [r"\\10.142.80.91\nas3-1", r"\\10.142.80.88\Camtek24-25"]
+# 장비 → 드라이브(AOI-Capacity 프로젝트 assets/devices.default.csv 의 Camtek 장비, 2026-11-25 옮김).  드라이브가
+# 다르게 물려 있어도 아래 '모든 드라이브 훑기' 가 찾는다.  KLA(K1~K6)는 Scanresult 가 없어 뺀다.
+DEVICE_DRIVES = ([(f"AOI-{n}", "X") for n in range(1, 8)] + [(f"AOI-{n}", "M") for n in (8, 9)]
+                 + [(f"AOI-{n}", "V") for n in range(10, 17)] + [(f"AOI-{n}", "P") for n in range(17, 24)]
+                 + [(f"AOI-{n}", "Y") for n in (24, 25)] + [(f"AOI-{n}", "J") for n in range(26, 29)]
+                 + [(f"4F-AOI-0{n}", "I") for n in range(1, 6)])
 CONDER_ROOT = r"\\k5cifsn2\k5tsvdata$\1. Conder Scan"
 CONDER_SKIP_TOP = ("0. 전산",)              # 고객 폴더가 아닌 파일 보관함
 WAFER_MARK = ("colorimagegrabinginfo.ini", "params_waferinfo.ini")
@@ -228,14 +234,24 @@ def nas_roots(extra_bases=()):
     if os.name == "nt":
         bases += [Path(f"{c}:\\") for c in "DEFGHIJKLMNOPQRSTUVWXYZ"] + [Path(u) for u in UNC_SHARES]
     starts, seen = [], set()
+
+    def add(d: Path) -> None:
+        try:
+            sr = next((p for p in (d / "Scanresult", d / "ScanResult", d / "ScanResults") if p.is_dir()), None)
+        except OSError:
+            return
+        if sr is not None and d.name.upper() not in seen:           # 같은 공유가 두 글자로 물려 있다
+            seen.add(d.name.upper())
+            starts.append({"kind": "scanresult", "machine": d.name, "path": str(sr), "fails": 0})
+
+    if os.name == "nt":                                              # 알려진 장비 자리를 먼저(정확 경로만 확인)
+        for name, drive in DEVICE_DRIVES:
+            add(Path(f"{drive}:\\") / name)
     for b in bases:
         try:
-            for d in sorted(b.glob("AOI-*")):
-                sr = next((p for p in (d / "Scanresult", d / "ScanResult", d / "ScanResults")
-                           if p.is_dir()), None)
-                if sr is not None and d.name.upper() not in seen:   # 같은 공유가 두 글자로 물려 있다
-                    seen.add(d.name.upper())
-                    starts.append({"kind": "scanresult", "machine": d.name, "path": str(sr), "fails": 0})
+            for pat in ("AOI-*", "4F-AOI-*"):
+                for d in sorted(b.glob(pat)):
+                    add(d)
         except OSError:
             continue
     conder = None
