@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel, QPushButton,
                              QSizePolicy, QVBoxLayout)
 
@@ -219,6 +219,8 @@ class PairLabelDialog(QDialog):
 
         first = next_unanswered(cands, self._answers)
         self.index = first if first is not None else len(cands) - 1
+        self._bind_keys()
+        self.match_btn.setFocus()
         self._show()
 
     # 화면 갱신
@@ -266,16 +268,15 @@ class PairLabelDialog(QDialog):
     def all_done(self) -> bool:
         return self.done_count >= len(self._cands)
 
-    def keyPressEvent(self, event) -> None:  # noqa: N802
-        key = event.key()
-        if key == Qt.Key.Key_1:
-            self.answer(MATCH)
-        elif key == Qt.Key.Key_2:
-            self.answer(UNKNOWN)
-        elif key == Qt.Key.Key_Backspace:
-            self.go_back()
-        else:
-            super().keyPressEvent(event)
+    def _bind_keys(self) -> None:
+        """1 = 매치, 2 = 모름, Backspace = 뒤로.  시트로 뜨면 이 창이 최상위 창이 아니고 포커스가 제목줄에
+        있을 수 있어 keyPressEvent 로는 키가 안 올 수 있다 — 창 단위 단축키로 받는다(숨으면 꺼진다)."""
+        for key, fn in ((Qt.Key.Key_1, lambda: self.answer(MATCH)),
+                        (Qt.Key.Key_2, lambda: self.answer(UNKNOWN)),
+                        (Qt.Key.Key_Backspace, self.go_back)):
+            sc = QShortcut(QKeySequence(key), self)
+            sc.setContext(Qt.ShortcutContext.WindowShortcut)
+            sc.activated.connect(fn)
 
     def done(self, result: int) -> None:
         """닫는 길이 여럿(끝 · 닫기 · Esc)이라 한 곳에서 zip 을 만든다."""

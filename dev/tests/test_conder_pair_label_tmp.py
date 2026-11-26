@@ -97,6 +97,9 @@ def test_dialog_keys_advance_save_and_back(styled_qapp, tmp_path):
     from PyQt6.QtCore import Qt
     from PyQt6.QtTest import QTest
     mod, dlg, base = _dialog(styled_qapp, tmp_path)
+    dlg.show()                                    # 키는 창 단위 단축키라 창이 떠서 활성이어야 받는다
+    dlg.activateWindow()
+    assert QTest.qWaitForWindowActive(dlg)
     assert dlg._progress.text() == "1 / 3" and "0. LOT (S)" in dlg._meta.text() and "37" not in dlg._meta.text()
     assert not dlg.back_btn.isEnabled()
     QTest.keyClick(dlg, Qt.Key.Key_1)
