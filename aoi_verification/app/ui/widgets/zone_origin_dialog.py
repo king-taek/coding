@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import html
 import logging
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from datetime import datetime
@@ -56,7 +58,7 @@ _KO = i18n.KO
 _INNER_BAR = "border-radius: 6px; margin: 4px 12px 0 12px;"
 
 LOAD_WORKERS = 6            # 웨이퍼를 동시에 읽는 수(Overkill 튜닝과 같다 — NAS 왕복 지연을 겹친다)
-THUMB_WORKERS = 3
+THUMB_WORKERS = 6           # 목록 사진 동시 읽기 수 — 실측 66 LOT: 3→14.4, 6→20.0, 8→22.9 장/초(공유 NAS 라 6 에서 멈춤)
 SCAN_WAIT_MS = 150          # 고른 Defect 에 이만큼 머물면 Scan 을 찾는다(화살표로 지나가는 것은 건너뜀)
 PAGE_TILES = 60
 TILE_PX = 118
@@ -383,7 +385,19 @@ class ZoneOriginDialog(QDialog):
         self._thumb_bus = _ThumbBus(self)
         self._thumb_bus.ready.connect(self._on_thumb)
         self._thumb_pool = ThreadPoolExecutor(max_workers=THUMB_WORKERS, thread_name_prefix="zone-origin-thumb")
+        # 오른쪽 큰 사진은 따로 1명이 받는다 — 목록 60칸 뒤에 줄 서서 5.7초 걸렸다(현택님 PC 실측 2026-11-25, 따로면 0.7초).
+        self._detail_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="zone-origin-detail")
         self._wanted: set = set()
+        # 목록 사진 줄 — 일꾼이 꺼낼 때 화면에 보이는 칸(_hot)의 사진을 먼저 고른다(스크롤 · [더 보기] 뒤에도 보이는 것부터).
+        self._q_lock = threading.Lock()
+        self._queue: list = []
+        self._hot: frozenset = frozenset()
+        self._hot_timer = QTimer(self)
+        self._hot_timer.setSingleShot(True)
+        self._hot_timer.setInterval(40)
+        self._hot_timer.timeout.connect(self._update_hot)
+        self._batch: Optional[dict] = None          # 목록 사진 한 묶음의 걸린 시간 — 다 뜨면 app.log 에 한 줄
+        self._detail_t0: Optional[tuple] = None     # (사진 경로, 요청 시각) — 큰 사진이 뜨면 app.log 에 한 줄
         self._scan_threads: dict = {}       # 찾는 중인 Scan — 같은 Defect 를 두 번 찾지 않는다
         self._scan_viewer = None            # (키, 크게보기 뷰어) — 찾는 중에 연 뷰어에 결과를 넘긴다
         # 화살표를 누르고 있으면 지나가는 Defect 마다 Scan 을 찾으러 갔다(NAS 읽기 수백 개) — 멈춘 Defect 만 찾는다.
@@ -480,6 +494,7 @@ class ZoneOriginDialog(QDialog):
         self.side_scroll.setWidgetResizable(True)
         self.side_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.side_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.side_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)   # 칸을 누른 뒤에도 화살표가 사진을 옮긴다
         sl.addWidget(self.side_scroll)
         body.addWidget(side)
 
@@ -526,11 +541,15 @@ class ZoneOriginDialog(QDialog):
         self.grid_scroll.setWidgetResizable(True)
         self.grid_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.grid_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # 사진을 누르면 키보드가 스크롤 칸으로 가 화살표를 스크롤이 먹었다(사진이 안 옮겨짐) — 이 화면이 받게 한다.
+        self.grid_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.grid_host = QWidget()
         self.grid = QVBoxLayout(self.grid_host)
         self.grid.setContentsMargins(14, 10, 14, 24)
         self.grid.setSpacing(TILE_GAP)
         self.grid_scroll.setWidget(self.grid_host)
+        # 인자 없이 켠다 — valueChanged 의 값(스크롤 위치)이 QTimer.start(ms) 로 들어가 기다림이 수 초가 됐다(Codex 리뷰).
+        self.grid_scroll.verticalScrollBar().valueChanged.connect(lambda _v: self._hot_timer.start())
         self.grid_scroll.viewport().installEventFilter(self)      # 폭이 바뀌면 한 줄 사진 수를 다시 맞춘다
         self._relayout_timer = QTimer(self)
         self._relayout_timer.setSingleShot(True)
@@ -974,6 +993,7 @@ class ZoneOriginDialog(QDialog):
                 v = getattr(self._flags, key)
                 ed.setText(_num_text(v) if v else "")
                 ed.editingFinished.connect(lambda key=key, ed=ed: self._edit_done(key, _float(ed.text())))
+                ed.textEdited.connect(lambda t, key=key: self._edit_done(key, 0.0) if not t.strip() else None)
                 row.addWidget(ed)
                 il.addLayout(row)
                 self.min_edits[key] = ed
@@ -1019,6 +1039,8 @@ class ZoneOriginDialog(QDialog):
             v = getattr(self._flags, key)
             ed.setText("" if v is None else str(v))
             ed.editingFinished.connect(lambda key=key, ed=ed: self._edit_done(key, _int_or_none(ed.text())))
+            # 빈칸은 검사기가 '덜 쓴 값' 으로 봐 editingFinished 가 안 온다 — 지우면 바로 푼다(2026-11-25).
+            ed.textEdited.connect(lambda t, key=key: self._edit_done(key, None) if not t.strip() else None)
             line.addWidget(ed)
             il.addLayout(line)
             self.coord_edits[key] = ed
@@ -1138,10 +1160,12 @@ class ZoneOriginDialog(QDialog):
         self._grp_name = None                 # 마지막으로 그린 묶음 · 줄 — [더 보기] 가 그 뒤에 이어 붙인다
         self._grp_row = None
         self._grp_index = 0
+        self._batch = None
         self._add_tiles(shown)
         self._add_tail()
         self._keep_pos = pos if keep_scroll else 0
         call_later(self, 0, self._restore_scroll)
+        self._hot_timer.start()
 
     def _add_tiles(self, items: list) -> None:
         """타일을 격자 끝에 이어 붙인다(묶음 머리 · 마지막 줄의 빈자리를 이어서 채운다)."""
@@ -1179,6 +1203,7 @@ class ZoneOriginDialog(QDialog):
                 tile.pic.setText(_KO.ZO_NO_PHOTO)
                 tile.pic.setStyleSheet(f"color: {theme.MUTE};")
             elif tile.wait_path is not None:
+                self._batch_add(tile.wait_path)
                 self._want(tile.wait_path, TILE_PX, "thumb")
             if self._sort is not None:
                 tile.set_caption(fmt_num(getattr(it, self._sort[0]), dec.get(self._sort[0], 1)))
@@ -1303,6 +1328,8 @@ class ZoneOriginDialog(QDialog):
         self.info_btn.setEnabled(it.photo is not None)
         # 컬러 사진 — 캐시에 있으면 바로, 없으면 뒤에서
         self.color_pic.clear()
+        # 화살표로 지나간 Defect 의 큰 사진은 더 만들지 않는다 — 안 그러면 줄이 쌓여 목록 사진이 그 뒤로 밀린다.
+        self._wanted = {w for w in self._wanted if w[2] != "mid"}
         if it.photo is None:
             self.color_pic.setText(_KO.ZO_NO_PHOTO)
         else:
@@ -1310,7 +1337,9 @@ class ZoneOriginDialog(QDialog):
             if pm is not None:
                 self.color_pic.setPixmap(pm)
             else:
-                self.color_pic.setText("…")
+                if not self._show_small_detail(it.photo):      # 목록의 작은 사진이 있으면 그걸 먼저(흐렸다가 선명해진다)
+                    self.color_pic.setText("…")
+                self._detail_t0 = (str(it.photo), time.monotonic())
                 self._want(it.photo, DETAIL_PIC, "mid")
         self._show_scan(it)
 
@@ -1366,7 +1395,61 @@ class ZoneOriginDialog(QDialog):
         if key in self._pending:
             return
         self._pending.add(key)
-        self._thumb_pool.submit(self._thumb_job, Path(photo), int(size), kind)
+        if kind == "mid":
+            self._detail_pool.submit(self._thumb_job, Path(photo), int(size), kind)
+            return
+        with self._q_lock:
+            self._queue.append(key)
+        self._thumb_pool.submit(self._thumb_next)       # 맡긴 수만큼 꺼낸다 — 무엇을 꺼낼지는 꺼낼 때 정한다
+
+    def _thumb_next(self) -> None:
+        """워커 스레드 — 줄에서 지금 보이는 칸의 사진을 먼저, 없으면 맨 앞을 꺼내 만든다."""
+        with self._q_lock:
+            if not self._queue:
+                return
+            hot = self._hot
+            j = next((i for i, k in enumerate(self._queue) if k[0] in hot), 0)
+            key = self._queue.pop(j)
+        self._thumb_job(Path(key[0]), key[1], key[2])
+
+    def _update_hot(self) -> None:
+        """화면에 보이는 목록 칸의 사진 경로 — 일꾼이 이것부터 꺼낸다(GUI 스레드에서 새 집합으로 바꿔 끼운다)."""
+        if self._view != "tiles" or not self._tiles:
+            self._hot = frozenset()
+            return
+        top = self.grid_scroll.verticalScrollBar().value()
+        bottom = top + self.grid_scroll.viewport().height()
+        hot = set()
+        for t in self._tiles.values():
+            if t.wait_path is None:
+                continue
+            y = t.mapTo(self.grid_host, QPoint(0, 0)).y()
+            if y + t.height() >= top and y <= bottom:
+                hot.add(str(t.wait_path))
+        self._hot = frozenset(hot)
+
+    def _batch_add(self, photo) -> None:
+        if self._batch is None:
+            self._batch = {"t0": time.monotonic(), "need": set(), "n": 0}
+        self._batch["need"].add(str(photo))
+        self._batch["n"] += 1
+
+    def _batch_done(self, path: str) -> None:
+        b = self._batch
+        if b is None or path not in b["need"]:
+            return
+        b["need"].discard(path)
+        if not b["need"]:
+            _LOG.info("어느 Zone 목록 사진 %d장 %.1f초 (NAS 에서 처음 받은 것만)", b["n"], time.monotonic() - b["t0"])
+            self._batch = None
+
+    def _show_small_detail(self, photo) -> bool:
+        pm = image_io._get_tile_cache().get(_tile_key(photo, TILE_PX))
+        if pm is None:
+            return False
+        self.color_pic.setPixmap(pm.scaled(DETAIL_PIC, DETAIL_PIC, Qt.AspectRatioMode.KeepAspectRatio,
+                                           Qt.TransformationMode.SmoothTransformation))
+        return True
 
     def _thumb_job(self, path: Path, size: int, kind: str) -> None:
         """워커 스레드 — QImage 까지만(QPixmap 은 GUI 스레드에서)."""
@@ -1389,12 +1472,18 @@ class ZoneOriginDialog(QDialog):
         finally:
             if not sent:
                 self._pending.discard(key)
+                if not skipped:                             # 실패도 묶음에서 뺀다(시간 기록이 영영 안 남지 않게)
+                    self._thumb_bus.ready.emit(path, size, kind, None)
                 # 건너뛴 사이 새 그리기가 다시 원했으면(그때는 '이미 하는 중' 이라 안 맡겼다) 여기서 다시 맡긴다.
-                if skipped and key in self._wanted:
+                elif key in self._wanted:
                     self._want(path, size, kind)
 
     def _on_thumb(self, path, size: int, kind: str, img) -> None:
         self._pending.discard((str(path), size, kind))
+        if img is None:                                     # 만들지 못했다 — 자리표시 그대로
+            if kind != "mid":
+                self._batch_done(str(path))
+            return
         pm = QPixmap.fromImage(img)
         cache = image_io._get_tile_cache()
         if kind == "mid":
@@ -1402,11 +1491,19 @@ class ZoneOriginDialog(QDialog):
             it = self.current()
             if it is not None and it.photo is not None and str(it.photo) == str(path):
                 self.color_pic.setPixmap(pm)
+                if self._detail_t0 is not None and self._detail_t0[0] == str(path):
+                    _LOG.info("어느 Zone 오른쪽 큰 사진 %.1f초", time.monotonic() - self._detail_t0[1])
+                    self._detail_t0 = None
             return
         cache.put(_tile_key(path, size), pm)
         for t in self._tiles.values():
             if t.wait_path is not None and str(t.wait_path) == str(path):
                 t.set_pixmap(pm)
+        self._batch_done(str(path))
+        it = self.current()                                 # 큰 사진이 아직이면 방금 온 작은 사진을 먼저 보인다
+        if (it is not None and it.photo is not None and str(it.photo) == str(path)
+                and image_io._get_tile_cache().get(_mid_key(path, DETAIL_PIC)) is None):
+            self._show_small_detail(path)
 
     # ------------------------------------------------------------------ 조작
     def toggle(self, k: str, v) -> None:
@@ -1477,6 +1574,7 @@ class ZoneOriginDialog(QDialog):
         self._add_tiles(self._passed[old:self._shown])
         self._add_tail()
         self._render_bar()
+        self._hot_timer.start()
 
     def _on_table_header(self, col: int) -> None:
         k, _n, d = TABLE_COLS[col]
@@ -1514,11 +1612,15 @@ class ZoneOriginDialog(QDialog):
         elif dx or self._view == "table":
             flat = [k for r in rows for k in r]
             j = flat.index(cur) + (1 if (dx or dy) > 0 else -1)
+            if j >= len(flat) and self._more_for_keys():
+                return self.move_current(dx, dy)
             if not 0 <= j < len(flat):
                 return False
             new = flat[j]
         else:
             ri = pos[0] + (1 if dy > 0 else -1)
+            if ri >= len(rows) and self._more_for_keys():
+                return self.move_current(dx, dy)
             if not 0 <= ri < len(rows):
                 return False
             new = rows[ri][min(pos[1], len(rows[ri]) - 1)]
@@ -1530,6 +1632,13 @@ class ZoneOriginDialog(QDialog):
             self.open_item(new)
             if new in self._tiles:
                 motion.ensure_visible_animated(self.grid_scroll, self.grid_host, self._tiles[new])
+        return True
+
+    def _more_for_keys(self) -> bool:
+        """화살표가 보이는 사진 끝에 닿았다 — 사진 보기이고 남은 게 있으면 [더 보기] 처럼 다음 묶음을 붙인다."""
+        if self._view != "tiles" or len(self._passed) <= self._shown:
+            return False
+        self.more()
         return True
 
     def keyPressEvent(self, e):         # noqa: N802
