@@ -55,20 +55,21 @@ def test_collect_code_lives_only_in_the_listed_places():
         lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if MARK in ln]
         if lines:
             found[path.relative_to(APP).as_posix()] = lines
-    assert set(found) == {"ui/conder_pair_collect_tmp.py", "ui/main_window.py", "i18n/ko.py"}
-    assert len(found["ui/main_window.py"]) == 2
+    assert set(found) == {"ui/conder_pair_collect_tmp.py", "ui/conder_pair_label_tmp.py",
+                          "ui/main_window.py", "i18n/ko.py"}
+    assert len(found["ui/main_window.py"]) == 4          # 수집 버튼 2줄 + 확인 버튼 2줄
     assert all(ln.rstrip().endswith("이 줄 삭제") for ln in found["ui/main_window.py"])
     assert len(found["i18n/ko.py"]) == 2
 
 
 def test_nothing_outside_the_marks_mentions_the_button():
     for path in APP.rglob("*.py"):
-        if path.name == "conder_pair_collect_tmp.py":
+        if path.name in ("conder_pair_collect_tmp.py", "conder_pair_label_tmp.py"):
             continue
         text = path.read_text(encoding="utf-8")
         text = re.sub(r"# ── \[Conder짝수집-임시\] 시작.*?# ── \[Conder짝수집-임시\] 끝[^\n]*", "", text, flags=re.S)
         text = "\n".join(ln for ln in text.splitlines() if MARK not in ln)
-        assert not re.search(r"conder_pair_collect|CPAIR_COLLECT", text), path
+        assert not re.search(r"conder_pair_collect|conder_pair_label|CPAIR_COLLECT|CPAIR_LABEL", text), path
 
 
 def test_strings_used_by_the_button_all_exist():

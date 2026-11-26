@@ -499,6 +499,25 @@ CPAIR_COLLECT_STOPPED = (
 )
 CPAIR_COLLECT_NOTHING = "Conder 폴더를 찾지 못해 결과 파일을 만들지 않았습니다."
 CPAIR_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니다. 잠시 뒤 다시 눌러 주세요."
+CPAIR_LABEL_BUTTON = "Conder 짝 확인"
+CPAIR_LABEL_TITLE = "Conder 짝 확인"
+CPAIR_LABEL_NO_TOOL = "확인 도구나 후보 파일(dev/conder_pair_collect.py · dev/conder_pair_candidates.json)이 없습니다. 개발자 모드에서 claude/project-thread-rgatd7 브랜치로 설치해 주세요."
+CPAIR_LABEL_CSV_NAME = "conder짝_확인.csv"
+CPAIR_LABEL_ZIP_FMT = "conder짝_확인_{hhmm}.zip"
+CPAIR_LABEL_KLA = "KLA"
+CPAIR_LABEL_CAMTEK = "Camtek"
+CPAIR_LABEL_MATCH = "매치"
+CPAIR_LABEL_UNKNOWN = "모름"
+CPAIR_LABEL_BACK = "뒤로"
+CPAIR_LABEL_PHOTO_MISSING = "사진을 찾지 못했습니다"
+CPAIR_LABEL_PROGRESS_FMT = "{n} / {total}"
+CPAIR_LABEL_META_FMT = "{lot} · {wafer} · KLA {kla} → Camtek {camtek}"
+CPAIR_LABEL_SAVE_FAIL_FMT = "저장 실패 · {error}"
+CPAIR_LABEL_DONE_FMT = "다 했습니다. 아래 폴더의 zip 을 올려 주세요.\n{path}"
+CPAIR_LABEL_EARLY_FMT = (
+    "지금까지 {done}/{total} 개를 저장했습니다. 다음에 누르면 이어서 합니다. "
+    "올릴 때는 아래 폴더의 zip 을 올려 주세요.\n{path}"
+)
 # ── [Conder짝수집-임시] 끝 ────────────────────────────────────────────────
 
 # ── 개발자 모드 (메인 화면 Ctrl+Shift+D) ───────────────────────────────────

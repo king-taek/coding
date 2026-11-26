@@ -1,0 +1,4380 @@
+[
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "6. RDL1",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_22.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/6. RDL1/08266F16EWG2/TB500_RDL1_SAO_WFN-RDL1_08266F16EWG2_2_5_27089.3014724495_28177.1107438745_Repassivation Defect.jpg",
+  "dist": 37.7,
+  "offset": [
+   104,
+   -97
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 1
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "38275621EWE6",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/1. RDL4_재리뷰/38275621EWE6/38275621EWE6_2_-2_23_6.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/2. PIDS3/38275621EWE6/R_TB500_LIVE_PI4 - Enhanced_XNN_38275621EWE6_5_1_26747.8044471247_34540.2315728563_Over Sized Bump.jpg",
+  "dist": 29.2,
+  "offset": [
+   92,
+   -86
+  ],
+  "die_kla": [
+   5,
+   1
+  ],
+  "die_camtek": [
+   5,
+   1
+  ],
+  "id": 2
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "57295312EWC1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/1. RDL4/57295312EWC1/57295312EWC1_3_0_7_11.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/2. PIDS3/57295312EWC1/R_TB500_LIVE_PI4 - Enhanced_XNU_57295312EWC1_6_3_22195.3577061821_11961.4727336405_Over Sized Bump.jpg",
+  "dist": 33.1,
+  "offset": [
+   82,
+   -90
+  ],
+  "die_kla": [
+   6,
+   3
+  ],
+  "die_camtek": [
+   6,
+   3
+  ],
+  "id": 3
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/507. TB500INT.546 (XNS)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "4. PIDS5",
+  "wafer": "16285224EWE6",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/507. TB500INT.546 (XNS)/3. RDL3/16285224EWE6/16285224EWE6_0_-1_7_2.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/507. TB500INT.546 (XNS)/4. PIDS5/16285224EWE6/R_TB500_LIVE_PI3 - Enhanced_XNS_16285224EWE6_3_2_23925.1529968248_22276.9000906176_Over Sized Bump.jpg",
+  "dist": 3.4,
+  "offset": [
+   94,
+   -86
+  ],
+  "die_kla": [
+   3,
+   2
+  ],
+  "die_camtek": [
+   3,
+   2
+  ],
+  "id": 4
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P138XMD4",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4_재리뷰/S3H0P138XMD4/S3H0P138XMD4_0_2_23_2.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P138XMD4/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P138XMD4_9_6_Foreign Material_14028_1039.jpg",
+  "dist": 7.2,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   9,
+   6
+  ],
+  "die_camtek": [
+   9,
+   6
+  ],
+  "id": 5
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P077XMD3",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4/S3H0P077XMD3/S3H0P077XMD3_1_0_23_2.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P077XMD3/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P077XMD3_10_4_Foreign Material_9746_10588.jpg",
+  "dist": 5.0,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   10,
+   4
+  ],
+  "die_camtek": [
+   10,
+   4
+  ],
+  "id": 6
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)",
+  "kla_step": "2. RDL4",
+  "camtek_step": "1. SPT",
+  "wafer": "001UZ018XYD4",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)/2. RDL4/001UZ018XYD4/001UZ018XYD4_1_1_7_1.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)/1. SPT/001UZ018XYD4/2D@RE-4DT-TB500-H-M1_0860154PD_BSX-SPT_1001D_001UZ018XYD4_4_4_Foreign Material_16912.4017047297_33771.3151175602.jpg",
+  "dist": 5.5,
+  "offset": [
+   60,
+   -221
+  ],
+  "die_kla": [
+   4,
+   4
+  ],
+  "die_camtek": [
+   4,
+   4
+  ],
+  "id": 7
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00EBX106XYG2",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00EBX106XYG2/00EBX106XYG2_2_2_23_8.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00EBX106XYG2/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00EBX106XYG2_11_6_Repassivation Defect_6744_5812.jpg",
+  "dist": 8.6,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   11,
+   6
+  ],
+  "die_camtek": [
+   11,
+   6
+  ],
+  "id": 8
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)",
+  "kla_step": "7. RDL1",
+  "camtek_step": "8. FS UBM",
+  "wafer": "59335795EWC2",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/7. RDL1/59335795EWC2/59335795EWC2_-1_-3_23_4.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/8. FS UBM/59335795EWC2/R_TB500 LIVE_FS_XNN_59335795EWC2_2_0_Repassivation Defect_21670.6027625836_29660.8382103304.jpg",
+  "dist": 49.6,
+  "offset": [
+   38,
+   -119
+  ],
+  "die_kla": [
+   2,
+   0
+  ],
+  "die_camtek": [
+   2,
+   0
+  ],
+  "id": 9
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P138XMD4",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4/S3H0P138XMD4/S3H0P138XMD4_0_2_31_2.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P138XMD4/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P138XMD4_9_6_Foreign Material_14028_1039.jpg",
+  "dist": 7.2,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   9,
+   6
+  ],
+  "die_camtek": [
+   9,
+   6
+  ],
+  "id": 10
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P017XMF7",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4/S3H0P017XMF7/S3H0P017XMF7_-5_0_7_5.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P017XMF7/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P017XMF7_4_4_Foreign Material_6012_21105.jpg",
+  "dist": 4.1,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   4,
+   4
+  ],
+  "die_camtek": [
+   4,
+   4
+  ],
+  "id": 11
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1200. TB500.INT1183 (KAT)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3M63154XME5",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1200. TB500.INT1183 (KAT)/1. RDL4/S3M63154XME5/S3M63154XME5_1_1_7_5.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1200. TB500.INT1183 (KAT)/2. PIDS3/S3M63154XME5/R_TB500_LIVE_PI4 - Enhanced_KAT-PIDS3_S3M63154XME5_4_4_9860.37709954378_22570.4889177599_Other.jpg",
+  "dist": 47.8,
+  "offset": [
+   88,
+   -89
+  ],
+  "die_kla": [
+   4,
+   4
+  ],
+  "die_camtek": [
+   4,
+   4
+  ],
+  "id": 12
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1200. TB500.INT1183 (KAT)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3M63137XMB0",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1200. TB500.INT1183 (KAT)/1. RDL4/S3M63137XMB0/S3M63137XMB0_-2_0_7_6.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1200. TB500.INT1183 (KAT)/2. PIDS3/S3M63137XMB0/R_TB500_LIVE_PI4 - Enhanced_KAT-PIDS3_S3M63137XMB0_1_3_31009.7603736576_6528.40262992066_Over Sized Bump.jpg",
+  "dist": 1.6,
+  "offset": [
+   88,
+   -89
+  ],
+  "die_kla": [
+   1,
+   3
+  ],
+  "die_camtek": [
+   1,
+   3
+  ],
+  "id": 13
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P102XMB3",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4/S3H0P102XMB3/S3H0P102XMB3_6_0_777_5.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P102XMB3/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P102XMB3_15_4_Foreign Material_9432_24104.jpg",
+  "dist": 12.2,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   15,
+   4
+  ],
+  "die_camtek": [
+   15,
+   4
+  ],
+  "id": 14
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_16.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/2. PIDS3/08266F16EWG2/R_TB500_LIVE_PI4 - Enhanced_WFN-PIDS3_08266F16EWG2_2_5_Over Sized Bump_27331.6359387773_28244.7398026403.jpg",
+  "dist": 59.7,
+  "offset": [
+   85,
+   -89
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 15
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00EBX106XYG2",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00EBX106XYG2/00EBX106XYG2_-2_4_23_4.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00EBX106XYG2/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00EBX106XYG2_7_8_Repassivation Defect_944_5170.jpg",
+  "dist": 32.0,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   7,
+   8
+  ],
+  "die_camtek": [
+   7,
+   8
+  ],
+  "id": 16
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P102XMB3",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4/S3H0P102XMB3/S3H0P102XMB3_6_0_777_5.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P102XMB3/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P102XMB3_15_4_Foreign Material_9424_24138.jpg",
+  "dist": 36.2,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   15,
+   4
+  ],
+  "die_camtek": [
+   15,
+   4
+  ],
+  "id": 17
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "57295312EWC1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/3. RDL3/57295312EWC1/57295312EWC1_3_0_23_1.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/2. PIDS3/57295312EWC1/R_TB500_LIVE_PI4 - Enhanced_XNU_57295312EWC1_6_3_22195.3577061821_11961.4727336405_Over Sized Bump.jpg",
+  "dist": 87.2,
+  "offset": [
+   85,
+   -84
+  ],
+  "die_kla": [
+   6,
+   3
+  ],
+  "die_camtek": [
+   6,
+   3
+  ],
+  "id": 18
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P017XMF7",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4_재리뷰/S3H0P017XMF7/S3H0P017XMF7_-5_0_23_3.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P017XMF7/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P017XMF7_4_4_Foreign Material_6012_21105.jpg",
+  "dist": 4.1,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   4,
+   4
+  ],
+  "die_camtek": [
+   4,
+   4
+  ],
+  "id": 19
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/507. TB500INT.546 (XNS)",
+  "kla_step": "7. RDL1_재리뷰",
+  "camtek_step": "9. FS UBM",
+  "wafer": "16285220EWC4",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/507. TB500INT.546 (XNS)/7. RDL1_재리뷰/16285220EWC4/16285220EWC4_3_-1_7_1.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/507. TB500INT.546 (XNS)/9. FS UBM/16285220EWC4/R_TB500 LIVE_FS_XNS-FS_16285220EWC4_6_2_Repassivation Defect_23685.7003931325_16189.2412729735.jpg",
+  "dist": 21.0,
+  "offset": [
+   20,
+   -138
+  ],
+  "die_kla": [
+   6,
+   2
+  ],
+  "die_camtek": [
+   6,
+   2
+  ],
+  "id": 20
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3 재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3 재리뷰/55305C99EWG1/55305C99EWG1_-1_0_23_6.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/2. PIDS3/55305C99EWG1/R_TB500_LIVE_PI4 - Enhanced_XNM_55305C99EWG1_2_3_12428.0769217977_39056.323147761_Other.jpg",
+  "dist": 55.0,
+  "offset": [
+   -42,
+   35
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 21
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1200. TB500.INT1183 (KAT)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3M63154XME5",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1200. TB500.INT1183 (KAT)/1. RDL4/S3M63154XME5/S3M63154XME5_1_1_7_5.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1200. TB500.INT1183 (KAT)/2. PIDS3/S3M63154XME5/R_TB500_LIVE_PI4 - Enhanced_KAT-PIDS3_S3M63154XME5_4_4_9878.69439062194_22590.2336388647_Other.jpg",
+  "dist": 74.1,
+  "offset": [
+   88,
+   -89
+  ],
+  "die_kla": [
+   4,
+   4
+  ],
+  "die_camtek": [
+   4,
+   4
+  ],
+  "id": 22
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1202. TB500.INT1196 (LYS)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3M9P047XME1",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1202. TB500.INT1196 (LYS)/1. RDL4/S3M9P047XME1/S3M9P047XME1_2_-1_7_2.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1202. TB500.INT1196 (LYS)/2. PIDS3/S3M9P047XME1/R_TB500_LIVE_PI4 - Enhanced_LYS-PIDS3_S3M9P047XME1_5_2_Foreign Material_16611.9037625258_32841.378052729.jpg",
+  "dist": 1.2,
+  "offset": [
+   91,
+   -90
+  ],
+  "die_kla": [
+   5,
+   2
+  ],
+  "die_camtek": [
+   5,
+   2
+  ],
+  "id": 23
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P138XMD4",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/3. RDL3/S3H0P138XMD4/S3H0P138XMD4_3_1_7_2.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P138XMD4/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P138XMD4_12_5_Foreign Material_11957_11080.jpg",
+  "dist": 6.3,
+  "offset": [
+   40,
+   -139
+  ],
+  "die_kla": [
+   12,
+   5
+  ],
+  "die_camtek": [
+   12,
+   5
+  ],
+  "id": 24
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P102XMB3",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4_재리뷰/S3H0P102XMB3/S3H0P102XMB3_6_0_23_3.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P102XMB3/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P102XMB3_15_4_Foreign Material_9432_24104.jpg",
+  "dist": 12.2,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   15,
+   4
+  ],
+  "die_camtek": [
+   15,
+   4
+  ],
+  "id": 25
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "6. RDL1",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_10.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/6. RDL1/08266F16EWG2/TB500_RDL1_SAO_WFN-RDL1_08266F16EWG2_2_5_27336.8782260374_27921.0629357769_Repassivation Defect.jpg",
+  "dist": 68.9,
+  "offset": [
+   104,
+   -97
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 26
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3 재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3 재리뷰/55305C99EWG1/55305C99EWG1_-1_0_23_5.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/2. PIDS3/55305C99EWG1/R_TB500_LIVE_PI4 - Enhanced_XNM_55305C99EWG1_2_3_12278.5463078913_38966.5277017474_Other.jpg",
+  "dist": 107.5,
+  "offset": [
+   -42,
+   35
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 27
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "4. RDL2",
+  "wafer": "08266F15EWC0",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F15EWC0/08266F15EWC0_-1_-3_23_8.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/4. RDL2/08266F15EWC0/TB500_RDL2 - Multi_WFN-RDL2_08266F15EWC0_2_0_4838.40373479278_15815.4119153669_Repassivation Defect.jpg",
+  "dist": 37.2,
+  "offset": [
+   78,
+   -61
+  ],
+  "die_kla": [
+   2,
+   0
+  ],
+  "die_camtek": [
+   2,
+   0
+  ],
+  "id": 28
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "7. RDL1",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/7. RDL1/55305C99EWG1/55305C99EWG1_-1_0_23_5.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_12811.4362567213_39446.6484952499_Repassivation Defect.jpg",
+  "dist": 48.3,
+  "offset": [
+   221,
+   -69
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 29
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P134XMB2",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4/S3H0P134XMB2/S3H0P134XMB2_-2_2_31_4.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P134XMB2/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P134XMB2_7_6_Foreign Material_1879_20454.jpg",
+  "dist": 3.2,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   7,
+   6
+  ],
+  "die_camtek": [
+   7,
+   6
+  ],
+  "id": 30
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3/55305C99EWG1/55305C99EWG1_-1_0_23_39.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_16354.6673642254_40783.6812446494_Repassivation Defect.jpg",
+  "dist": 54.1,
+  "offset": [
+   -199,
+   207
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 31
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00EBX106XYG2",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00EBX106XYG2/00EBX106XYG2_-2_4_23_6.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00EBX106XYG2/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00EBX106XYG2_7_8_Repassivation Defect_819_4609.jpg",
+  "dist": 27.9,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   7,
+   8
+  ],
+  "die_camtek": [
+   7,
+   8
+  ],
+  "id": 32
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "55305C96EWA6",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/1. RDL4/55305C96EWA6/55305C96EWA6_-1_2_23_1.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/2. PIDS3/55305C96EWA6/R_TB500_LIVE_PI4 - Enhanced_XNM_55305C96EWA6_2_5_30301.9746481081_42403.0024171776_Over Sized Bump.jpg",
+  "dist": 44.6,
+  "offset": [
+   87,
+   -90
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 33
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "6. RDL1",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_7.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/6. RDL1/08266F16EWG2/TB500_RDL1_SAO_WFN-RDL1_08266F16EWG2_2_5_27316.9126265082_28088.6408599072_Repassivation Defect.jpg",
+  "dist": 22.7,
+  "offset": [
+   104,
+   -97
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 34
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00EBX113XYF3",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00EBX113XYF3/00EBX113XYF3_-5_2_23_2.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00EBX113XYF3/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00EBX113XYF3_4_6_Repassivation Defect_9231_11698.jpg",
+  "dist": 1.0,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   4,
+   6
+  ],
+  "die_camtek": [
+   4,
+   6
+  ],
+  "id": 35
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)",
+  "kla_step": "7. RDL1",
+  "camtek_step": "8. FS UBM",
+  "wafer": "59335795EWC2",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/7. RDL1/59335795EWC2/59335795EWC2_-1_-3_23_3.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/8. FS UBM/59335795EWC2/R_TB500 LIVE_FS_XNN_59335795EWC2_2_0_Repassivation Defect_21664.6835658111_29562.7486639058.jpg",
+  "dist": 67.8,
+  "offset": [
+   38,
+   -119
+  ],
+  "die_kla": [
+   2,
+   0
+  ],
+  "die_camtek": [
+   2,
+   0
+  ],
+  "id": 36
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)",
+  "kla_step": "4. RDL3 재리뷰",
+  "camtek_step": "3. PIDS3",
+  "wafer": "55305E63EWC2",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)/4. RDL3 재리뷰/55305E63EWC2/55305E63EWC2_1_2_23_57.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)/3. PIDS3/55305E63EWC2/R_TB500_LIVE_PI4 - Enhanced_XNP-PIDS3_55305E63EWC2_4_5_34088.7402764005_13643.774352668_Other.jpg",
+  "dist": 14.6,
+  "offset": [
+   223,
+   6
+  ],
+  "die_kla": [
+   4,
+   5
+  ],
+  "die_camtek": [
+   4,
+   5
+  ],
+  "id": 37
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3S4G012XMG4",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4/S3S4G012XMG4/S3S4G012XMG4_-3_0_14_6.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/2. PIDS3/S3S4G012XMG4/R_TB500_LIVE_PI4 - Enhanced_MAH-PIDS3_S3S4G012XMG4_0_3_12818.1200129592_33471.8306737621_Foreign Material.jpg",
+  "dist": 1.2,
+  "offset": [
+   88,
+   -89
+  ],
+  "die_kla": [
+   0,
+   3
+  ],
+  "die_camtek": [
+   0,
+   3
+  ],
+  "id": 38
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "4. RDL2",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_8.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/4. RDL2/08266F16EWG2/TB500_RDL2 - Multi_WFN-RDL2_08266F16EWG2_2_5_27280.6577477774_28358.1002266287_Repassivation Defect.jpg",
+  "dist": 71.2,
+  "offset": [
+   78,
+   -61
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 39
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00EBX106XYG2",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00EBX106XYG2/00EBX106XYG2_-2_4_23_6.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00EBX106XYG2/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00EBX106XYG2_7_8_Repassivation Defect_817_4499.jpg",
+  "dist": 107.0,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   7,
+   8
+  ],
+  "die_camtek": [
+   7,
+   8
+  ],
+  "id": 40
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-2_-2_23_35.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/2. PIDS3/08266F16EWG2/R_TB500_LIVE_PI4 - Enhanced_WFN-PIDS3_08266F16EWG2_1_1_Foreign Material_9984.84581725442_21639.8132213044.jpg",
+  "dist": 27.2,
+  "offset": [
+   80,
+   -76
+  ],
+  "die_kla": [
+   1,
+   1
+  ],
+  "die_camtek": [
+   1,
+   1
+  ],
+  "id": 41
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "57295312EWC1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/3. RDL3/57295312EWC1/57295312EWC1_0_-1_14_2.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/2. PIDS3/57295312EWC1/R_TB500_LIVE_PI4 - Enhanced_XNU_57295312EWC1_3_2_5990.80161404359_10901.5705683633_Foreign Material.jpg",
+  "dist": 10.3,
+  "offset": [
+   85,
+   -84
+  ],
+  "die_kla": [
+   3,
+   2
+  ],
+  "die_camtek": [
+   3,
+   2
+  ],
+  "id": 42
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P110XME6",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4_재리뷰/S3H0P110XME6/S3H0P110XME6_5_-2_23_6.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P110XME6/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P110XME6_14_2_Foreign Material_7465_14177.jpg",
+  "dist": 2.2,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   14,
+   2
+  ],
+  "die_camtek": [
+   14,
+   2
+  ],
+  "id": 43
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3/55305C99EWG1/55305C99EWG1_-1_0_23_40.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/2. PIDS3/55305C99EWG1/R_TB500_LIVE_PI4 - Enhanced_XNM_55305C99EWG1_2_3_16597.8080601598_40735.4154994529_Other.jpg",
+  "dist": 75.1,
+  "offset": [
+   -42,
+   35
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 44
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3/55305C99EWG1/55305C99EWG1_-1_0_23_33.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_15594.9635682543_40213.5962600484_Repassivation Defect.jpg",
+  "dist": 82.8,
+  "offset": [
+   -199,
+   207
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 45
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3 재리뷰",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3 재리뷰/55305C99EWG1/55305C99EWG1_-1_0_23_31.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_15374.0178859006_40402.9782733495_Repassivation Defect.jpg",
+  "dist": 138.7,
+  "offset": [
+   -199,
+   207
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 46
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3S4G163XMC7",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4_재리뷰/S3S4G163XMC7/S3S4G163XMC7_3_0_23_1.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/2. PIDS3/S3S4G163XMC7/R_TB500_LIVE_PI4 - Enhanced_MAH-PIDS3_S3S4G163XMC7_6_3_9771.5125054536_28747.6691543448_Over Sized Bump.jpg",
+  "dist": 32.8,
+  "offset": [
+   83,
+   -90
+  ],
+  "die_kla": [
+   6,
+   3
+  ],
+  "die_camtek": [
+   6,
+   3
+  ],
+  "id": 47
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "6. RDL1",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_10.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/6. RDL1/08266F16EWG2/TB500_RDL1_SAO_WFN-RDL1_08266F16EWG2_2_5_27216.2012260584_27953.0574672966_Repassivation Defect.jpg",
+  "dist": 69.9,
+  "offset": [
+   179,
+   -122
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 48
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "5. PIDS7",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_8.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/5. PIDS7/08266F16EWG2/R_TB500_LIVE_PI2 - Enhanced_WFN-PIDS7_08266F16EWG2_2_5_Over Sized Bump_27213.9325680649_27980.6431262307.jpg",
+  "dist": 36.3,
+  "offset": [
+   120,
+   -176
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 49
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "6. RDL1",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_2.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/6. RDL1/08266F16EWG2/TB500_RDL1_SAO_WFN-RDL1_08266F16EWG2_2_5_27336.8194782333_28463.5392688664_Repassivation Defect.jpg",
+  "dist": 138.1,
+  "offset": [
+   104,
+   -97
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 50
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00E7H273XYH2",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00E7H273XYH2/00E7H273XYH2_-2_-4_23_26.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00E7H273XYH2/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00E7H273XYH2_7_0_Repassivation Defect_5064_4180.jpg",
+  "dist": 2.0,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   7,
+   0
+  ],
+  "die_camtek": [
+   7,
+   0
+  ],
+  "id": 51
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/507. TB500INT.546 (XNS)",
+  "kla_step": "7. RDL1",
+  "camtek_step": "9. FS UBM",
+  "wafer": "57295600EWB2",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/507. TB500INT.546 (XNS)/7. RDL1/57295600EWB2/57295600EWB2_0_1_7_1.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/507. TB500INT.546 (XNS)/9. FS UBM/57295600EWB2/R_TB500 LIVE_FS_XNS-FS_57295600EWB2_3_4_Repassivation Defect_35470.5731772374_32723.5481901483.jpg",
+  "dist": 3.4,
+  "offset": [
+   20,
+   -138
+  ],
+  "die_kla": [
+   3,
+   4
+  ],
+  "die_camtek": [
+   3,
+   4
+  ],
+  "id": 52
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)",
+  "kla_step": "3. RDL3_재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "61FU5B61EWD7",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/3. RDL3_재리뷰/61FU5B61EWD7/61FU5B61EWD7_-2_1_23_3.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/2. PIDS3/61FU5B61EWD7/R_TB500_LIVE_PI4 - Enhanced_XNU_61FU5B61EWD7_1_4_27719.4360374194_43326.7210689535_Foreign Material.jpg",
+  "dist": 28.9,
+  "offset": [
+   88,
+   -77
+  ],
+  "die_kla": [
+   1,
+   4
+  ],
+  "die_camtek": [
+   1,
+   4
+  ],
+  "id": 53
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P087XMA4",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4_재리뷰/S3H0P087XMA4/S3H0P087XMA4_5_1_23_2.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P087XMA4/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P087XMA4_14_5_Foreign Material_13897_24323.jpg",
+  "dist": 6.1,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   14,
+   5
+  ],
+  "die_camtek": [
+   14,
+   5
+  ],
+  "id": 54
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "38275621EWE6",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/1. RDL4/38275621EWE6/38275621EWE6_2_-2_23_5.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/2. PIDS3/38275621EWE6/R_TB500_LIVE_PI4 - Enhanced_XNN_38275621EWE6_5_1_26737.9413644396_34254.5019212426_Over Sized Bump.jpg",
+  "dist": 77.2,
+  "offset": [
+   91,
+   -91
+  ],
+  "die_kla": [
+   5,
+   1
+  ],
+  "die_camtek": [
+   5,
+   1
+  ],
+  "id": 55
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3 재리뷰",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3 재리뷰/55305C99EWG1/55305C99EWG1_-1_0_9_10.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_12407.4127953335_39265.323673956_Repassivation Defect.jpg",
+  "dist": 31.2,
+  "offset": [
+   -199,
+   207
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 56
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3S4G182XMA2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4/S3S4G182XMA2/S3S4G182XMA2_2_0_23_2.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/2. PIDS3/S3S4G182XMA2/R_TB500_LIVE_PI4 - Enhanced_MAH-PIDS3_S3S4G182XMA2_5_3_12759.7233363133_356.066589123191_Over Sized Bump.jpg",
+  "dist": 57.5,
+  "offset": [
+   88,
+   -89
+  ],
+  "die_kla": [
+   5,
+   3
+  ],
+  "die_camtek": [
+   5,
+   3
+  ],
+  "id": 57
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3 재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3 재리뷰/55305C99EWG1/55305C99EWG1_-1_0_23_33.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/2. PIDS3/55305C99EWG1/R_TB500_LIVE_PI4 - Enhanced_XNM_55305C99EWG1_2_3_16154.1494502661_40023.6394638305_Other.jpg",
+  "dist": 48.4,
+  "offset": [
+   -42,
+   35
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 58
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P074XMF3",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/3. RDL3/S3H0P074XMF3/S3H0P074XMF3_-6_-1_7_2.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P074XMF3/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P074XMF3_3_3_Foreign Material_4661_12845.jpg",
+  "dist": 0.0,
+  "offset": [
+   40,
+   -139
+  ],
+  "die_kla": [
+   3,
+   3
+  ],
+  "die_camtek": [
+   3,
+   3
+  ],
+  "id": 59
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)",
+  "kla_step": "4. RDL3 재리뷰",
+  "camtek_step": "3. PIDS3",
+  "wafer": "55305E63EWC2",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)/4. RDL3 재리뷰/55305E63EWC2/55305E63EWC2_1_2_23_49.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)/3. PIDS3/55305E63EWC2/R_TB500_LIVE_PI4 - Enhanced_XNP-PIDS3_55305E63EWC2_4_5_34088.3548882203_13405.2190690523_Other.jpg",
+  "dist": 72.0,
+  "offset": [
+   223,
+   6
+  ],
+  "die_kla": [
+   4,
+   5
+  ],
+  "die_camtek": [
+   4,
+   5
+  ],
+  "id": 60
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "3. RDL3",
+  "wafer": "S3S4G020XMC4",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4_재리뷰/S3S4G020XMC4/S3S4G020XMC4_-2_-1_23_30.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/3. RDL3/S3S4G020XMC4/TB500_RDL3 - Multi_MAH-RDL3_S3S4G020XMC4_1_2_Repassivation Defect_27145.1140339699_26399.6210533966.jpg",
+  "dist": 45.4,
+  "offset": [
+   -89,
+   -71
+  ],
+  "die_kla": [
+   1,
+   2
+  ],
+  "die_camtek": [
+   1,
+   2
+  ],
+  "id": 61
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1230. TB500.INT1250 (NMT)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "3. RDL3",
+  "wafer": "S3S1V012XMD1",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1230. TB500.INT1250 (NMT)/1. RDL4/S3S1V012XMD1/S3S1V012XMD1_-1_-1_23_1.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1230. TB500.INT1250 (NMT)/3. RDL3/S3S1V012XMD1/TB500_RDL3-Multi_NMT-RDL3_S3S1V012XMD1_2_2_Repassivation Defect_22978.1158677305_42195.3093666083.jpg",
+  "dist": 11.4,
+  "offset": [
+   91,
+   -83
+  ],
+  "die_kla": [
+   2,
+   2
+  ],
+  "die_camtek": [
+   2,
+   2
+  ],
+  "id": 62
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "3. RDL3",
+  "wafer": "S3S4G020XMC4",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4_재리뷰/S3S4G020XMC4/S3S4G020XMC4_-2_-1_23_27.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/3. RDL3/S3S4G020XMC4/TB500_RDL3 - Multi_MAH-RDL3_S3S4G020XMC4_1_2_Repassivation Defect_26935.1783997506_26371.3064678203.jpg",
+  "dist": 66.5,
+  "offset": [
+   -89,
+   -71
+  ],
+  "die_kla": [
+   1,
+   2
+  ],
+  "die_camtek": [
+   1,
+   2
+  ],
+  "id": 63
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)",
+  "kla_step": "2. RDL4",
+  "camtek_step": "3. PIDS 3",
+  "wafer": "001UZ009XYD2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)/2. RDL4/001UZ009XYD2/001UZ009XYD2_0_2_7_4.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)/3. PIDS 3/001UZ009XYD2/R_TB500_LIVE_PI4 - Enhanced_BSX_001UZ009XYD2_3_5_31026.9774446988_6497.40781651672_Over Sized Bump.jpg",
+  "dist": 8.2,
+  "offset": [
+   62,
+   -69
+  ],
+  "die_kla": [
+   3,
+   5
+  ],
+  "die_camtek": [
+   3,
+   5
+  ],
+  "id": 64
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "08266F15EWC0",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F15EWC0/08266F15EWC0_3_0_23_1.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/2. PIDS3/08266F15EWC0/R_TB500_LIVE_PI4 - Enhanced_WFN-PIDS3_08266F15EWC0_6_3_Over Sized Bump_26912.1985524697_33634.6192582607.jpg",
+  "dist": 18.9,
+  "offset": [
+   85,
+   -89
+  ],
+  "die_kla": [
+   6,
+   3
+  ],
+  "die_camtek": [
+   6,
+   3
+  ],
+  "id": 65
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "3. RDL3",
+  "wafer": "S3S4G020XMC4",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4_재리뷰/S3S4G020XMC4/S3S4G020XMC4_-2_-1_23_25.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/3. RDL3/S3S4G020XMC4/TB500_RDL3 - Multi_MAH-RDL3_S3S4G020XMC4_1_2_Repassivation Defect_27006.347516979_26531.2804329536.jpg",
+  "dist": 5.9,
+  "offset": [
+   -89,
+   -71
+  ],
+  "die_kla": [
+   1,
+   2
+  ],
+  "die_camtek": [
+   1,
+   2
+  ],
+  "id": 66
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "08266F15EWC0",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F15EWC0/08266F15EWC0_-1_-3_23_7.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/2. PIDS3/08266F15EWC0/R_TB500_LIVE_PI4 - Enhanced_WFN-PIDS3_08266F15EWC0_2_0_Over Sized Bump_4939.92280358111_15720.1506003255.jpg",
+  "dist": 123.3,
+  "offset": [
+   85,
+   -89
+  ],
+  "die_kla": [
+   2,
+   0
+  ],
+  "die_camtek": [
+   2,
+   0
+  ],
+  "id": 67
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00E7H271XYG1",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00E7H271XYG1/00E7H271XYG1_-5_2_7_2.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00E7H271XYG1/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00E7H271XYG1_4_6_Repassivation Defect_9385_20168.jpg",
+  "dist": 63.7,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   4,
+   6
+  ],
+  "die_camtek": [
+   4,
+   6
+  ],
+  "id": 68
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P030XMH2",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4_재리뷰/S3H0P030XMH2/S3H0P030XMH2_1_0_23_3.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P030XMH2/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P030XMH2_10_4_Foreign Material_7712_24665.jpg",
+  "dist": 4.1,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   10,
+   4
+  ],
+  "die_camtek": [
+   10,
+   4
+  ],
+  "id": 69
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00EA2018XYC7",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00EA2018XYC7/00EA2018XYC7_7_1_23_3.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00EA2018XYC7/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00EA2018XYC7_16_5_Repassivation Defect_4054_10162.jpg",
+  "dist": 9.8,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   16,
+   5
+  ],
+  "die_camtek": [
+   16,
+   5
+  ],
+  "id": 70
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "4. RDL2",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_16.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/4. RDL2/08266F16EWG2/TB500_RDL2 - Multi_WFN-RDL2_08266F16EWG2_2_5_27249.9881198375_28264.9156862941_Repassivation Defect.jpg",
+  "dist": 36.2,
+  "offset": [
+   40,
+   -79
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 71
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3 재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3 재리뷰/55305C99EWG1/55305C99EWG1_-1_0_9_18.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/2. PIDS3/55305C99EWG1/R_TB500_LIVE_PI4 - Enhanced_XNM_55305C99EWG1_2_3_12968.0057622177_39326.865650343_Other.jpg",
+  "dist": 104.9,
+  "offset": [
+   -42,
+   35
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 72
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "55305D02EWB3",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/1. RDL4/55305D02EWB3/55305D02EWB3_-1_0_23_1.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/2. PIDS3/55305D02EWB3/R_TB500_LIVE_PI4 - Enhanced_XNM_55305D02EWB3_2_3_13486.7883440453_16757.2161732927_Over Sized Bump.jpg",
+  "dist": 37.8,
+  "offset": [
+   87,
+   -90
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 73
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)",
+  "kla_step": "7. RDL1",
+  "camtek_step": "8. FS UBM",
+  "wafer": "59335795EWC2",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/7. RDL1/59335795EWC2/59335795EWC2_-1_-3_23_3.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/8. FS UBM/59335795EWC2/R_TB500 LIVE_FS_XNN_59335795EWC2_2_0_Repassivation Defect_21733.5999282335_29540.7630759141.jpg",
+  "dist": 26.4,
+  "offset": [
+   38,
+   -119
+  ],
+  "die_kla": [
+   2,
+   0
+  ],
+  "die_camtek": [
+   2,
+   0
+  ],
+  "id": 74
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "4. RDL2",
+  "wafer": "08266F15EWC0",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F15EWC0/08266F15EWC0_-1_-3_23_8.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/4. RDL2/08266F15EWC0/TB500_RDL2 - Multi_WFN-RDL2_08266F15EWC0_2_0_4717.53797824393_15815.4119153669_Repassivation Defect.jpg",
+  "dist": 34.1,
+  "offset": [
+   40,
+   -79
+  ],
+  "die_kla": [
+   2,
+   0
+  ],
+  "die_camtek": [
+   2,
+   0
+  ],
+  "id": 75
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "6. RDL1",
+  "wafer": "08266F15EWC0",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F15EWC0/08266F15EWC0_-1_-3_23_6.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/6. RDL1/08266F15EWC0/TB500_RDL1_SAO_WFN-RDL1_08266F15EWC0_2_0_4792.25497001188_15700.3029449256_Repassivation Defect.jpg",
+  "dist": 42.7,
+  "offset": [
+   179,
+   -122
+  ],
+  "die_kla": [
+   2,
+   0
+  ],
+  "die_camtek": [
+   2,
+   0
+  ],
+  "id": 76
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)",
+  "kla_step": "2. RDL4",
+  "camtek_step": "1. SPT",
+  "wafer": "001UZ075XYD0",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)/2. RDL4/001UZ075XYD0/001UZ075XYD0_-1_0_23_2.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)/1. SPT/001UZ075XYD0/2D@RE-4DT-TB500-H-M1_0860154PD_BSX-SPT_1001D_001UZ075XYD0_2_3_Foreign Material_30053.7608058972_23179.2637157588.jpg",
+  "dist": 143.1,
+  "offset": [
+   60,
+   -221
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 77
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "6. RDL1",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_12.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/6. RDL1/08266F16EWG2/TB500_RDL1_SAO_WFN-RDL1_08266F16EWG2_2_5_27316.0818915738_28235.5782253329_Repassivation Defect.jpg",
+  "dist": 15.6,
+  "offset": [
+   179,
+   -122
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 78
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1230. TB500.INT1250 (NMT)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "3. RDL3",
+  "wafer": "S3S1V097XMB3",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1230. TB500.INT1250 (NMT)/1. RDL4_재리뷰/S3S1V097XMB3/S3S1V097XMB3_1_-3_23_2.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1230. TB500.INT1250 (NMT)/3. RDL3/S3S1V097XMB3/TB500_RDL3-Multi_NMT-RDL3_S3S1V097XMB3_4_0_Repassivation Defect_13580.5474572619_19205.2031249489.jpg",
+  "dist": 2.3,
+  "offset": [
+   91,
+   -83
+  ],
+  "die_kla": [
+   4,
+   0
+  ],
+  "die_camtek": [
+   4,
+   0
+  ],
+  "id": 79
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3/55305C99EWG1/55305C99EWG1_-1_0_23_38.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/2. PIDS3/55305C99EWG1/R_TB500_LIVE_PI4 - Enhanced_XNM_55305C99EWG1_2_3_16538.0728922332_40885.7168897762_Other.jpg",
+  "dist": 52.1,
+  "offset": [
+   -42,
+   35
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 80
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)",
+  "kla_step": "3. RDL3_재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "61FU5B61EWD7",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/3. RDL3_재리뷰/61FU5B61EWD7/61FU5B61EWD7_-2_1_23_2.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/2. PIDS3/61FU5B61EWD7/R_TB500_LIVE_PI4 - Enhanced_XNU_61FU5B61EWD7_1_4_27675.7550399697_43303.1353123182_Foreign Material.jpg",
+  "dist": 62.3,
+  "offset": [
+   88,
+   -77
+  ],
+  "die_kla": [
+   1,
+   4
+  ],
+  "die_camtek": [
+   1,
+   4
+  ],
+  "id": 81
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "38275621EWE6",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/1. RDL4_재리뷰/38275621EWE6/38275621EWE6_2_-2_23_10.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/2. PIDS3/38275621EWE6/R_TB500_LIVE_PI4 - Enhanced_XNN_38275621EWE6_5_1_26483.9413115777_34709.2739199013_Over Sized Bump.jpg",
+  "dist": 107.9,
+  "offset": [
+   92,
+   -86
+  ],
+  "die_kla": [
+   5,
+   1
+  ],
+  "die_camtek": [
+   5,
+   1
+  ],
+  "id": 82
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "5. PIDS7",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_10.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/5. PIDS7/08266F16EWG2/R_TB500_LIVE_PI2 - Enhanced_WFN-PIDS7_08266F16EWG2_2_5_Over Sized Bump_27171.3028357109_27948.4891054181.jpg",
+  "dist": 39.6,
+  "offset": [
+   120,
+   -176
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 83
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3/55305C99EWG1/55305C99EWG1_-1_0_23_3.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/2. PIDS3/55305C99EWG1/R_TB500_LIVE_PI4 - Enhanced_XNM_55305C99EWG1_2_3_12169.7330939437_39412.011067427_Other.jpg",
+  "dist": 88.7,
+  "offset": [
+   -42,
+   35
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 84
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3S4G163XMC7",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4_재리뷰/S3S4G163XMC7/S3S4G163XMC7_3_0_23_1.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/2. PIDS3/S3S4G163XMC7/R_TB500_LIVE_PI4 - Enhanced_MAH-PIDS3_S3S4G163XMC7_6_3_9772.02224510943_28747.6768092259_Over Sized Bump.jpg",
+  "dist": 33.3,
+  "offset": [
+   83,
+   -90
+  ],
+  "die_kla": [
+   6,
+   3
+  ],
+  "die_camtek": [
+   6,
+   3
+  ],
+  "id": 85
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "57295308EWB0",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/1. RDL4/57295308EWB0/57295308EWB0_0_1_23_3.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/2. PIDS3/57295308EWB0/R_TB500_LIVE_PI4 - Enhanced_XNU_57295308EWB0_3_4_2009.29116342217_35475.9732696679_Over Sized Bump.jpg",
+  "dist": 13.3,
+  "offset": [
+   82,
+   -90
+  ],
+  "die_kla": [
+   3,
+   4
+  ],
+  "die_camtek": [
+   3,
+   4
+  ],
+  "id": 86
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "61FU5B61EWD7",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/3. RDL3/61FU5B61EWD7/61FU5B61EWD7_-2_1_23_4.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/2. PIDS3/61FU5B61EWD7/R_TB500_LIVE_PI4 - Enhanced_XNU_61FU5B61EWD7_1_4_27719.4360374194_43326.7210689535_Foreign Material.jpg",
+  "dist": 30.9,
+  "offset": [
+   85,
+   -84
+  ],
+  "die_kla": [
+   1,
+   4
+  ],
+  "die_camtek": [
+   1,
+   4
+  ],
+  "id": 87
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00EBX121XYB3",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00EBX121XYB3/00EBX121XYB3_0_3_23_4.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00EBX121XYB3/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00EBX121XYB3_9_7_Repassivation Defect_6716_14675.jpg",
+  "dist": 2.2,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   9,
+   7
+  ],
+  "die_camtek": [
+   9,
+   7
+  ],
+  "id": 88
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/504. TB500INT.547 (XNT)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "61FU5C13EWD6",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/504. TB500INT.547 (XNT)/1. RDL4_재리뷰/61FU5C13EWD6/61FU5C13EWD6_0_-3_23_2.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/504. TB500INT.547 (XNT)/2. PIDS3/61FU5C13EWD6/R_TB500_LIVE_PI4 - Enhanced_XNT-PIDS3_61FU5C13EWD6_3_0_12092.2372624697_2647.3702916624_Over Sized Bump.jpg",
+  "dist": 30.2,
+  "offset": [
+   83,
+   -93
+  ],
+  "die_kla": [
+   3,
+   0
+  ],
+  "die_camtek": [
+   3,
+   0
+  ],
+  "id": 89
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1230. TB500.INT1250 (NMT)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3S1V097XMB3",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1230. TB500.INT1250 (NMT)/1. RDL4_재리뷰/S3S1V097XMB3/S3S1V097XMB3_-1_2_23_3.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1230. TB500.INT1250 (NMT)/2. PIDS3/S3S1V097XMB3/R_TB500_LIVE_PI4 - Enhanced_NMT-PIDS3_S3S1V097XMB3_2_5_31933.5526922764_7043.76043497147_Over Sized Bump.jpg",
+  "dist": 7.8,
+  "offset": [
+   86,
+   -86
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 90
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P055XMA5",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/3. RDL3/S3H0P055XMA5/S3H0P055XMA5_-2_4_7_1.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P055XMA5/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P055XMA5_7_8_Foreign Material_4970_30001.jpg",
+  "dist": 21.8,
+  "offset": [
+   40,
+   -139
+  ],
+  "die_kla": [
+   7,
+   8
+  ],
+  "die_camtek": [
+   7,
+   8
+  ],
+  "id": 91
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "5. PIDS7",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_23_11.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/5. PIDS7/08266F16EWG2/R_TB500_LIVE_PI2 - Enhanced_WFN-PIDS7_08266F16EWG2_2_5_Over Sized Bump_27141.8571152924_28246.9697228018.jpg",
+  "dist": 79.4,
+  "offset": [
+   120,
+   -176
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 92
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P134XMB2",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4_재리뷰/S3H0P134XMB2/S3H0P134XMB2_-2_2_23_3.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P134XMB2/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P134XMB2_7_6_Foreign Material_1879_20454.jpg",
+  "dist": 3.2,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   7,
+   6
+  ],
+  "die_camtek": [
+   7,
+   6
+  ],
+  "id": 93
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00EBX121XYB3",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00EBX121XYB3/00EBX121XYB3_1_-2_23_15.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00EBX121XYB3/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00EBX121XYB3_10_2_Repassivation Defect_7236_16015.jpg",
+  "dist": 18.2,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   10,
+   2
+  ],
+  "die_camtek": [
+   10,
+   2
+  ],
+  "id": 94
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "6. RDL1",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_23_11.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/6. RDL1/08266F16EWG2/TB500_RDL1_SAO_WFN-RDL1_08266F16EWG2_2_5_27244.7133765986_28432.3329218715_Repassivation Defect.jpg",
+  "dist": 113.3,
+  "offset": [
+   179,
+   -122
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 95
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)",
+  "kla_step": "4. RDL3 재리뷰",
+  "camtek_step": "3. PIDS3",
+  "wafer": "55305E63EWC2",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)/4. RDL3 재리뷰/55305E63EWC2/55305E63EWC2_1_2_23_46.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)/3. PIDS3/55305E63EWC2/R_TB500_LIVE_PI4 - Enhanced_XNP-PIDS3_55305E63EWC2_4_5_34238.6562784871_13195.5678989603_Other.jpg",
+  "dist": 137.4,
+  "offset": [
+   223,
+   6
+  ],
+  "die_kla": [
+   4,
+   5
+  ],
+  "die_camtek": [
+   4,
+   5
+  ],
+  "id": 96
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "7. RDL1",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/7. RDL1/55305C99EWG1/55305C99EWG1_-1_0_23_7.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_15784.2117871382_40973.833103533_Repassivation Defect.jpg",
+  "dist": 145.3,
+  "offset": [
+   221,
+   -69
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 97
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1230. TB500.INT1250 (NMT)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3RNW087XMB2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1230. TB500.INT1250 (NMT)/1. RDL4_재리뷰/S3RNW087XMB2/S3RNW087XMB2_-1_-3_23_3.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1230. TB500.INT1250 (NMT)/2. PIDS3/S3RNW087XMB2/R_TB500_LIVE_PI4 - Enhanced_NMT-PIDS3_S3RNW087XMB2_2_0_35221.6524548155_38006.4099137892_Over Sized Bump.jpg",
+  "dist": 5.1,
+  "offset": [
+   86,
+   -86
+  ],
+  "die_kla": [
+   2,
+   0
+  ],
+  "die_camtek": [
+   2,
+   0
+  ],
+  "id": 98
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "5. PIDS7",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_7.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/5. PIDS7/08266F16EWG2/R_TB500_LIVE_PI2 - Enhanced_WFN-PIDS7_08266F16EWG2_2_5_Over Sized Bump_27154.3706651871_28132.177500911.jpg",
+  "dist": 17.3,
+  "offset": [
+   120,
+   -176
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 99
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1202. TB500.INT1196 (LYS)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3M9P158XME5",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1202. TB500.INT1196 (LYS)/1. RDL4/S3M9P158XME5/S3M9P158XME5_-2_-1_7_1.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1202. TB500.INT1196 (LYS)/2. PIDS3/S3M9P158XME5/R_TB500_LIVE_PI4 - Enhanced_LYS-PIDS3_S3M9P158XME5_1_2_Over Sized Bump_12395.7353289399_18079.826120424.jpg",
+  "dist": 39.2,
+  "offset": [
+   91,
+   -90
+  ],
+  "die_kla": [
+   1,
+   2
+  ],
+  "die_camtek": [
+   1,
+   2
+  ],
+  "id": 100
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "4. RDL2",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_16.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/4. RDL2/08266F16EWG2/TB500_RDL2 - Multi_WFN-RDL2_08266F16EWG2_2_5_27249.8639244529_28296.897502818_Repassivation Defect.jpg",
+  "dist": 65.4,
+  "offset": [
+   40,
+   -79
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 101
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "3. RDL3",
+  "wafer": "S3S4G020XMC4",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4_재리뷰/S3S4G020XMC4/S3S4G020XMC4_-2_-1_23_19.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/3. RDL3/S3S4G020XMC4/TB500_RDL3 - Multi_MAH-RDL3_S3S4G020XMC4_1_2_Repassivation Defect_26823.2975073078_26007.9362236356.jpg",
+  "dist": 43.3,
+  "offset": [
+   -89,
+   -71
+  ],
+  "die_kla": [
+   1,
+   2
+  ],
+  "die_camtek": [
+   1,
+   2
+  ],
+  "id": 102
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/504. TB500INT.547 (XNT)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "61FU5C16EWB6",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/504. TB500INT.547 (XNT)/1. RDL4_재리뷰/61FU5C16EWB6/61FU5C16EWB6_-1_0_23_3.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/504. TB500INT.547 (XNT)/2. PIDS3/61FU5C16EWB6/R_TB500_LIVE_PI4 - Enhanced_XNT-PIDS3_61FU5C16EWB6_2_3_15967.8630721772_21009.8810411312_Over Sized Bump.jpg",
+  "dist": 0.9,
+  "offset": [
+   83,
+   -93
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 103
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "38275621EWE6",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/1. RDL4/38275621EWE6/38275621EWE6_2_-2_23_5.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/2. PIDS3/38275621EWE6/R_TB500_LIVE_PI4 - Enhanced_XNN_38275621EWE6_5_1_26788.6646896016_34324.9085482873_Over Sized Bump.jpg",
+  "dist": 9.7,
+  "offset": [
+   91,
+   -91
+  ],
+  "die_kla": [
+   5,
+   1
+  ],
+  "die_camtek": [
+   5,
+   1
+  ],
+  "id": 104
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P030XMH2",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4/S3H0P030XMH2/S3H0P030XMH2_1_0_23_5.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P030XMH2/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P030XMH2_10_4_Foreign Material_7712_24665.jpg",
+  "dist": 4.1,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   10,
+   4
+  ],
+  "die_camtek": [
+   10,
+   4
+  ],
+  "id": 105
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3 재리뷰",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3 재리뷰/55305C99EWG1/55305C99EWG1_-1_0_9_17.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_12707.1221802093_39701.8523058569_Repassivation Defect.jpg",
+  "dist": 29.4,
+  "offset": [
+   -199,
+   207
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 106
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3/55305C99EWG1/55305C99EWG1_-1_0_23_19.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_12811.4362567213_39446.6484952499_Repassivation Defect.jpg",
+  "dist": 102.7,
+  "offset": [
+   -199,
+   207
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 107
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3 재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3 재리뷰/55305C99EWG1/55305C99EWG1_-1_0_23_36.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/2. PIDS3/55305C99EWG1/R_TB500_LIVE_PI4 - Enhanced_XNM_55305C99EWG1_2_3_16417.4463918396_41006.3433902152_Other.jpg",
+  "dist": 93.0,
+  "offset": [
+   -42,
+   35
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 108
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P074XMF3",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/3. RDL3/S3H0P074XMF3/S3H0P074XMF3_-6_-1_7_5.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P074XMF3/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P074XMF3_3_3_Foreign Material_4627_12956.jpg",
+  "dist": 30.8,
+  "offset": [
+   40,
+   -139
+  ],
+  "die_kla": [
+   3,
+   3
+  ],
+  "die_camtek": [
+   3,
+   3
+  ],
+  "id": 109
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P110XME6",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4_재리뷰/S3H0P110XME6/S3H0P110XME6_-4_2_23_3.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P110XME6/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P110XME6_5_6_Foreign Material_4111_24648.jpg",
+  "dist": 5.1,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   5,
+   6
+  ],
+  "die_camtek": [
+   5,
+   6
+  ],
+  "id": 110
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "4. RDL2",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_10.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/4. RDL2/08266F16EWG2/TB500_RDL2 - Multi_WFN-RDL2_08266F16EWG2_2_5_27180.3170945657_28042.0453901531_Repassivation Defect.jpg",
+  "dist": 49.8,
+  "offset": [
+   40,
+   -79
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 111
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P138XMD4",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4/S3H0P138XMD4/S3H0P138XMD4_3_1_31_3.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P138XMD4/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P138XMD4_12_5_Foreign Material_11957_11080.jpg",
+  "dist": 1.0,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   12,
+   5
+  ],
+  "die_camtek": [
+   12,
+   5
+  ],
+  "id": 112
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00E7H271XYG1",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00E7H271XYG1/00E7H271XYG1_-9_1_23_15.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00E7H271XYG1/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00E7H271XYG1_0_5_Repassivation Defect_9354_26320.jpg",
+  "dist": 2.0,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   0,
+   5
+  ],
+  "die_camtek": [
+   0,
+   5
+  ],
+  "id": 113
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3S4G022XMD5",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4/S3S4G022XMD5/S3S4G022XMD5_-1_-2_7_28.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/2. PIDS3/S3S4G022XMD5/R_TB500_LIVE_PI4 - Enhanced_MAH-PIDS3_S3S4G022XMD5_2_1_28335.4451268739_14794.9491903698_Over Sized Bump.jpg",
+  "dist": 34.5,
+  "offset": [
+   88,
+   -89
+  ],
+  "die_kla": [
+   2,
+   1
+  ],
+  "die_camtek": [
+   2,
+   1
+  ],
+  "id": 114
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00E7H271XYG1",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00E7H271XYG1/00E7H271XYG1_-5_2_7_2.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00E7H271XYG1/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00E7H271XYG1_4_6_Repassivation Defect_9264_20197.jpg",
+  "dist": 76.5,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   4,
+   6
+  ],
+  "die_camtek": [
+   4,
+   6
+  ],
+  "id": 115
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "5. PIDS7",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_10.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/5. PIDS7/08266F16EWG2/R_TB500_LIVE_PI2 - Enhanced_WFN-PIDS7_08266F16EWG2_2_5_Over Sized Bump_27191.1094185822_27805.23462095.jpg",
+  "dist": 38.9,
+  "offset": [
+   59,
+   -220
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 116
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "57295312EWC1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/3. RDL3/57295312EWC1/57295312EWC1_3_0_23_1.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/2. PIDS3/57295312EWC1/R_TB500_LIVE_PI4 - Enhanced_XNU_57295312EWC1_6_3_22078.6448018252_12018.8623000003_Over Sized Bump.jpg",
+  "dist": 51.8,
+  "offset": [
+   85,
+   -84
+  ],
+  "die_kla": [
+   6,
+   3
+  ],
+  "die_camtek": [
+   6,
+   3
+  ],
+  "id": 117
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P137XMG5",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4/S3H0P137XMG5/S3H0P137XMG5_4_0_31_5.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P137XMG5/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P137XMG5_13_4_Foreign Material_1288_28970.jpg",
+  "dist": 13.5,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   13,
+   4
+  ],
+  "die_camtek": [
+   13,
+   4
+  ],
+  "id": 118
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)",
+  "kla_step": "2. RDL4",
+  "camtek_step": "3. PIDS 3",
+  "wafer": "001UZ007XYC1",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)/2. RDL4/001UZ007XYC1/001UZ007XYC1_0_2_7_1.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)/3. PIDS 3/001UZ007XYC1/R_TB500_LIVE_PI4 - Enhanced_BSX_001UZ007XYC1_3_5_31560.2807848756_2653.16398960176_Over Sized Bump.jpg",
+  "dist": 71.9,
+  "offset": [
+   62,
+   -69
+  ],
+  "die_kla": [
+   3,
+   5
+  ],
+  "die_camtek": [
+   3,
+   5
+  ],
+  "id": 119
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "3. RDL3",
+  "wafer": "S3S4G020XMC4",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4_재리뷰/S3S4G020XMC4/S3S4G020XMC4_-2_-1_23_9.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/3. RDL3/S3S4G020XMC4/TB500_RDL3 - Multi_MAH-RDL3_S3S4G020XMC4_1_2_Repassivation Defect_26626.1026822184_26138.1921942201.jpg",
+  "dist": 23.5,
+  "offset": [
+   -89,
+   -71
+  ],
+  "die_kla": [
+   1,
+   2
+  ],
+  "die_camtek": [
+   1,
+   2
+  ],
+  "id": 120
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "6. RDL1",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_5.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/6. RDL1/08266F16EWG2/TB500_RDL1_SAO_WFN-RDL1_08266F16EWG2_2_5_27410.139771781_28251.3050566047_Repassivation Defect.jpg",
+  "dist": 54.2,
+  "offset": [
+   104,
+   -97
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 121
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3/55305C99EWG1/55305C99EWG1_-1_0_23_18.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/2. PIDS3/55305C99EWG1/R_TB500_LIVE_PI4 - Enhanced_XNM_55305C99EWG1_2_3_12847.8728027575_39535.7361427757_Other.jpg",
+  "dist": 26.7,
+  "offset": [
+   -42,
+   35
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 122
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P087XMA4",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4/S3H0P087XMA4/S3H0P087XMA4_5_1_23_3.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P087XMA4/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P087XMA4_14_5_Foreign Material_13897_24323.jpg",
+  "dist": 6.1,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   14,
+   5
+  ],
+  "die_camtek": [
+   14,
+   5
+  ],
+  "id": 123
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "7. RDL1",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/7. RDL1/55305C99EWG1/55305C99EWG1_-1_0_23_8.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_15635.3804613677_40239.386087063_Repassivation Defect.jpg",
+  "dist": 93.0,
+  "offset": [
+   221,
+   -69
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 124
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "5. PIDS7",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_2.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/5. PIDS7/08266F16EWG2/R_TB500_LIVE_PI2 - Enhanced_WFN-PIDS7_08266F16EWG2_2_5_Over Sized Bump_27434.28353092_28292.4511869762.jpg",
+  "dist": 108.4,
+  "offset": [
+   59,
+   -220
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 125
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "5. PIDS7",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_23_11.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/5. PIDS7/08266F16EWG2/R_TB500_LIVE_PI2 - Enhanced_WFN-PIDS7_08266F16EWG2_2_5_Over Sized Bump_27255.374702161_28323.9747545904.jpg",
+  "dist": 65.5,
+  "offset": [
+   120,
+   -176
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 126
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P077XMD3",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/3. RDL3/S3H0P077XMD3/S3H0P077XMD3_1_0_3_1.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P077XMD3/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P077XMD3_10_4_Foreign Material_9746_10588.jpg",
+  "dist": 15.6,
+  "offset": [
+   40,
+   -139
+  ],
+  "die_kla": [
+   10,
+   4
+  ],
+  "die_camtek": [
+   10,
+   4
+  ],
+  "id": 127
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3 재리뷰",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3 재리뷰/55305C99EWG1/55305C99EWG1_-1_0_23_34.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_16355.052287017_40973.833103533_Repassivation Defect.jpg",
+  "dist": 16.2,
+  "offset": [
+   -199,
+   207
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 128
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)",
+  "kla_step": "4. RDL3 재리뷰",
+  "camtek_step": "3. PIDS3",
+  "wafer": "55305E63EWC2",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)/4. RDL3 재리뷰/55305E63EWC2/55305E63EWC2_1_2_23_62.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)/3. PIDS3/55305E63EWC2/R_TB500_LIVE_PI4 - Enhanced_XNP-PIDS3_55305E63EWC2_4_5_33935.3557806923_13632.9834836191_Other.jpg",
+  "dist": 45.1,
+  "offset": [
+   223,
+   6
+  ],
+  "die_kla": [
+   4,
+   5
+  ],
+  "die_camtek": [
+   4,
+   5
+  ],
+  "id": 129
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00EAP100XYE2",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00EAP100XYE2/00EAP100XYE2_3_2_23_1.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00EAP100XYE2/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00EAP100XYE2_12_6_Repassivation Defect_12391_17885.jpg",
+  "dist": 0.0,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   12,
+   6
+  ],
+  "die_camtek": [
+   12,
+   6
+  ],
+  "id": 130
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00EAP105XYD3",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00EAP105XYD3/00EAP105XYD3_-5_1_23_7.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00EAP105XYD3/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00EAP105XYD3_4_5_Repassivation Defect_1299_17875.jpg",
+  "dist": 2.2,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   4,
+   5
+  ],
+  "die_camtek": [
+   4,
+   5
+  ],
+  "id": 131
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00E7H273XYH2",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00E7H273XYH2/00E7H273XYH2_2_-4_23_25.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00E7H273XYH2/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00E7H273XYH2_11_0_Repassivation Defect_12388_1610.jpg",
+  "dist": 2.8,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   11,
+   0
+  ],
+  "die_camtek": [
+   11,
+   0
+  ],
+  "id": 132
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P055XMA5",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/3. RDL3/S3H0P055XMA5/S3H0P055XMA5_-2_4_7_1.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P055XMA5/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P055XMA5_7_8_Foreign Material_4939_30038.jpg",
+  "dist": 29.7,
+  "offset": [
+   40,
+   -139
+  ],
+  "die_kla": [
+   7,
+   8
+  ],
+  "die_camtek": [
+   7,
+   8
+  ],
+  "id": 133
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "3. RDL3",
+  "wafer": "S3S4G020XMC4",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4/S3S4G020XMC4/S3S4G020XMC4_-2_-1_23_24.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/3. RDL3/S3S4G020XMC4/TB500_RDL3 - Multi_MAH-RDL3_S3S4G020XMC4_1_2_Repassivation Defect_26823.2975073078_26007.9362236356.jpg",
+  "dist": 43.3,
+  "offset": [
+   -89,
+   -71
+  ],
+  "die_kla": [
+   1,
+   2
+  ],
+  "die_camtek": [
+   1,
+   2
+  ],
+  "id": 134
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "6. RDL1",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_2.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/6. RDL1/08266F16EWG2/TB500_RDL1_SAO_WFN-RDL1_08266F16EWG2_2_5_27405.0159772268_28358.8815713188_Repassivation Defect.jpg",
+  "dist": 18.1,
+  "offset": [
+   104,
+   -97
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 135
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "3. RDL3",
+  "wafer": "S3S4G020XMC4",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4/S3S4G020XMC4/S3S4G020XMC4_-2_-1_23_37.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/3. RDL3/S3S4G020XMC4/TB500_RDL3 - Multi_MAH-RDL3_S3S4G020XMC4_1_2_Repassivation Defect_27130.8035149287_26582.3178987956.jpg",
+  "dist": 80.5,
+  "offset": [
+   -89,
+   -71
+  ],
+  "die_kla": [
+   1,
+   2
+  ],
+  "die_camtek": [
+   1,
+   2
+  ],
+  "id": 136
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00EBX106XYG2",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00EBX106XYG2/00EBX106XYG2_-2_4_23_6.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00EBX106XYG2/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00EBX106XYG2_7_8_Repassivation Defect_761_4588.jpg",
+  "dist": 86.1,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   7,
+   8
+  ],
+  "die_camtek": [
+   7,
+   8
+  ],
+  "id": 137
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "7. RDL1",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/7. RDL1/55305C99EWG1/55305C99EWG1_-1_0_23_3.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_12702.8880295022_39587.1453140606_Repassivation Defect.jpg",
+  "dist": 45.9,
+  "offset": [
+   221,
+   -69
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 138
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "5. PIDS7",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_16.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/5. PIDS7/08266F16EWG2/R_TB500_LIVE_PI2 - Enhanced_WFN-PIDS7_08266F16EWG2_2_5_Over Sized Bump_27316.5614092809_28117.7101317186.jpg",
+  "dist": 20.5,
+  "offset": [
+   120,
+   -176
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 139
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-2_-2_23_35.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/2. PIDS3/08266F16EWG2/R_TB500_LIVE_PI4 - Enhanced_WFN-PIDS3_08266F16EWG2_1_1_Foreign Material_10001.777536089_21673.9173079225.jpg",
+  "dist": 31.0,
+  "offset": [
+   80,
+   -76
+  ],
+  "die_kla": [
+   1,
+   1
+  ],
+  "die_camtek": [
+   1,
+   1
+  ],
+  "id": 140
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3S4G022XMD5",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4_재리뷰/S3S4G022XMD5/S3S4G022XMD5_-1_-2_7_18.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/2. PIDS3/S3S4G022XMD5/R_TB500_LIVE_PI4 - Enhanced_MAH-PIDS3_S3S4G022XMD5_2_1_28335.4451268739_14794.9491903698_Over Sized Bump.jpg",
+  "dist": 39.4,
+  "offset": [
+   83,
+   -90
+  ],
+  "die_kla": [
+   2,
+   1
+  ],
+  "die_camtek": [
+   2,
+   1
+  ],
+  "id": 141
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "55305D03EWF5",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/1. RDL4/55305D03EWF5/55305D03EWF5_0_0_23_1.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/2. PIDS3/55305D03EWF5/R_TB500_LIVE_PI4 - Enhanced_XNM_55305D03EWF5_3_3_34847.5129349343_5943.87228301837_Over Sized Bump.jpg",
+  "dist": 7.6,
+  "offset": [
+   87,
+   -90
+  ],
+  "die_kla": [
+   3,
+   3
+  ],
+  "die_camtek": [
+   3,
+   3
+  ],
+  "id": 142
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "3. RDL3",
+  "wafer": "S3S4G020XMC4",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4/S3S4G020XMC4/S3S4G020XMC4_-2_-1_23_32.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/3. RDL3/S3S4G020XMC4/TB500_RDL3 - Multi_MAH-RDL3_S3S4G020XMC4_1_2_Repassivation Defect_26946.8087293159_26287.3655850207.jpg",
+  "dist": 94.2,
+  "offset": [
+   -89,
+   -71
+  ],
+  "die_kla": [
+   1,
+   2
+  ],
+  "die_camtek": [
+   1,
+   2
+  ],
+  "id": 143
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "4. RDL2",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_24.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/4. RDL2/08266F16EWG2/TB500_RDL2 - Multi_WFN-RDL2_08266F16EWG2_2_5_27097.8194217879_28328.8460944927_Repassivation Defect.jpg",
+  "dist": 45.5,
+  "offset": [
+   78,
+   -61
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 144
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "7. RDL1",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/7. RDL1/55305C99EWG1/55305C99EWG1_-1_0_23_5.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_12863.4008335814_39435.100811512_Repassivation Defect.jpg",
+  "dist": 18.3,
+  "offset": [
+   221,
+   -69
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 145
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3 재리뷰",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3 재리뷰/55305C99EWG1/55305C99EWG1_-1_0_23_32.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_15594.9635682543_40213.5962600484_Repassivation Defect.jpg",
+  "dist": 82.8,
+  "offset": [
+   -199,
+   207
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 146
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)",
+  "kla_step": "4. RDL3 재리뷰",
+  "camtek_step": "3. PIDS3",
+  "wafer": "55305E63EWC2",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)/4. RDL3 재리뷰/55305E63EWC2/55305E63EWC2_1_2_23_21.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)/3. PIDS3/55305E63EWC2/R_TB500_LIVE_PI4 - Enhanced_XNP-PIDS3_55305E63EWC2_4_5_34362.0424318191_13262.5497627656_Other.jpg",
+  "dist": 70.8,
+  "offset": [
+   223,
+   6
+  ],
+  "die_kla": [
+   4,
+   5
+  ],
+  "die_camtek": [
+   4,
+   5
+  ],
+  "id": 147
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P102XMB3",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4_재리뷰/S3H0P102XMB3/S3H0P102XMB3_6_0_23_3.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P102XMB3/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P102XMB3_15_4_Foreign Material_9424_24138.jpg",
+  "dist": 36.2,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   15,
+   4
+  ],
+  "die_camtek": [
+   15,
+   4
+  ],
+  "id": 148
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "4. RDL2",
+  "wafer": "08266F15EWC0",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F15EWC0/08266F15EWC0_-1_-3_23_15.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/4. RDL2/08266F15EWC0/TB500_RDL2 - Multi_WFN-RDL2_08266F15EWC0_2_0_4807.22498867667_15692.236622163_Repassivation Defect.jpg",
+  "dist": 60.1,
+  "offset": [
+   78,
+   -61
+  ],
+  "die_kla": [
+   2,
+   0
+  ],
+  "die_camtek": [
+   2,
+   0
+  ],
+  "id": 149
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "08266F15EWC0",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F15EWC0/08266F15EWC0_-1_-3_23_4.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/2. PIDS3/08266F15EWC0/R_TB500_LIVE_PI4 - Enhanced_WFN-PIDS3_08266F15EWC0_2_0_Over Sized Bump_4939.92280358111_15720.1506003255.jpg",
+  "dist": 37.1,
+  "offset": [
+   80,
+   -76
+  ],
+  "die_kla": [
+   2,
+   0
+  ],
+  "die_camtek": [
+   2,
+   0
+  ],
+  "id": 150
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "38275621EWE6",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/1. RDL4/38275621EWE6/38275621EWE6_2_-2_23_8.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/2. PIDS3/38275621EWE6/R_TB500_LIVE_PI4 - Enhanced_XNN_38275621EWE6_5_1_26483.9413115777_34709.2739199013_Over Sized Bump.jpg",
+  "dist": 137.0,
+  "offset": [
+   91,
+   -91
+  ],
+  "die_kla": [
+   5,
+   1
+  ],
+  "die_camtek": [
+   5,
+   1
+  ],
+  "id": 151
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "4. RDL2",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_8.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/4. RDL2/08266F16EWG2/TB500_RDL2 - Multi_WFN-RDL2_08266F16EWG2_2_5_27099.4833083388_28115.9505660755_Repassivation Defect.jpg",
+  "dist": 15.4,
+  "offset": [
+   40,
+   -79
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 152
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "6. RDL1",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_31.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/6. RDL1/08266F16EWG2/TB500_RDL1_SAO_WFN-RDL1_08266F16EWG2_2_5_27066.1725070585_28463.3705594625_Repassivation Defect.jpg",
+  "dist": 134.6,
+  "offset": [
+   104,
+   -97
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 153
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "5. PIDS7",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_30.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/5. PIDS7/08266F16EWG2/R_TB500_LIVE_PI2 - Enhanced_WFN-PIDS7_08266F16EWG2_2_5_Over Sized Bump_26925.1973769479_27903.3642456372.jpg",
+  "dist": 55.5,
+  "offset": [
+   59,
+   -220
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 154
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "6. RDL1",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_25.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/6. RDL1/08266F16EWG2/TB500_RDL1_SAO_WFN-RDL1_08266F16EWG2_2_5_27065.3333326815_27951.516192369_Repassivation Defect.jpg",
+  "dist": 41.8,
+  "offset": [
+   104,
+   -97
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 155
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P110XME6",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4/S3H0P110XME6/S3H0P110XME6_1_-1_31_15.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P110XME6/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P110XME6_10_3_Foreign Material_4800_21618.jpg",
+  "dist": 3.0,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   10,
+   3
+  ],
+  "die_camtek": [
+   10,
+   3
+  ],
+  "id": 156
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00E7H271XYG1",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00E7H271XYG1/00E7H271XYG1_-5_2_7_2.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00E7H271XYG1/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00E7H271XYG1_4_6_Repassivation Defect_9253_20110.jpg",
+  "dist": 133.4,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   4,
+   6
+  ],
+  "die_camtek": [
+   4,
+   6
+  ],
+  "id": 157
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "4. RDL2",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_5.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/4. RDL2/08266F16EWG2/TB500_RDL2 - Multi_WFN-RDL2_08266F16EWG2_2_5_27310.0360753204_28266.8403002504_Repassivation Defect.jpg",
+  "dist": 27.4,
+  "offset": [
+   78,
+   -61
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 158
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)",
+  "kla_step": "7. RDL1",
+  "camtek_step": "8. FS UBM",
+  "wafer": "59335795EWC2",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/7. RDL1/59335795EWC2/59335795EWC2_-1_-3_23_2.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/8. FS UBM/59335795EWC2/R_TB500 LIVE_FS_XNN_59335795EWC2_2_0_Repassivation Defect_21788.1096314275_29667.7455913099.jpg",
+  "dist": 37.1,
+  "offset": [
+   38,
+   -119
+  ],
+  "die_kla": [
+   2,
+   0
+  ],
+  "die_camtek": [
+   2,
+   0
+  ],
+  "id": 159
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_23_11.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/2. PIDS3/08266F16EWG2/R_TB500_LIVE_PI4 - Enhanced_WFN-PIDS3_08266F16EWG2_2_5_Over Sized Bump_27097.9303743811_28376.331340007.jpg",
+  "dist": 87.2,
+  "offset": [
+   85,
+   -89
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 160
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00EAP100XYE2",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00EAP100XYE2/00EAP100XYE2_4_2_23_2.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00EAP100XYE2/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00EAP100XYE2_13_6_Repassivation Defect_9819_19186.jpg",
+  "dist": 4.0,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   13,
+   6
+  ],
+  "die_camtek": [
+   13,
+   6
+  ],
+  "id": 161
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "08266F21EWE2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F21EWE2/08266F21EWE2_-2_-1_23_2.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/2. PIDS3/08266F21EWE2/R_TB500_LIVE_PI4 - Enhanced_WFN-PIDS3_08266F21EWE2_1_2_Over Sized Bump_7784.61085100315_19685.85452549.jpg",
+  "dist": 5.9,
+  "offset": [
+   85,
+   -89
+  ],
+  "die_kla": [
+   1,
+   2
+  ],
+  "die_camtek": [
+   1,
+   2
+  ],
+  "id": 162
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3/55305C99EWG1/55305C99EWG1_-1_0_23_35.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_16323.4886181093_40973.4481807418_Repassivation Defect.jpg",
+  "dist": 16.1,
+  "offset": [
+   -199,
+   207
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 163
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "5. PIDS7",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_1.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/5. PIDS7/08266F16EWG2/R_TB500_LIVE_PI2 - Enhanced_WFN-PIDS7_08266F16EWG2_2_5_Over Sized Bump_27374.6695399419_27903.3642456372.jpg",
+  "dist": 24.4,
+  "offset": [
+   59,
+   -220
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 164
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1200. TB500.INT1183 (KAT)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3M63154XME5",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1200. TB500.INT1183 (KAT)/1. RDL4/S3M63154XME5/S3M63154XME5_1_1_7_2.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1200. TB500.INT1183 (KAT)/2. PIDS3/S3M63154XME5/R_TB500_LIVE_PI4 - Enhanced_KAT-PIDS3_S3M63154XME5_4_4_10051.3510594425_22572.7530002718_Other.jpg",
+  "dist": 63.3,
+  "offset": [
+   88,
+   -89
+  ],
+  "die_kla": [
+   4,
+   4
+  ],
+  "die_camtek": [
+   4,
+   4
+  ],
+  "id": 165
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_30.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/2. PIDS3/08266F16EWG2/R_TB500_LIVE_PI4 - Enhanced_WFN-PIDS3_08266F16EWG2_2_5_Over Sized Bump_27016.613468365_28090.7586983927.jpg",
+  "dist": 63.8,
+  "offset": [
+   80,
+   -76
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 166
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "08266F15EWC0",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F15EWC0/08266F15EWC0_-1_-3_23_20.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/2. PIDS3/08266F15EWC0/R_TB500_LIVE_PI4 - Enhanced_WFN-PIDS3_08266F15EWC0_2_0_Over Sized Bump_4626.60221310187_15562.9122227565.jpg",
+  "dist": 133.4,
+  "offset": [
+   80,
+   -76
+  ],
+  "die_kla": [
+   2,
+   0
+  ],
+  "die_camtek": [
+   2,
+   0
+  ],
+  "id": 167
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3 재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3 재리뷰/55305C99EWG1/55305C99EWG1_-1_0_9_17.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/2. PIDS3/55305C99EWG1/R_TB500_LIVE_PI4 - Enhanced_XNM_55305C99EWG1_2_3_12847.8728027575_39535.7361427757_Other.jpg",
+  "dist": 26.7,
+  "offset": [
+   -42,
+   35
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 168
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)",
+  "kla_step": "4. RDL3 재리뷰",
+  "camtek_step": "3. PIDS3",
+  "wafer": "55305E63EWC2",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)/4. RDL3 재리뷰/55305E63EWC2/55305E63EWC2_1_2_23_30.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/503. TB500INT.545 (XNP)/3. PIDS3/55305E63EWC2/R_TB500_LIVE_PI4 - Enhanced_XNP-PIDS3_55305E63EWC2_4_5_34328.7369488967_13855.3810367097_Other.jpg",
+  "dist": 37.2,
+  "offset": [
+   223,
+   6
+  ],
+  "die_kla": [
+   4,
+   5
+  ],
+  "die_camtek": [
+   4,
+   5
+  ],
+  "id": 169
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "4. RDL2",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_16.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/4. RDL2/08266F16EWG2/TB500_RDL2 - Multi_WFN-RDL2_08266F16EWG2_2_5_27309.9118799357_28296.897502818_Repassivation Defect.jpg",
+  "dist": 101.0,
+  "offset": [
+   40,
+   -79
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 170
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "3. RDL3",
+  "wafer": "S3S4G020XMC4",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4_재리뷰/S3S4G020XMC4/S3S4G020XMC4_-2_-1_23_27.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/3. RDL3/S3S4G020XMC4/TB500_RDL3 - Multi_MAH-RDL3_S3S4G020XMC4_1_2_Repassivation Defect_26946.8087293159_26287.3655850207.jpg",
+  "dist": 94.2,
+  "offset": [
+   -89,
+   -71
+  ],
+  "die_kla": [
+   1,
+   2
+  ],
+  "die_camtek": [
+   1,
+   2
+  ],
+  "id": 171
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)",
+  "kla_step": "7. RDL1",
+  "camtek_step": "8. FS UBM",
+  "wafer": "59335795EWC2",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/7. RDL1/59335795EWC2/59335795EWC2_-1_-3_23_4.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/501. TB500INT.544 (XNN)/8. FS UBM/59335795EWC2/R_TB500 LIVE_FS_XNN_59335795EWC2_2_0_Repassivation Defect_21647.740107966_29669.0139906171.jpg",
+  "dist": 69.5,
+  "offset": [
+   38,
+   -119
+  ],
+  "die_kla": [
+   2,
+   0
+  ],
+  "die_camtek": [
+   2,
+   0
+  ],
+  "id": 172
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)",
+  "kla_step": "2. RDL4",
+  "camtek_step": "1. SPT",
+  "wafer": "001UZ018XYD4",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)/2. RDL4/001UZ018XYD4/001UZ018XYD4_-2_-2_7_13.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)/1. SPT/001UZ018XYD4/2D@RE-4DT-TB500-H-M1_0860154PD_BSX-SPT_1001D_001UZ018XYD4_1_1_Foreign Material_28533.8557851619_37579.5963375557.jpg",
+  "dist": 12.3,
+  "offset": [
+   60,
+   -221
+  ],
+  "die_kla": [
+   1,
+   1
+  ],
+  "die_camtek": [
+   1,
+   1
+  ],
+  "id": 173
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3/55305C99EWG1/55305C99EWG1_-1_0_23_7.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_12335.4322333124_39264.1689055822_Repassivation Defect.jpg",
+  "dist": 19.4,
+  "offset": [
+   -199,
+   207
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 174
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "6. RDL1",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_10.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/6. RDL1/08266F16EWG2/TB500_RDL1_SAO_WFN-RDL1_08266F16EWG2_2_5_27307.1773884425_27952.6711204476_Repassivation Defect.jpg",
+  "dist": 58.4,
+  "offset": [
+   179,
+   -122
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 175
+ },
+ {
+  "lot": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)",
+  "kla_step": "2. FS UBM",
+  "camtek_step": "1. PI REWORK",
+  "wafer": "00E7W096XYG7",
+  "kla": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/2. FS UBM/00E7W096XYG7/00E7W096XYG7_-3_-2_23_13.jpg",
+  "camtek": "00S/1009. 4DT-T254-H-M1/6. HELLER TEST_T254 (GAA)/1. PI REWORK/00E7W096XYG7/2D@RE-4DT-T254-H-M1_0858711PD-0B_GAA-PIDV5_00E7W096XYG7_6_2_Repassivation Defect_8507_10896.jpg",
+  "dist": 1.0,
+  "offset": [
+   21,
+   -167
+  ],
+  "die_kla": [
+   6,
+   2
+  ],
+  "die_camtek": [
+   6,
+   2
+  ],
+  "id": 176
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "5. PIDS7",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_29.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/5. PIDS7/08266F16EWG2/R_TB500_LIVE_PI2 - Enhanced_WFN-PIDS7_08266F16EWG2_2_5_Over Sized Bump_26985.9992620105_28053.4448480999.jpg",
+  "dist": 18.8,
+  "offset": [
+   59,
+   -220
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 177
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "6. RDL1",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_10.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/6. RDL1/08266F16EWG2/TB500_RDL1_SAO_WFN-RDL1_08266F16EWG2_2_5_27366.873060736_27922.8909825323_Repassivation Defect.jpg",
+  "dist": 122.4,
+  "offset": [
+   179,
+   -122
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 178
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_0_-1_7_22.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/2. PIDS3/08266F16EWG2/R_TB500_LIVE_PI4 - Enhanced_WFN-PIDS3_08266F16EWG2_3_2_Over Sized Bump_6020.74488624098_25247.992155687.jpg",
+  "dist": 49.5,
+  "offset": [
+   85,
+   -89
+  ],
+  "die_kla": [
+   3,
+   2
+  ],
+  "die_camtek": [
+   3,
+   2
+  ],
+  "id": 179
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "61FU5B61EWD7",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/3. RDL3/61FU5B61EWD7/61FU5B61EWD7_-2_1_23_4.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/506. TB500INT.548 (XNU)/2. PIDS3/61FU5B61EWD7/R_TB500_LIVE_PI4 - Enhanced_XNU_61FU5B61EWD7_1_4_27675.7550399697_43303.1353123182_Foreign Material.jpg",
+  "dist": 63.9,
+  "offset": [
+   85,
+   -84
+  ],
+  "die_kla": [
+   1,
+   4
+  ],
+  "die_camtek": [
+   1,
+   4
+  ],
+  "id": 180
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3/55305C99EWG1/55305C99EWG1_-1_0_23_3.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/2. PIDS3/55305C99EWG1/R_TB500_LIVE_PI4 - Enhanced_XNM_55305C99EWG1_2_3_12069.2437188898_39356.0959161418_Other.jpg",
+  "dist": 93.6,
+  "offset": [
+   -42,
+   35
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 181
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/504. TB500INT.547 (XNT)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "61FU5C16EWB6",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/504. TB500INT.547 (XNT)/1. RDL4/61FU5C16EWB6/61FU5C16EWB6_-1_0_23_5.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/504. TB500INT.547 (XNT)/2. PIDS3/61FU5C16EWB6/R_TB500_LIVE_PI4 - Enhanced_XNT-PIDS3_61FU5C16EWB6_2_3_15968.2215813189_21010.7531344021_Over Sized Bump.jpg",
+  "dist": 4.0,
+  "offset": [
+   88,
+   -92
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 182
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P110XME6",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4/S3H0P110XME6/S3H0P110XME6_-4_2_31_5.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P110XME6/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P110XME6_5_6_Foreign Material_4111_24648.jpg",
+  "dist": 5.1,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   5,
+   6
+  ],
+  "die_camtek": [
+   5,
+   6
+  ],
+  "id": 183
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P137XMG5",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4_재리뷰/S3H0P137XMG5/S3H0P137XMG5_4_0_31_4.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P137XMG5/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P137XMG5_13_4_Foreign Material_1288_28970.jpg",
+  "dist": 13.5,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   13,
+   4
+  ],
+  "die_camtek": [
+   13,
+   4
+  ],
+  "id": 184
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "3. RDL3",
+  "wafer": "S3S4G020XMC4",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4/S3S4G020XMC4/S3S4G020XMC4_-2_-1_23_35.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/3. RDL3/S3S4G020XMC4/TB500_RDL3 - Multi_MAH-RDL3_S3S4G020XMC4_1_2_Repassivation Defect_27145.1140339699_26399.6210533966.jpg",
+  "dist": 45.4,
+  "offset": [
+   -89,
+   -71
+  ],
+  "die_kla": [
+   1,
+   2
+  ],
+  "die_camtek": [
+   1,
+   2
+  ],
+  "id": 185
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P110XME6",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4/S3H0P110XME6/S3H0P110XME6_5_-2_31_16.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P110XME6/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P110XME6_14_2_Foreign Material_7465_14177.jpg",
+  "dist": 2.2,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   14,
+   2
+  ],
+  "die_camtek": [
+   14,
+   2
+  ],
+  "id": 186
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3S4G022XMD5",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4_재리뷰/S3S4G022XMD5/S3S4G022XMD5_-1_-2_7_6.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/2. PIDS3/S3S4G022XMD5/R_TB500_LIVE_PI4 - Enhanced_MAH-PIDS3_S3S4G022XMD5_2_1_28208.399424549_14740.9251035507_Over Sized Bump.jpg",
+  "dist": 21.8,
+  "offset": [
+   83,
+   -90
+  ],
+  "die_kla": [
+   2,
+   1
+  ],
+  "die_camtek": [
+   2,
+   1
+  ],
+  "id": 187
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)",
+  "kla_step": "2. RDL4",
+  "camtek_step": "1. SPT",
+  "wafer": "001UZ328XYF3",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)/2. RDL4/001UZ328XYF3/001UZ328XYF3_-1_-3_0_74.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/892. TB500.INT1022 (BSX)/1. SPT/001UZ328XYF3/2D@RE-4DT-TB500-H-M1_0860154PD_BSX-SPT_1001D_001UZ328XYF3_2_0_Foreign Material_16275.0003737766_18133.2956372902.jpg",
+  "dist": 147.2,
+  "offset": [
+   60,
+   -221
+  ],
+  "die_kla": [
+   2,
+   0
+  ],
+  "die_camtek": [
+   2,
+   0
+  ],
+  "id": 188
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3S4G092XMF5",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4/S3S4G092XMF5/S3S4G092XMF5_2_-1_23_2.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/2. PIDS3/S3S4G092XMF5/R_TB500_LIVE_PI4 - Enhanced_MAH-PIDS3_S3S4G092XMF5_5_2_14546.0811808096_6325.29467384986_Over Sized Bump.jpg",
+  "dist": 8.0,
+  "offset": [
+   88,
+   -89
+  ],
+  "die_kla": [
+   5,
+   2
+  ],
+  "die_camtek": [
+   5,
+   2
+  ],
+  "id": 189
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3/55305C99EWG1/55305C99EWG1_-1_0_23_34.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_15974.1125179377_40270.9497559465_Repassivation Defect.jpg",
+  "dist": 57.3,
+  "offset": [
+   -199,
+   207
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 190
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3 재리뷰",
+  "camtek_step": "5. RDL2",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3 재리뷰/55305C99EWG1/55305C99EWG1_-1_0_9_10.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/5. RDL2/55305C99EWG1/TB500_RDL2 - Multi_XNM_55305C99EWG1_2_3_12351.8384436024_39316.5445918032_Repassivation Defect.jpg",
+  "dist": 57.8,
+  "offset": [
+   -199,
+   207
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 191
+ },
+ {
+  "lot": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)",
+  "kla_step": "1. RDL4_재리뷰",
+  "camtek_step": "2. SPT",
+  "wafer": "S3H0P110XME6",
+  "kla": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/1. RDL4_재리뷰/S3H0P110XME6/S3H0P110XME6_1_-1_23_5.jpg",
+  "camtek": "531. NVIDIA INT/113. 4DT-T254-H-M1/438. T254.INT432 (FGM)/2. SPT/S3H0P110XME6/2D@RE-4DT-T254-H-M1_0858711PD-0B_FGM-SPT_S3H0P110XME6_10_3_Foreign Material_4800_21618.jpg",
+  "dist": 3.0,
+  "offset": [
+   33,
+   -146
+  ],
+  "die_kla": [
+   10,
+   3
+  ],
+  "die_camtek": [
+   10,
+   3
+  ],
+  "id": 192
+ },
+ {
+  "lot": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "2. PIDS3",
+  "wafer": "55305C99EWG1",
+  "kla": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/3. RDL3/55305C99EWG1/55305C99EWG1_-1_0_23_36.jpg",
+  "camtek": "163. NVIDIA DEV/40. 4DT-TB500-H-M1/502. TB500INT.543 (XNM)/2. PIDS3/55305C99EWG1/R_TB500_LIVE_PI4 - Enhanced_XNM_55305C99EWG1_2_3_16532.9238103305_40403.6477721249_Other.jpg",
+  "dist": 34.4,
+  "offset": [
+   -42,
+   35
+  ],
+  "die_kla": [
+   2,
+   3
+  ],
+  "die_camtek": [
+   2,
+   3
+  ],
+  "id": 193
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "3. RDL3",
+  "camtek_step": "5. PIDS7",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/3. RDL3/08266F16EWG2/08266F16EWG2_-1_2_23_26.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/5. PIDS7/08266F16EWG2/R_TB500_LIVE_PI2 - Enhanced_WFN-PIDS7_08266F16EWG2_2_5_Over Sized Bump_27075.2779793175_28293.5738120403.jpg",
+  "dist": 96.5,
+  "offset": [
+   59,
+   -220
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 194
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "3. RDL3",
+  "wafer": "S3S4G020XMC4",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/1. RDL4/S3S4G020XMC4/S3S4G020XMC4_-2_-1_23_27.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1214. TB500.INT1208 (MAH)/3. RDL3/S3S4G020XMC4/TB500_RDL3 - Multi_MAH-RDL3_S3S4G020XMC4_1_2_Repassivation Defect_26827.675463905_26725.6327771726.jpg",
+  "dist": 11.4,
+  "offset": [
+   -89,
+   -71
+  ],
+  "die_kla": [
+   1,
+   2
+  ],
+  "die_camtek": [
+   1,
+   2
+  ],
+  "id": 195
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1202. TB500.INT1196 (LYS)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3M9P193XMB3",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1202. TB500.INT1196 (LYS)/1. RDL4/S3M9P193XMB3/S3M9P193XMB3_1_2_7_1.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1202. TB500.INT1196 (LYS)/2. PIDS3/S3M9P193XMB3/R_TB500_LIVE_PI4 - Enhanced_LYS-PIDS3_S3M9P193XMB3_4_5_Foreign Material_6311.29668796918_20397.2596165223.jpg",
+  "dist": 2.7,
+  "offset": [
+   91,
+   -90
+  ],
+  "die_kla": [
+   4,
+   5
+  ],
+  "die_camtek": [
+   4,
+   5
+  ],
+  "id": 196
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "4. RDL2",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_14.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/4. RDL2/08266F16EWG2/TB500_RDL2 - Multi_WFN-RDL2_08266F16EWG2_2_5_27196.8687746027_28205.2526536484_Repassivation Defect.jpg",
+  "dist": 27.0,
+  "offset": [
+   40,
+   -79
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 197
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1230. TB500.INT1250 (NMT)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "2. PIDS3",
+  "wafer": "S3S1V097XMB3",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1230. TB500.INT1250 (NMT)/1. RDL4/S3S1V097XMB3/S3S1V097XMB3_-2_1_23_1.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/1230. TB500.INT1250 (NMT)/2. PIDS3/S3S1V097XMB3/R_TB500_LIVE_PI4 - Enhanced_NMT-PIDS3_S3S1V097XMB3_1_4_11374.0439760819_42403.2535194803_Over Sized Bump.jpg",
+  "dist": 3.9,
+  "offset": [
+   86,
+   -86
+  ],
+  "die_kla": [
+   1,
+   4
+  ],
+  "die_camtek": [
+   1,
+   4
+  ],
+  "id": 198
+ },
+ {
+  "lot": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)",
+  "kla_step": "1. RDL4",
+  "camtek_step": "6. RDL1",
+  "wafer": "08266F16EWG2",
+  "kla": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/1. RDL4/08266F16EWG2/08266F16EWG2_-1_2_31_18.jpg",
+  "camtek": "531. NVIDIA INT/129. 4DT-TB500-H-M1/920. TB500.INT955 (WFN)/6. RDL1/08266F16EWG2/TB500_RDL1_SAO_WFN-RDL1_08266F16EWG2_2_5_27487.4514401573_28162.9760775549_Repassivation Defect.jpg",
+  "dist": 36.6,
+  "offset": [
+   179,
+   -122
+  ],
+  "die_kla": [
+   2,
+   5
+  ],
+  "die_camtek": [
+   2,
+   5
+  ],
+  "id": 199
+ }
+]
