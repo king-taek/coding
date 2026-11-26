@@ -80,21 +80,23 @@ def test_strings_used_by_the_button_all_exist():
     assert used and used == defined
 
 
-def _lot(dev: Path, name: str, with_kla: bool, with_camtek: bool = True, ts: int = 1000):
+def _lot(dev: Path, name: str, with_kla: bool, with_camtek: bool = True, ts: int = 1000, wid: str = "W1",
+         kla_wid=None, cam_wid=None):
+    """LOT 하나 — KLA 단계 폴더는 웨이퍼 ID 이름, Camtek 단계 폴더도 웨이퍼 ID 이름(둘이 같으면 짝)."""
     lot = dev / name
     if with_kla:
-        k = lot / "1. RDL6" / "2026-08-02-23-09_4"
+        k = lot / "1. RDL6" / (kla_wid or wid)
         k.mkdir(parents=True)
-        (k / "W1_2_0_23_2.jpg").write_bytes(JPG)
-        (k / "W1.001").write_text(f'FileVersion 1 7;\nWaferID "W1";\n{name}\n')
+        (k / f"{wid}_2_0_23_2.jpg").write_bytes(JPG)
+        (k / f"{wid}.001").write_text(f'FileVersion 1 7;\nWaferID "{wid}";\n{name}\n')
         (k / "Thumbs.db").write_bytes(b"thumb")
     if with_camtek:
-        c = lot / "2. PIDS3" / "W1"
+        c = lot / "2. PIDS3" / (cam_wid or wid)
         c.mkdir(parents=True)
         (c / "TB500_RDL4_3_5_1200.5_800.2.jpg").write_bytes(JPG)
         (c / "TB500_RDL4_4_5_10.5_80.2.jpg").write_bytes(JPG)
     lot.mkdir(parents=True, exist_ok=True)
-    (lot / "W1.txt").write_text(f"ROWCT:5\n{name}\n")
+    (lot / f"{wid}.txt").write_text(f"ROWCT:5\n{name}\n")
     (lot / "x.lot").write_text(f"lot {name}")
     os.utime(lot, (ts, ts))
     return lot
@@ -103,8 +105,8 @@ def _lot(dev: Path, name: str, with_kla: bool, with_camtek: bool = True, ts: int
 def _tree(base: Path, n_pair_lots: int = 2):
     dev = base / "100. CUST" / "1. TB500 PRODUCT"
     for i in range(n_pair_lots):
-        _lot(dev, f"{i + 1}. L{i} (S)", True, ts=1000 + i)
-    _lot(dev, "9. CAMONLY (M)", False, ts=5000)                       # 가장 최근이지만 KLA 단계가 없다
+        _lot(dev, f"{i + 1}. L{i} (S)", True, ts=1000 + i, wid=f"WAFER{i}XX")
+    _lot(dev, "9. CAMONLY (M)", False, ts=5000, wid="WCAMONLY")      # 가장 최근이지만 KLA 단계가 없다
     other = base / "200. OTHER" / "1. ZZZ9"
     _lot(other, "1. O1 (S)", True)
     return base
@@ -123,12 +125,12 @@ def test_pair_lots_are_taken_with_info_file_and_map_but_no_image_bytes(tmp_path,
     assert lots == 2 and files > 0
     names, txt, blob = _zip_all(folder)
     arc = "Conder짝/100. CUST/1. TB500 PRODUCT/1. L0 (S)"
-    assert f"{arc}/1. RDL6/2026-08-02-23-09_4/W1.001" in names              # KLA 정보파일
-    assert f"{arc}/W1.txt" in names and f"{arc}/x.lot" in names              # LOT 맵 txt · .lot
+    assert f"{arc}/1. RDL6/WAFER0XX/WAFER0XX.001" in names                  # KLA 정보파일
+    assert f"{arc}/WAFER0XX.txt" in names and f"{arc}/x.lot" in names        # LOT 맵 txt · .lot
     assert not any(n.endswith((".jpg", "Thumbs.db")) for n in names)
     assert b"IMAGEBYTES" not in blob
-    assert f"{arc}/2. PIDS3/W1/TB500_RDL4_3_5_1200.5_800.2.jpg" in txt["사진목록.txt"]
-    assert re.search(r"W1\.001\t\d+\t담음\t\d{4}-\d\d-\d\d \d\d:\d\d", txt["파일목록.txt"])   # 수정 시각
+    assert f"{arc}/2. PIDS3/WAFER0XX/TB500_RDL4_3_5_1200.5_800.2.jpg" in txt["사진목록.txt"]
+    assert re.search(r"WAFER0XX\.001\t\d+\t담음\t\d{4}-\d\d-\d\d \d\d:\d\d", txt["파일목록.txt"])   # 수정 시각
     assert "CAMONLY" not in "\n".join(n for n in names if n.startswith("Conder짝/"))
     assert "ZZZ9" not in "\n".join(names)
 
@@ -170,18 +172,98 @@ def test_device_list_is_written_even_without_a_matching_device(tmp_path, monkeyp
     assert "LOT요약.tsv" in txt and "Conder짝/" not in "\n".join(names)
 
 
-def test_lots_per_device_and_look_limit_are_respected(tmp_path, monkeypatch):
+def test_bisect_order_spreads_over_time():
+    tool = _tool()
+    assert tool.bisect_order(0) == [] and tool.bisect_order(1) == [0] and tool.bisect_order(2) == [0, 1]
+    assert tool.bisect_order(9) == [0, 8, 4, 2, 6, 1, 3, 5, 7]              # 최근 · 오래됨 · 가운데 · 4분점 …
+    assert sorted(tool.bisect_order(37)) == list(range(37))
+
+
+def test_ids_match_equal_or_contained_with_min_length():
+    tool = _tool()
+    assert tool.ids_match("42194742EWG5", "42194742EWG5")
+    assert tool.ids_match("42194742EWG5", "194742EWG5")                     # 줄어든 폴더 이름(10자)
+    assert not tool.ids_match("W1", "W10")                                  # 짧은 쪽이 8자 미만
+    assert not tool.ids_match("ABCDEFGH1", "XXABCDEFGH2")
+
+
+def test_pair_across_devices_and_lots_is_found_and_taken(tmp_path, monkeypatch):
+    tool = _tool()
+    base = tmp_path / "1. Conder Scan"
+    cust = base / "100. CUST"
+    _lot(cust / "1. TB500 A", "1. LA (S)", True, wid="WAFERAAAXX")           # 같은 LOT 짝
+    _lot(cust / "2. TB500 B", "1. LB (S)", True, with_camtek=False, wid="42194742EWG5")
+    _lot(cust / "3. TB500 C", "1. LC (S)", False, with_camtek=True, wid="194742EWG5")
+    monkeypatch.setattr(tool, "CONDER_ROOTS", [str(base)])
+    folder, lots, _ = tool.run(tmp_path / "desk", _noop)
+    names, txt, blob = _zip_all(folder)
+    assert lots == 3
+    assert "Conder짝/100. CUST/2. TB500 B/1. LB (S)/1. RDL6/42194742EWG5/42194742EWG5.001" in names
+    assert "Conder짝/100. CUST/2. TB500 B/1. LB (S)/42194742EWG5.txt" in names   # 단계 · LOT 폴더 파일
+    assert "Conder짝/100. CUST/3. TB500 C/1. LC (S)/2. PIDS3/194742EWG5" in txt["사진목록.txt"]
+    rows = [ln.split("\t") for ln in txt["짝목록.tsv"].splitlines()[1:]]
+    cross = [r for r in rows if r[3] == "0"]
+    assert cross == [["100. CUST", "100. CUST/2. TB500 B/1. LB (S)/1. RDL6/42194742EWG5",
+                      "100. CUST/3. TB500 C/1. LC (S)/2. PIDS3/194742EWG5", "0", "1"]]
+    assert any(r[3] == "1" and r[4] == "1" for r in rows)
+    assert b"IMAGEBYTES" not in blob
+
+
+def test_devices_are_visited_round_robin_even_if_time_runs_out(tmp_path, monkeypatch):
+    tool = _tool()
+    base = tmp_path / "1. Conder Scan"
+    for d in ("1. TB500 A", "2. TB500 B", "3. TB500 C"):
+        for i in range(4):
+            _lot(base / "100. CUST" / d, f"{i + 1}. L{i} (S)", True, ts=1000 + i, wid=f"W{d[0]}{i}")
+    monkeypatch.setattr(tool, "CONDER_ROOTS", [str(base)])
+    seen = []
+    real = tool._conder_steps
+
+    def spy(d, k=0, out=None):
+        if k == 0:
+            seen.append(d.parent.name)
+        return real(d, k, out)
+
+    monkeypatch.setattr(tool, "_conder_steps", spy)
+    folder, _, _ = tool.run(tmp_path / "desk", _noop, stop=lambda: len(seen) >= 3)   # 3개 훑고 중지
+    assert seen == ["1. TB500 A", "2. TB500 B", "3. TB500 C"]
+    _, txt, _ = _zip_all(folder)
+    assert all(d in txt["LOT요약.tsv"] for d in ("TB500 A", "TB500 B", "TB500 C"))
+
+
+def test_look_limit_per_device_and_time_spread(tmp_path, monkeypatch):
     tool = _tool()
     _setup(tmp_path, monkeypatch, tool, n=5)
-    monkeypatch.setattr(tool, "LOTS_PER_DEVICE", 3)
+    monkeypatch.setattr(tool, "LOOK_PER_DEVICE", 2)                         # 최근 · 가장 오래된 것
     folder, lots, _ = tool.run(tmp_path / "desk", _noop)
-    assert lots == 3
-    names, _, _ = _zip_all(folder)
-    got = {n.split("/")[3] for n in names if n.startswith("Conder짝/") and n.count("/") > 3}
-    assert got == {"5. L4 (S)", "4. L3 (S)", "3. L2 (S)"}                   # 최근 것부터
-    monkeypatch.setattr(tool, "LOOK_PER_DEVICE", 1)                         # 가장 최근 1개(CAMONLY)만 훑는다
-    folder2, lots2, _ = tool.run(tmp_path / "desk2", _noop)
-    assert lots2 == 0 and folder2 is not None
+    _, txt, _ = _zip_all(folder)
+    seen = {ln.split("\t")[1] for ln in txt["LOT요약.tsv"].splitlines()[1:]}
+    assert {s.split("/")[-1] for s in seen} == {"9. CAMONLY (M)", "1. L0 (S)"}
+    assert lots == 1
+
+
+def test_wafers_per_lot_cap(tmp_path, monkeypatch):
+    tool = _tool()
+    base = tmp_path / "1. Conder Scan"
+    dev = base / "100. CUST" / "1. TB500 A"
+    lot = dev / "1. L (S)"
+    for i in range(5):
+        for step, nm in (("1. RDL6", "k"), ("2. PIDS3", "c")):
+            w = lot / step / f"WAFERNO{i}XX"
+            w.mkdir(parents=True)
+            if nm == "k":
+                (w / "a.001").write_text('WaferID "X";\n')
+                (w / f"WAFERNO{i}XX_2_0_23_2.jpg").write_bytes(JPG)
+            else:
+                (w / "T_R_3_5_1.5_2.5.jpg").write_bytes(JPG)
+    monkeypatch.setattr(tool, "CONDER_ROOTS", [str(base)])
+    monkeypatch.setattr(tool, "MAX_WAFERS_PER_LOT", 4)
+    folder, lots, _ = tool.run(tmp_path / "desk", _noop)
+    names, txt, _ = _zip_all(folder)
+    taken = {ln.rsplit("/", 1)[0] for ln in txt["사진목록.txt"].splitlines() if ln}
+    assert lots == 1 and len(taken) == 4                                    # 같은 LOT 의 짝 웨이퍼 4개(KLA 2 + Camtek 2)
+    rows = [ln.split("\t") for ln in txt["짝목록.tsv"].splitlines()[1:]]
+    assert len(rows) == 5 and sum(r[4] == "1" for r in rows) == 2
 
 
 def test_zip_is_split_when_it_grows_past_the_part_size(tmp_path, monkeypatch):

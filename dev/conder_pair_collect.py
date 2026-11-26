@@ -6,11 +6,14 @@
 무엇을 모으나 — 한 단계가 실패해도 요약에 적고 zip 은 남긴다:
     1. ``Conder장치목록.txt`` — Conder 의 ``고객\\디바이스`` 폴더 전부와 LOT 수 · 가장 최근 LOT 수정 시각.
        키워드로 아무것도 못 찾아도 항상 쓴다(다음에 맞는 이름을 찾으려고).
-    2. 장치 이름에 :data:`KEYWORDS` 가 든 장치를 찾아, LOT(``N. LOT (S/M)``)을 최근 것부터 훑는다
-       (장치마다 :data:`LOOK_PER_DEVICE` 개까지).  LOT 의 공정(단계) 폴더를 KLA(웨이퍼 폴더에 ``WaferID`` 정보파일) ·
-       Camtek(LIVE 사진 이름) · 기타로 나누고, **KLA 단계와 Camtek 단계가 함께 있는 LOT** 을 장치마다
-       :data:`LOTS_PER_DEVICE` 개까지 통째로 담는다 — LOT · 단계 · 웨이퍼 폴더의 사진 아닌 파일(수정 시각과 함께),
-       사진은 이름만 ``사진목록.txt``.  훑은 단계마다 한 줄씩 ``LOT요약.tsv`` 에 적는다(담지 않은 LOT 도).
+    2. 장치 이름에 :data:`KEYWORDS` 가 든 장치 **전부를 돌아가며**(장치 1 의 LOT 하나, 장치 2 의 LOT 하나, …) 훑는다.
+       장치마다 LOT 를 최근 것 · 가장 오래된 것 · 가운데 · 4분점 … 순서(:func:`bisect_order`)로 :data:`LOOK_PER_DEVICE` 개까지,
+       색인 시간 :data:`INDEX_MINUTES` 안에서 본다.  LOT 의 단계 폴더를 KLA · Camtek · 기타로 나누고 웨이퍼 폴더마다 기록한다.
+    3. 같은 고객 안에서 KLA 웨이퍼 폴더와 Camtek 웨이퍼 폴더를 웨이퍼 ID(폴더 이름)로 짝짓는다 — 같거나, 한쪽이 다른 쪽에
+       들어 있고 짧은 쪽이 8자 이상(폴더 이름이 줄었을 수 있다).  같은 LOT 이든 다른 LOT · 장치든 상관없다.
+    4. 짝이 된 웨이퍼 폴더를 장치 → LOT 순으로 돌아가며 담는다(LOT 마다 :data:`MAX_WAFERS_PER_LOT` 개, 전체
+       :data:`MAX_PAIRED_WAFERS` 개) — 웨이퍼 폴더의 사진 아닌 파일(수정 시각과 함께) · 사진 이름, 관련 단계 폴더의 맵 txt 등.
+       훑은 단계마다 한 줄씩 ``LOT요약.tsv``, 짝마다 한 줄씩 ``짝목록.tsv`` 에 적는다(담지 않은 것도).
 무엇을 버리나: 사진 · 영상 · 압축 파일(사진은 이름만), :data:`FILE_MB` 를 넘는 파일(이름 · 크기만 ``파일목록.txt``),
 내용이 같은 파일(한 번만 담고 ``중복목록.txt``), ``Thumbs.db``.
 결과: 바탕화면 ``프로그램 개발중\\분석용 자료 수집\\AOI 레시피 검증\\<날짜>\\`` 폴더 안 zip.  :data:`PART_MB` 를 넘으면
@@ -29,9 +32,12 @@ from pathlib import Path
 
 CONDER_ROOTS = [r"\\k5cifsn2\k5tsvdata$\1. Conder Scan"]
 KEYWORDS = ("TB500", "T254")
-LOTS_PER_DEVICE = 12     # 장치마다 새로 담을 LOT 수(2차 수집, 2026-11-26 — 1차 6개는 사진이 몇 웨이퍼에 몰렸다)
 LOOK_PER_DEVICE = 80     # 장치마다 훑을 LOT 수
 MINUTES = 60             # 전체 시간 상한(1차는 25분에 끝까지 못 돌았다)
+INDEX_MINUTES = 35       # 그중 LOT 를 훑어 색인하는 시간(나머지는 담는 시간)
+MAX_WAFERS_PER_LOT = 6   # LOT 하나에서 담는 짝 웨이퍼 폴더 수(1차는 두 웨이퍼에 짝의 35% 가 몰렸다)
+MAX_PAIRED_WAFERS = 400  # 전체에서 담는 짝 웨이퍼 폴더 수
+MIN_ID_LEN = 8           # 한쪽이 다른 쪽에 들어 있어 짝으로 볼 때 짧은 쪽의 최소 글자 수
 DONE_LOTS = frozenset((   # 1차 수집(conder짝_1336)에서 이미 받은 LOT 폴더 — 다시 담지 않고 요약에만 '이미 받음'
     '1200. TB500.INT1183 (KAT)',
     '1202. TB500.INT1196 (LYS)',
@@ -144,17 +150,24 @@ def is_camtek_name(stem: str) -> bool:
     return False
 
 
-def classify_step(wafer_dirs):
-    """단계 하나 → (종류, 사진 수).  종류는 KLA · Camtek · 기타.  KLA 정보파일이 있으면 KLA 가 먼저다."""
-    photos, kla, camtek = 0, False, False
+def classify_wafers(wafer_dirs):
+    """단계 하나 → (종류, 사진 수, 웨이퍼 폴더별 사진 수 목록).  종류는 KLA · Camtek · 기타.  KLA 정보파일이 있으면 KLA 가 먼저다."""
+    photos, kla, camtek, per = 0, False, False, []
     for _, p in wafer_dirs:
         names = [n for n, _, _, _ in _entries(p)[1] if Path(n).suffix.lower() in IMG_EXT]
         photos += len(names)
+        per.append(len(names))
         if not kla and kla_info_names(p):
             kla = True
         if not camtek and any(is_camtek_name(Path(n).stem) for n in names[:5]):
             camtek = True
-    return ("KLA" if kla else "Camtek" if camtek else "기타"), photos
+    return ("KLA" if kla else "Camtek" if camtek else "기타"), photos, per
+
+
+def classify_step(wafer_dirs):
+    """단계 하나 → (종류, 사진 수)."""
+    kind, photos, _ = classify_wafers(wafer_dirs)
+    return kind, photos
 
 
 def _budget(col, stop, end, minutes: float, zip_mb: float):
@@ -185,48 +198,188 @@ def list_devices(col, say, progress, stop, end=None):
     return found
 
 
-def collect_pairs(col, devices, say, progress, stop, end=None):
-    """키워드 장치의 LOT 중 KLA 단계와 Camtek 단계가 함께 있는 것을 장치마다 최근 :data:`LOTS_PER_DEVICE` 개 담는다.
-    담은 LOT 수를 돌려준다."""
-    expired = _budget(col, stop, end, MINUTES, ZIP_MB)
-    taken_total = 0
+def bisect_order(n: int):
+    """0..n-1 을 시간에 고르게 퍼지는 순서로 — 처음(최근) · 끝(가장 오래됨) · 가운데 · 4분점 … (구간 이등분을 넓게부터)."""
+    if n <= 0:
+        return []
+    out = [0] if n == 1 else [0, n - 1]
+    queue = [(0, n - 1)]
+    while queue:
+        nxt = []
+        for lo, hi in queue:
+            if hi - lo > 1:
+                mid = (lo + hi) // 2
+                out.append(mid)
+                nxt += [(lo, mid), (mid, hi)]
+        queue = nxt
+    return out
+
+
+def ids_match(a: str, b: str) -> bool:
+    """웨이퍼 폴더 이름(대문자) 둘이 같은 웨이퍼인가 — 같거나, 짧은 쪽이 :data:`MIN_ID_LEN` 자 이상이고 긴 쪽에 들어 있다."""
+    if a == b:
+        return True
+    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
+    return len(short) >= MIN_ID_LEN and short in long_
+
+
+class Wafer:
+    """색인한 웨이퍼 폴더 하나."""
+    __slots__ = ("cust", "label", "base", "lot", "step", "kind", "wid", "path", "photos", "row")
+
+    def __init__(self, cust, label, base, lot, step, kind, wid, path, photos, row):
+        self.cust, self.label, self.base, self.lot, self.step = cust, label, base, lot, step
+        self.kind, self.wid, self.path, self.photos, self.row = kind, wid, path, photos, row
+
+    def rel(self) -> str:
+        return self.path.relative_to(self.base).as_posix()
+
+
+def index_lots(col, devices, say, progress, expired, index_end):
+    """키워드 장치를 돌아가며(장치마다 :func:`bisect_order` 순서로) LOT 를 훑어 ``(웨이퍼 목록, 요약 줄 목록)`` 을 돌려준다.
+    요약 줄은 ``[고객 디바이스, LOT, 단계, 종류, 웨이퍼 폴더, 사진, 담음]`` 리스트(마지막 칸은 나중에 채운다)."""
+    queues, rows, wafers = [], [], []
     for cust_name, dev_name, dev, lots, base in devices:
         label = f"{cust_name} {dev_name}"
-        if not any(k.upper() in label.upper() for k in KEYWORDS) or expired():
+        if not any(k.upper() in label.upper() for k in KEYWORDS):
             continue
-        taken = 0
-        for _, lot in sorted(lots, key=lambda t: -t[0])[:LOOK_PER_DEVICE]:
-            if taken >= LOTS_PER_DEVICE or expired():
-                break
-            if lot.name in DONE_LOTS:
-                col.rows.append(f"{label}\t{lot.relative_to(base).as_posix()}\t.\t-\t0\t0\t이미 받음")
+        ordered = [p for _, p in sorted(lots, key=lambda t: -t[0])]
+        todo = []
+        for p in ordered:
+            if p.name in DONE_LOTS:
+                rows.append([label, p.relative_to(base).as_posix(), ".", "-", "0", "0", "이미 받음"])
+            else:
+                todo.append(p)
+        todo = [todo[i] for i in bisect_order(len(todo))][:LOOK_PER_DEVICE]
+        queues.append([cust_name, label, dev_name, base, list(reversed(todo))])
+    visited = 0
+    while any(q[4] for q in queues):
+        for cust_name, label, dev_name, base, todo in queues:
+            if not todo:
                 continue
+            if expired() or time.time() > index_end:
+                return wafers, rows
+            lot = todo.pop()
             progress(0, 0, f"{dev_name} {lot.name}"[:70])
-            steps = _conder_steps(lot)
-            rows = []
-            for step, (wafer_dirs, _, _) in steps.items():
-                if wafer_dirs:
-                    kind, photos = classify_step(wafer_dirs)
-                    rows.append((step, kind, len(wafer_dirs), photos))
-            kinds = {r[1] for r in rows}
-            take = "KLA" in kinds and "Camtek" in kinds
             rel_lot = lot.relative_to(base).as_posix()
-            for step, kind, wafers, photos in rows:
+            for step, (wafer_dirs, _, _) in _conder_steps(lot).items():
+                if not wafer_dirs:
+                    continue
+                kind, photos, per = classify_wafers(wafer_dirs)
                 rel_step = "." if step == lot else step.relative_to(lot).as_posix()
-                col.rows.append(f"{label}\t{rel_lot}\t{rel_step}\t{kind}\t{wafers}\t{photos}\t{'담음' if take else '이름만'}")
-            if not take:
+                row = [label, rel_lot, rel_step, kind, str(len(wafer_dirs)), str(photos), "이름만"]
+                rows.append(row)
+                for (name, p), n in zip(wafer_dirs, per):
+                    wafers.append(Wafer(cust_name, label, base, lot, step, kind, name.upper(), p, n, row))
+            visited += 1
+            if visited % 20 == 0:
+                say(f"색인 LOT {visited}개")
+    return wafers, rows
+
+
+def find_pairs(wafers):
+    """같은 고객 안에서 KLA 웨이퍼 폴더 ↔ Camtek 웨이퍼 폴더 짝 ``[(kla, camtek)]``."""
+    by_cust = {}
+    for w in wafers:
+        if w.kind in ("KLA", "Camtek"):
+            by_cust.setdefault(w.cust, ([], []))[0 if w.kind == "KLA" else 1].append(w)
+    pairs = []
+    for ks, cs in by_cust.values():
+        for k in ks:
+            for c in cs:
+                if ids_match(k.wid, c.wid):
+                    pairs.append((k, c))
+    return pairs
+
+
+def _spread(pairs):
+    """한 LOT 의 짝을 단계가 다른 것부터 번갈아 나열한다."""
+    groups = {}
+    for pr in pairs:
+        groups.setdefault((pr[0].step, pr[1].step), []).append(pr)
+    lists = list(groups.values())
+    out = []
+    while any(lists):
+        for g in lists:
+            if g:
+                out.append(g.pop(0))
+    return out
+
+
+def take_pairs(col, pairs, say, progress, expired):
+    """짝 웨이퍼 폴더를 장치 → LOT 순으로 돌아가며 담는다.  ``(담은 LOT 수, 담은 웨이퍼 id 집합)``."""
+    devs = {}                                     # 장치 → LOT → 짝(KLA 쪽 장치 · LOT 기준)
+    for pr in pairs:
+        devs.setdefault(pr[0].label, {}).setdefault(pr[0].lot, []).append(pr)
+    rot = [[_cursor(lots)] for lots in devs.values()]
+    taken, per_lot, steps_done, lots_done = set(), {}, set(), set()
+    while any(r[0]["left"] for r in rot) and len(taken) < MAX_PAIRED_WAFERS:
+        for (cur,) in rot:
+            if expired():
+                return len(lots_done), taken
+            pr = cur_next(cur)
+            if pr is None:
                 continue
-            arc_lot = f"Conder짝/{rel_lot}"
-            for step, (wafer_dirs, _, _) in steps.items():
-                arc = arc_lot if step == lot else f"{arc_lot}/{step.relative_to(lot).as_posix()}"
-                col.take_files(step, arc, depth=_WAFER_DEPTH, with_mtime=True, skip=("Thumbs.db",))
-                for name, p in wafer_dirs:
-                    col.take_files(p, f"{arc}/{name}", with_mtime=True, skip=("Thumbs.db",))
-            taken += 1
-            taken_total += 1
-            say(f"짝 LOT {label} {lot.name}  단계 {len(rows)}")
-        say(f"{label}: LOT {taken}개를 담음")
-    return taken_total
+            new = [w for w in pr if id(w) not in taken]
+            if len(taken) + len(new) > MAX_PAIRED_WAFERS:
+                continue
+            if any(per_lot.get(w.lot, 0) + sum(1 for x in new if x.lot == w.lot) > MAX_WAFERS_PER_LOT for w in new):
+                continue
+            for w in new:
+                progress(0, 0, f"{w.label} {w.lot.name}"[:70])
+                if (w.lot, w.step) not in steps_done:
+                    steps_done.add((w.lot, w.step))
+                    arc = f"Conder짝/{w.step.relative_to(w.base).as_posix()}"
+                    col.take_files(w.step, arc, depth=_WAFER_DEPTH, with_mtime=True, skip=("Thumbs.db",))
+                if w.lot not in lots_done:
+                    arc = f"Conder짝/{w.lot.relative_to(w.base).as_posix()}"
+                    if w.step != w.lot:
+                        col.take_files(w.lot, arc, depth=_WAFER_DEPTH, with_mtime=True, skip=("Thumbs.db",))
+                    lots_done.add(w.lot)
+                col.take_files(w.path, f"Conder짝/{w.rel()}", with_mtime=True, skip=("Thumbs.db",))
+                taken.add(id(w))
+                per_lot[w.lot] = per_lot.get(w.lot, 0) + 1
+                w.row[6] = "담음"
+    say(f"짝 웨이퍼 폴더 {len(taken)}개 · LOT {len(lots_done)}개를 담음")
+    return len(lots_done), taken
+
+
+def _cursor(lots):
+    """장치 하나의 LOT 별 짝 목록(단계 번갈아)과 LOT 순환 위치."""
+    return {"lots": [_spread(prs) for prs in lots.values()], "pos": 0, "left": sum(len(p) for p in lots.values())}
+
+
+def cur_next(cur):
+    """장치의 다음 LOT 에서 짝 하나를 꺼낸다(LOT 을 돌아가며).  없으면 None."""
+    n = len(cur["lots"])
+    for _ in range(n):
+        lot_pairs = cur["lots"][cur["pos"] % n]
+        cur["pos"] += 1
+        if lot_pairs:
+            cur["left"] -= 1
+            return lot_pairs.pop(0)
+    return None
+
+
+def collect_pairs(col, devices, say, progress, stop, end=None):
+    """키워드 장치를 돌아가며 색인하고, 고객 안에서 KLA ↔ Camtek 웨이퍼 폴더 짝을 찾아 담는다.  담은 LOT 수를 돌려준다."""
+    expired = _budget(col, stop, end, MINUTES, ZIP_MB)
+    index_end = time.time() + INDEX_MINUTES * 60
+    wafers, rows = [], []
+    pairs = []
+    try:
+        wafers, rows = index_lots(col, devices, say, progress, expired, index_end)
+        pairs = find_pairs(wafers)
+        say(f"색인: 웨이퍼 폴더 {len(wafers)}개 · 짝 {len(pairs)}개")
+        lots, taken = take_pairs(col, pairs, say, progress, expired)
+        for k, c in pairs:
+            same = 1 if k.lot == c.lot else 0
+            col.pairs.append("\t".join((k.cust, k.rel(), c.rel(), str(same),
+                                        "1" if id(k) in taken and id(c) in taken else "0")))
+        return lots
+    finally:
+        for r in rows:
+            col.rows.append("\t".join(r))
 
 
 class Collector:
@@ -236,7 +389,7 @@ class Collector:
         self.zf = zipfile.ZipFile(staging, "w", zipfile.ZIP_DEFLATED)
         self.hashes = {}
         self.photos, self.listing, self.dups = [], [], []
-        self.devices, self.rows = [], []
+        self.devices, self.rows, self.pairs = [], [], []
         self.raw = 0
         self.files = 0
 
@@ -289,11 +442,13 @@ class Collector:
     def close(self, summary: str):
         head = "고객\t디바이스\tLOT 수\t가장 최근 LOT 수정\n"
         rows_head = "디바이스\tLOT\t단계\t종류\t웨이퍼 폴더\t사진\t담음\n"
+        pairs_head = "고객\tKLA 웨이퍼 폴더\tCamtek 웨이퍼 폴더\t같은 LOT\t담음\n"
         for name, text in (("사진목록.txt", "\n".join(self.photos) + "\n"),
                            ("파일목록.txt", "\n".join(self.listing) + "\n"),
                            ("중복목록.txt", "\n".join(self.dups) + "\n"),
                            ("Conder장치목록.txt", head + "\n".join(self.devices) + "\n"),
                            ("LOT요약.tsv", rows_head + "\n".join(self.rows) + "\n"),
+                           ("짝목록.tsv", pairs_head + "\n".join(self.pairs) + "\n"),
                            ("요약.txt", summary)):
             self.zf.writestr(name, text)
         self.zf.close()
@@ -378,7 +533,7 @@ def run(out: Path, progress=None, stop=None):
     summary = "\n".join([
         f"Conder 짝 자료 수집 {now:%Y%m%d_%H%M}  ({time.time() - t0:.0f}초)",
         f"장치 {len(devices)} · 담은 LOT {lots} · 담은 파일 {col.files} · 원본 {col.raw / MB:.1f} MB"
-        f" · zip {col.zipped() / MB:.1f} MB · 사진 이름 {len(col.photos)} · 중복 {len(col.dups)}",
+        f" · zip {col.zipped() / MB:.1f} MB · 사진 이름 {len(col.photos)} · 중복 {len(col.dups)} · 짝 {len(col.pairs)}",
         "", "기록:", *log, ""])
     col.close(summary)
     if not (col.devices or col.files or col.photos or col.rows):

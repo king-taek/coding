@@ -480,8 +480,9 @@ SETUP_SECTION_MODE = "2  방식"
 CPAIR_COLLECT_BUTTON = "Conder 짝 자료 수집"
 CPAIR_COLLECT_TITLE = "Conder 짝 자료 수집"
 CPAIR_COLLECT_ASK = (
-    "Conder 에서 TB500 · T254 LOT 중 KLA 단계와 Camtek 단계가 함께 있는 LOT 을 장치마다 최근 12개까지 모읍니다(지난번에 받은 LOT 은 건너뜁니다)"
-    "(KLA 정보파일 · LOT 맵 · 사진 이름). 읽기만 하고 사진은 이름만 적습니다. "
+    "Conder 에서 TB500 · T254 장치 폴더를 돌아가며 훑어, 같은 웨이퍼가 KLA 단계와 Camtek 단계에 모두 있는 것을 모읍니다"
+    "(다른 LOT · 다른 장치 폴더에 나뉘어 있어도 웨이퍼 ID 로 찾음, 지난번 받은 LOT 은 건너뜀). "
+    "KLA 정보파일 · LOT 맵 · 사진 이름만 담고 사진은 담지 않습니다. "
     "최대 60분이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
 )
 CPAIR_COLLECT_START = "수집 시작"
