@@ -147,6 +147,17 @@ def test_summary_lists_every_step_looked_at_including_untaken_lots(tmp_path, mon
     assert all(r[0] == cust for r in rows)                                  # 다른 장치(ZZZ9)는 없다
 
 
+def test_lots_already_collected_are_skipped_and_noted(tmp_path, monkeypatch):
+    tool = _tool()
+    _setup(tmp_path, monkeypatch, tool)
+    monkeypatch.setattr(tool, "DONE_LOTS", frozenset({"2. L1 (S)"}))       # 1차에 받은 LOT
+    folder, lots, files = tool.run(tmp_path / "desk", _noop)
+    names, txt, _ = _zip_all(folder)
+    assert lots == 1
+    assert not any("2. L1 (S)/" in n and n.startswith("Conder짝/") for n in names)
+    assert "이미 받음" in txt["LOT요약.tsv"]
+
+
 def test_device_list_is_written_even_without_a_matching_device(tmp_path, monkeypatch):
     tool = _tool()
     base = tmp_path / "1. Conder Scan"

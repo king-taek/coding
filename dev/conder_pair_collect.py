@@ -29,9 +29,33 @@ from pathlib import Path
 
 CONDER_ROOTS = [r"\\k5cifsn2\k5tsvdata$\1. Conder Scan"]
 KEYWORDS = ("TB500", "T254")
-LOTS_PER_DEVICE = 6      # 장치마다 담을 LOT 수
-LOOK_PER_DEVICE = 40     # 장치마다 훑을 LOT 수
-MINUTES = 25             # 전체 시간 상한
+LOTS_PER_DEVICE = 12     # 장치마다 새로 담을 LOT 수(2차 수집, 2026-11-26 — 1차 6개는 사진이 몇 웨이퍼에 몰렸다)
+LOOK_PER_DEVICE = 80     # 장치마다 훑을 LOT 수
+MINUTES = 60             # 전체 시간 상한(1차는 25분에 끝까지 못 돌았다)
+DONE_LOTS = frozenset((   # 1차 수집(conder짝_1336)에서 이미 받은 LOT 폴더 — 다시 담지 않고 요약에만 '이미 받음'
+    '1200. TB500.INT1183 (KAT)',
+    '1202. TB500.INT1196 (LYS)',
+    '1214. TB500.INT1208 (MAH)',
+    '1230. TB500.INT1250 (NMT)',
+    '2. N7G732.00 DCC01 (UGT)',
+    '2. N7G733.00 DCC01 (UGU)',
+    '430. T254.INT424 (FGB)',
+    '436. T254.INT442 (KBP)',
+    '437. T254.INT433 (KBA)',
+    '438. T254.INT432 (FGM)',
+    '439. T254.INT430 (FGK)',
+    '447. T254.INT443 (KBS)',
+    '501. TB500INT.544 (XNN)',
+    '502. TB500INT.543 (XNM)',
+    '503. TB500INT.545 (XNP)',
+    '504. TB500INT.547 (XNT)',
+    '506. TB500INT.548 (XNU)',
+    '507. TB500INT.546 (XNS)',
+    '6. HELLER TEST_T254 (GAA)',
+    '78. E2C089.S00 DCC20 (MDG)',
+    '892. TB500.INT1022 (BSX)',
+    '920. TB500.INT955 (WFN)',
+))
 ZIP_MB = 80              # zip(압축한 크기) 상한 — 올리는 양이 기준
 FILE_MB = 20             # 이보다 큰 파일은 이름만 남긴다
 PART_MB = 28             # 올릴 수 있는 한도가 30 MB 보다 작다(30 MB 조각 2개가 안 올라감, 사용자 2026-11-15)
@@ -174,6 +198,9 @@ def collect_pairs(col, devices, say, progress, stop, end=None):
         for _, lot in sorted(lots, key=lambda t: -t[0])[:LOOK_PER_DEVICE]:
             if taken >= LOTS_PER_DEVICE or expired():
                 break
+            if lot.name in DONE_LOTS:
+                col.rows.append(f"{label}\t{lot.relative_to(base).as_posix()}\t.\t-\t0\t0\t이미 받음")
+                continue
             progress(0, 0, f"{dev_name} {lot.name}"[:70])
             steps = _conder_steps(lot)
             rows = []
