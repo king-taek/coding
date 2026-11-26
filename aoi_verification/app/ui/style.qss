@@ -188,6 +188,7 @@ QLabel[role="mutedSmall"] {
 QLabel[role="tileScore"] {
     color: $ink2;
     font-weight: 700;
+    font-size: 15px;
     padding: 2px;
 }
 
@@ -418,6 +419,32 @@ QFrame[role="row"] {
     border-bottom: 1px solid $row_divider;
     border-radius: $row_radius;
 }
+/* 같은 묶음 안의 행 — 아래 눈금을 감춘다(단일 사진 정보 표).  두께는 그대로 둬 행 높이가 안 바뀐다. */
+QFrame[role="row"][rule="none"] {
+    border-bottom: 1px solid $row_border;
+}
+
+/* Defect 정보 조회 — 묶음마다 밝은 상자(현택님 2026-11-24 안 B).  제목은 상자 위 굵은 글씨. */
+QFrame[role="infoBox"] {
+    background-color: $elev;
+    border: 1px solid $line2;
+    border-radius: $radius_sm;
+}
+QLabel[role="infoGroupTitle"] {
+    color: $ink;
+    font-weight: 700;
+    padding-left: 2px;
+}
+
+/* Defect 정보 조회 — 여러 장 넘겨 보기 띠의 썸네일.  지금 사진은 강조색 테두리. */
+QLabel[role="stripTile"] {
+    background-color: $panel;
+    border: 1px solid $line2;
+    border-radius: $radius_sm;
+}
+QLabel[role="stripTile"][current="true"] {
+    border: 2px solid $accent;
+}
 
 /* 점수 컬럼 눈금 — 이미지 영역과 우측 거리 컬럼을 가르는 1px 눈금.
    score_rule = ink 반투명이라 시트 위에서 또렷. */
@@ -498,8 +525,8 @@ QPushButton:focus {
 
 QPushButton:disabled {
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
-    background-color: transparent;
+    border: 1px solid $disabled_fill;
+    background-color: $disabled_fill;
 }
 
 /* ★ QSS `min-height` 는 `setMinimumHeight()` 를 **덮어쓴다** — 일반 QPushButton 의
@@ -520,6 +547,14 @@ QPushButton[grade="panel"] {
     max-height: 30px;
     padding-top: 0px;
     padding-bottom: 0px;
+}
+/* 도구 화면의 빈 화면 가운데 큰 [사진 선택]/[폴더 선택](`tool_open_save.EmptyOpen`, 현택님 2026-11-24) —
+   화면에 하나뿐인 할 일이라 크게: 내용 42 + 패딩 12 + 보더 2 = 56. */
+QPushButton[grade="hero"] {
+    min-height: 42px;
+    font-size: 16px;
+    padding-left: 32px;
+    padding-right: 32px;
 }
 /* 허용 오차 ± — 입력란과 **같은 높이**여야 중심이 맞는다.  ghost 의 min-height 30
    (+패딩 = 44)이 `setFixedSize(38,38)` 을 이겨 38×44 로 렌더돼 3px 어긋났다(실측).
@@ -545,7 +580,7 @@ QPushButton[role="stepper"]:focus {
 }
 QPushButton[role="stepper"]:disabled {
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
 }
 QPushButton[role="primary"] {
     background-color: $accent;
@@ -566,9 +601,9 @@ QPushButton[role="primary"]:pressed {
    면은 비우고 글자·테두리를 비활성 토큰으로 — '비어 있다 = 못 누른다'로 읽힌다.
    ★ 주석에도 달러 토큰을 쓰지 마라 — Template.substitute 가 주석을 구분하지 않는다. */
 QPushButton[role="primary"]:disabled {
-    background-color: transparent;
+    background-color: $disabled_fill;
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
     font-weight: 600;
 }
 /* ★ 채운 버튼의 포커스 링은 페이지 배경이 아니라 **버튼 자기 면**과 대비해야 한다.
@@ -613,6 +648,20 @@ QPushButton[role="ghost"]:hover {
 QPushButton[grade="rail"] {
     text-align: left;
     padding-left: 16px;
+    background-color: transparent;
+    border: 1px solid transparent;  /* 높이를 그대로 두려 테두리 두께는 남긴다 */
+    color: $ink2;
+}
+/* 선택된 메뉴만 옅은 accent 바탕 + accent 글자, 나머지는 테두리 없는 줄. */
+QPushButton[grade="rail"]:hover {
+    background-color: $elev;
+    border: 1px solid transparent;  /* 높이를 그대로 두려 테두리 두께는 남긴다 */
+    color: $ink;
+}
+QPushButton[grade="rail"]:checked {
+    background-color: $accent_tint;
+    border: 1px solid transparent;  /* 높이를 그대로 두려 테두리 두께는 남긴다 */
+    color: $accent;
 }
 /* ※ 접힌 메뉴(52px)도 같은 규칙이다 — 왼쪽 16 + 아이콘 20 + 오른쪽 16 이라 아이콘이
    저절로 가운데에 온다.  가운데 정렬로 바꾸지 마라: 서랍이 움직이는 동안 아이콘이 튄다. */
@@ -633,6 +682,24 @@ QPushButton[role="warn"]:focus {
     border: $focus_w solid $focus;
     padding: $pad_control_focus;
 }
+/* 입력칸 옆 [폴더 선택…] — 입력칸과 같은 높이(같은 줄에서 위아래가 어긋나지 않게). */
+QPushButton[grade="field"] {
+    padding: $pad_input;
+    min-height: $input_h;
+}
+/* 왼쪽 메뉴는 테두리 없는 줄이다 — 클릭 뒤 남는 포커스가 테두리를 되살리지 않게(바탕색이 상태를 말한다). */
+QPushButton[grade="rail"]:focus {
+    border: 1px solid transparent;
+    padding: $pad_control;
+    padding-left: 16px;
+}
+/* 접힌 메뉴 칸(54) — 아이콘을 위로 올려 아래 짧은 이름과 한 묶음으로 바탕 가운데에 둔다.
+   아이콘 가운데 = 칸 위에서 22 = 펼친 칸(44)의 가운데라 접어도 아이콘이 움직이지 않는다. */
+QPushButton[grade="rail"][railFolded="true"],
+QPushButton[grade="rail"][railFolded="true"]:focus {
+    padding-top: 0px;
+    padding-bottom: 10px;
+}
 
 /* ★ :disabled 도 마찬가지다 — `[role="ghost"] { color: $ink2 }` 가 일반
    `:disabled { color: $mute }` 를 특이도 동급·후순위로 덮어, 비활성 ± 버튼의 글리프가
@@ -641,8 +708,8 @@ QPushButton[role="ghost"]:disabled,
 QPushButton[role="danger"]:disabled,
 QPushButton[role="warn"]:disabled {
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
-    background: transparent;
+    border: 1px solid $disabled_fill;
+    background-color: $disabled_fill;
 }
 
 QPushButton:checked {
@@ -681,20 +748,19 @@ QPushButton[role="option"]:focus {
     padding: $pad_control_focus;
 }
 QPushButton[role="option"]:disabled {
-    background: transparent;
+    background-color: $disabled_fill;
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
 }
 QPushButton[role="option"]:checked:disabled {
     background-color: $accent_tint_soft;
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
 }
 
 /* 입력 오류 — 왜 [검증 시작] 을 누를 수 없는지 툴팁이 아니라 눈에 보이게. */
 QLineEdit[state="invalid"] {
     border: 1px solid $danger;
-    background-color: $danger_tint_soft;
 }
 QLineEdit[state="invalid"]:focus {
     border: $focus_w solid $danger;
@@ -725,8 +791,7 @@ QWidget[role="loadingPanel"] {
 /* 패널 안 컨테이너 — 맨 QWidget 은 전역 규칙의 $bg 를 물려받아 패널 면 위에 색이 다른
    띠로 보인다.  투명으로 못 박는다. */
 QWidget[role="loadingBarHost"],
-QWidget[role="rowHost"],
-QWidget[role="switchRowText"] {
+QWidget[role="rowHost"] {
     background: transparent;
 }
 /* ── 로딩 패널(개선안 2a — 원형 웨이퍼 맵) ──────────────────────────────
@@ -838,14 +903,14 @@ QPushButton[role="segment"]:focus {
     padding: 3px 13px;          /* 보더가 굵어진 만큼 패딩을 줄여 높이 고정 */
 }
 QPushButton[role="segment"]:disabled {
-    background: transparent;
+    background-color: $disabled_fill;
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
 }
 QPushButton[role="segment"]:checked:disabled {
     background-color: $accent_tint_soft;
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
 }
 
 /* 차단 이유 문구 — '왜 지금 확인할 수 없는가'.  ★ `role="warn"` 은 QPushButton 에만
@@ -905,9 +970,9 @@ QPushButton[role="slotTile"]:checked {
     font-weight: 700;
 }
 QPushButton[role="slotTile"]:disabled {
-    background: transparent;
+    background-color: $disabled_fill;
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
 }
 
 QFrame[role="card"][bare="true"] {
@@ -925,12 +990,6 @@ QFrame[flat="true"] {
     border-radius: 0;
 }
 QFrame[flat="true"][joined="true"] { border-bottom: none; }
-/* 끌어다 놓을 줄 강조(설정 화면 — `SetupPage._set_drop_hl`) */
-QFrame[role="card"][drop="on"],
-QWidget[role="rowHost"][drop="on"] {
-    background-color: $accent_tint;
-    border: 1px solid $accent;
-}
 QLabel[role="sectionHead"] {
     color: $ink;
     font-weight: 700;
@@ -1013,9 +1072,9 @@ QPushButton[role="rowAction"]:focus {
     padding: 2px 7px;
 }
 QPushButton[role="rowAction"]:disabled {
-    background: transparent;
+    background-color: $disabled_fill;
     color: $disabled_ink;
-    border: 1px dashed $disabled_line;
+    border: 1px solid $disabled_fill;
 }
 
 /* 링크형 버튼 — 반복되는 2차 액션(더 보기 ▾·접기 ▴)용. 테두리 없이 조용히.
@@ -1065,6 +1124,14 @@ QSpinBox:disabled, QDoubleSpinBox:disabled {
 QSpinBox::up-button, QDoubleSpinBox::up-button,
 QSpinBox::down-button, QDoubleSpinBox::down-button {
     width: 18px;
+}
+/* 허용 오차(NoButtons + 바깥 ±) — 위 18px 규칙이 NoButtons 와 만나면 입력란이 1px 로
+   눌려 값이 안 보였다(실측).  버튼 자리를 테두리 기준 0 폭으로 둔다. */
+QDoubleSpinBox[stepper="outside"]::up-button,
+QDoubleSpinBox[stepper="outside"]::down-button {
+    subcontrol-origin: border;
+    width: 0px;
+    border: none;
 }
 /* ★ 순서 주의 — Qt 는 `위젯::서브컨트롤:상태` 만 인식한다.
    `QSlider:disabled::sub-page` 처럼 상태를 앞에 쓰면 규칙이 **무시**돼, 무효해진
@@ -1347,8 +1414,487 @@ QLabel[role="viewerHint"] {
     background: transparent;
     font-size: $font_caption_sz;
 }
-/* 좌우 비교 뷰어의 사진 칸 — 검정 바탕 + 면 경계 1px. */
+/* 좌우 비교 뷰어의 사진 칸 — 패널 바탕 + 면 경계 1px(사진 위아래 여백이 검게 남지 않게). */
 QLabel[role="viewerPane"] {
-    background-color: $viewer_bg;
+    background-color: $panel;
     border: 1px solid $line;
+}
+
+/* ── GL 히스토그램 뷰어 ────────────────────────────────────────────────
+   사진 위에 뜨는 도구 팔레트·배율 막대, 오른쪽 인스펙터, 머리줄의 글자 버튼.
+   팔레트는 검은 사진 위에 떠서 화면 색($bg)이 아니라 사진 판독용 잉크를 쓴다. */
+QFrame[role="viewerTools"] {
+    background-color: rgba(27, 26, 23, 220);
+    border: none;
+    border-radius: $radius_sm;
+}
+QToolButton[role="viewerTool"] {
+    background: transparent;
+    color: $bg;
+    border: 1px solid transparent;
+    border-radius: $radius_sm;
+    padding: 0px 8px;
+    min-width: 14px;
+    min-height: 30px;
+    font-size: $font_caption_sz;
+}
+QToolButton[role="viewerTool"]:hover {
+    background-color: rgba(255, 255, 255, 36);
+}
+QToolButton[role="viewerTool"]:checked {
+    background-color: $accent;
+}
+QToolButton[role="viewerTool"]:focus {
+    border: 1px solid $bg;
+}
+QToolButton[role="viewerTool"]:disabled {
+    color: $viewer_ink;
+}
+QLabel[role="viewerZoom"] {
+    color: $bg;
+    background: transparent;
+    font-family: $font_mono;
+    font-size: $font_caption_sz;
+    padding: 0px 8px;
+}
+QFrame[role="viewerSep"] {
+    background-color: rgba(255, 255, 255, 60);
+    border: none;
+}
+QFrame[role="inspector"] {
+    background-color: $panel;
+    border: none;
+    border-left: 1px solid $line2;
+}
+QFrame[role="statusBar"] {
+    background-color: $bg;
+    border: none;
+    border-top: 1px solid $line2;
+}
+/* 글자 버튼 — 버튼 위계의 셋째 단(남색 채움 > 외곽선 > 글자). */
+QPushButton[role="textAction"],
+QPushButton[role="textAccent"] {
+    background: transparent;
+    color: $ink2;
+    border: 1px solid transparent;
+    border-radius: $radius_sm;
+    padding: 0px 10px;
+    min-height: 30px;           /* 보더 2 와 합쳐 32 — 옆 외곽선 버튼과 같은 높이 */
+}
+QPushButton[role="textAccent"] {
+    color: $accent;
+    font-weight: 700;
+}
+QPushButton[role="textAction"]:hover,
+QPushButton[role="textAccent"]:hover {
+    background-color: $elev;
+    color: $ink;
+}
+QPushButton[role="textAction"]:focus,
+QPushButton[role="textAccent"]:focus {
+    border: $focus_w solid $focus;
+}
+QPushButton[role="textAction"]:disabled,
+QPushButton[role="textAccent"]:disabled {
+    color: $disabled_ink;
+}
+/* 히스토그램 제목 줄의 'ROI 별로 보기' — 외곽선 32px 토글(켜면 남색 옅은 면). */
+QPushButton[role="histToggle"] {
+    background: transparent;
+    font-size: $font_caption_sz;
+    font-weight: 600;
+    color: $ink2;
+    border: 1px solid $line_strong;
+    border-radius: $radius_sm;
+    padding: 0px 12px;
+    min-height: 30px;
+    max-height: 30px;
+}
+QPushButton[role="histToggle"]:hover {
+    color: $ink;
+    border-color: $accent;
+}
+QPushButton[role="histToggle"]:checked {
+    background-color: $accent_tint;
+    color: $accent;
+    border-color: $accent;
+}
+QPushButton[role="histToggle"]:focus {
+    border: $focus_w solid $focus;
+}
+QPushButton[role="histToggle"]:disabled {
+    color: $disabled_ink;
+    border: 1px solid $line2;
+    background: transparent;
+}
+/* GL 상태줄 읽기값의 구역 글자 — 하한 이하 파랑 · 사이 중립 · 상한 이상 빨강.
+   ★ 파랑·빨강은 **차트 색과 같은 값**이다(`gl_charts._LOW`·`_HIGH`, E2b) — 강조색($accent)을
+     쓰면 차트의 하한 선과 다른 파랑이 된다.  test_gl_zone_colors 가 둘을 맞춰 본다. */
+QLabel[role="glZoneLow"], QLabel[role="glZoneMid"], QLabel[role="glZoneHigh"] {
+    font-family: $font_mono;
+}
+QLabel[role="glZoneLow"] {
+    color: #2F6FE0;
+    font-weight: 700;
+}
+QLabel[role="glZoneMid"] {
+    color: $ink2;
+}
+QLabel[role="glZoneHigh"] {
+    color: #E5322A;
+    font-weight: 700;
+}
+
+/* ===== Overkill 튜닝 — 왼쪽 열(폴더 · Zone) · 한 줄 요약 · 밑줄 탭 · 밀착 타일 · 줄 아래 상세 =====
+   상자 대신 면 색 하나(선택 행)와 1px 선만 쓴다. */
+QFrame[role="ovHeader"] {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid $line2;
+}
+QFrame[role="ovSide"] {
+    background-color: $panel;
+    border: none;
+    border-right: 1px solid $line2;
+}
+QScrollArea[role="ovSideScroll"],
+QScrollArea[role="ovSideScroll"] > QWidget > QWidget,
+QScrollArea[role="ovSideScroll"] QAbstractScrollArea::viewport {
+    background: transparent;
+    border: none;
+}
+QLabel[role="ovGroupHead"] {
+    color: $mute;
+    font-size: $font_caption_sz;
+}
+QFrame[role="ovRow"] {
+    background: transparent;
+    border: none;
+    border-radius: $radius_sm;
+}
+QFrame[role="ovRow"][selected="true"],
+QFrame[role="ovRow"][flash="on"] {
+    background-color: $accent_tint;
+}
+QLabel[role="ovRowName"] {
+    color: $ink;
+}
+QFrame[role="ovRow"][selected="true"] QLabel[role="ovRowName"] {
+    color: $accent;
+    font-weight: 700;
+}
+QFrame[role="ovRow"][excluded="true"] QLabel[role="ovRowName"] {
+    color: $mute;
+}
+QLabel[role="ovRowCount"] {
+    font-family: $font_mono;
+    font-size: $font_caption_lg_sz;
+    color: $mute;
+}
+QLabel[role="ovRowNote"] {
+    font-size: $font_caption_sz;
+    color: $mute;
+}
+QLabel[role="ovRowNote"][warn="true"] {
+    color: $warn;
+}
+QPushButton[role="ovRowX"] {
+    background: transparent;
+    color: $mute;
+    border: none;
+    border-radius: $radius_sm;
+    padding: 0px;
+}
+QPushButton[role="ovRowX"]:hover {
+    background-color: $danger_tint;
+    color: $danger;
+}
+/* LOT 줄의 ▾/▸ — 웨이퍼 목록 펴기 · 접기. */
+QPushButton[role="ovRowDisc"] {
+    background: transparent;
+    color: $mute;
+    border: none;
+    border-radius: $radius_sm;
+    padding: 0px;
+}
+QPushButton[role="ovRowDisc"]:hover {
+    color: $ink;
+}
+/* LOT 안 웨이퍼 한 줄 — 넣은 줄은 잉크, 뺀 줄은 옅게 + 수에 취소선. */
+QFrame[role="ovRow"][wafer="true"] QLabel[role="ovRowCount"] {
+    color: $ink;
+}
+QFrame[role="ovRow"][wafer="true"][excluded="true"] QLabel[role="ovRowCount"] {
+    color: $mute;
+    text-decoration: line-through;
+}
+QPushButton[role="ovView"] {
+    background: transparent;
+    color: $mute;
+    border: none;
+    border-radius: $radius_sm;
+    padding: 0px 8px;
+    font-size: $font_caption_sz;
+}
+QPushButton[role="ovView"]:hover {
+    color: $ink;
+}
+QPushButton[role="ovView"]:checked {
+    color: $accent;
+    font-weight: 700;
+}
+QPushButton[role="ovView"]:disabled {
+    color: $disabled_ink;
+}
+/* GL 인스펙터 안 세그먼트 — 'ROI 별로 보기'(histToggle)와 같은 32 px · 같은 글자 크기, 비활성은 옅은 실선. */
+QPushButton[role="segment"][grade="gl"] {
+    min-height: 30px;
+    max-height: 30px;
+    padding: 0px 14px;
+}
+QPushButton[role="segment"][grade="gl"]:focus {
+    padding: 0px 14px;
+}
+QPushButton[role="segment"][grade="gl"]:disabled,
+QPushButton[role="segment"][grade="gl"]:checked:disabled {
+    border: 1px solid $line2;
+}
+QPushButton[role="segment"][grade="panel"] {
+    min-height: 30px;
+    max-height: 30px;
+    padding: 0px 14px;
+}
+QLabel[role="sumCap"] {
+    color: $mute;
+}
+QLabel[role="sumNum"] {
+    font-family: $font_mono;
+    font-weight: 700;
+    color: $ink;
+}
+QLabel[role="sumNum"][tone="over"] { color: $danger; }
+QLabel[role="sumNum"][tone="ok"] { color: $pass; }
+QLabel[role="sumNum"][tone="pick"] { color: $accent; }
+QFrame[role="ovTabs"] {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid $line2;
+}
+QPushButton[role="underTab"] {
+    background: transparent;
+    color: $mute;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0px;
+    padding: 0px 2px;
+    min-height: 30px;
+    max-height: 30px;
+}
+QPushButton[role="underTab"]:hover {
+    color: $ink;
+}
+QPushButton[role="underTab"]:checked {
+    color: $ink;
+    font-weight: 700;
+    border-bottom: 2px solid $accent;
+}
+QPushButton[role="underTab"]:focus {
+    border-bottom: 2px solid $focus;
+}
+QLabel[role="ovGroupName"] {
+    font-size: $font_caption_lg_sz;
+    font-weight: 700;
+    color: $ink2;
+}
+QLabel[role="tilePic"] {
+    background-color: $panel;
+    border: none;
+}
+QFrame[role="tileRing"] {
+    background: transparent;
+    border: 3px solid $accent;
+    border-radius: 0px;
+}
+QFrame[role="tileHover"] {
+    background: transparent;
+    border: 2px solid $mute;
+    border-radius: 0px;
+}
+QLabel[role="tileBadge"] {
+    background-color: $accent;
+    color: $on_accent;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 700;
+}
+/* 고르는 중(아직 [적용] 전) — 속 빈 점선 표시로 적용된 ✓ 와 구분한다. */
+QLabel[role="tileBadge"][pending="true"] {
+    background-color: $panel;
+    color: $accent;
+    border: 1px dashed $accent;
+}
+/* 사진 칸 정렬 줄 — 고르지 않은 글자는 보통 굵기(고른 것만 강조색 · 굵게). */
+QPushButton[role="ovView"][sort="true"]:!checked {
+    font-weight: 400;
+}
+/* 정렬 중일 때 사진 아래에 붙는 그 값 — 사진 위 얇은 띠. */
+QLabel[role="tileCap"] {
+    background-color: $panel;
+    color: $ink;
+    font-family: $font_mono;
+    font-size: 11px;
+}
+QLabel[role="tileMore"] {
+    background-color: $elev;
+    color: $ink;
+    border: 1px solid $line2;
+    border-radius: $radius_sm;
+    font-weight: 700;
+}
+/* Defect 고르기 팝업 — 타일 아래 막대(Overkill=경고색 · Defect=강조색)와 '놓침' 글자. */
+QFrame[role="pickBarOver"] {
+    background-color: $warn;
+    border: none;
+}
+QFrame[role="pickBarDef"] {
+    background-color: $accent;
+    border: none;
+}
+QLabel[role="pickMissed"] {
+    color: $danger;
+    font-weight: 700;
+}
+/* 펼친 값 띠 — 강조색을 옅게 깐 면 + 위쪽 강조색 선(윗면 가운데에 고른 타일을 가리키는 작은 삼각형이 붙는다). */
+QFrame[role="ovDetail"] {
+    background-color: $accent_tint_soft;
+    border: none;
+    border-top: 1px solid $accent;
+    border-bottom: 1px solid $line2;
+    border-radius: 0px;
+}
+/* 상세의 기준 칩 — 이름 · 이 Defect 의 값(크게) · 레시피 기준 · (바꿨으면) 조정 기준. 값이 지금 기준에 걸리면 빨강. */
+QFrame[role="ovChip"] {
+    background-color: $elev;
+    border: 1px solid $line2;
+    border-radius: $radius_sm;
+}
+QLabel[role="ovChipName"] {
+    background: transparent;
+    color: $mute;
+}
+QLabel[role="ovChipValue"] {
+    background: transparent;
+    color: $ink;
+    font-family: $font_mono;
+    font-size: 16px;
+    font-weight: 700;
+}
+QLabel[role="ovChipValue"][fail="true"] {
+    color: $danger;
+}
+QLabel[role="ovChipRef"] {
+    background: transparent;
+    color: $ink2;
+    font-family: $font_mono;
+}
+/* 'Defect 표시' — 켜짐/꺼짐을 색으로만: 꺼짐은 조용한 외곽선, 켜짐은 강조색 옅은 면 + 강조색 글자. */
+QPushButton[role="ovBoxToggle"] {
+    background: transparent;
+    border: 1px solid $line_strong;
+    border-radius: $radius_sm;
+    color: $mute;
+    font-size: $font_caption_sz;
+    padding: 2px 10px;
+    min-height: 22px;
+    max-height: 22px;
+}
+QPushButton[role="ovBoxToggle"]:hover {
+    color: $ink2;
+}
+QPushButton[role="ovBoxToggle"]:checked {
+    background-color: $accent_tint;
+    border-color: $accent_tint;
+    color: $accent;
+}
+QPushButton[role="ovBoxToggle"]:focus {
+    border-color: $focus;
+}
+QLabel[role="ovFile"] {
+    font-size: $font_caption_sz;
+    color: $mute;
+}
+
+/* Overkill 기준 열 — 분포 바로 밑 같은 축 슬라이더(상자 없음).  분포 · 자름선 · 손잡이 중심이 같은 x 를 쓴다(손잡이 12px). */
+QLineEdit[role="axisField"] {
+    background-color: $elev;
+    border: 1px solid $line_strong;
+    border-radius: $radius_sm;
+    padding: 0px 8px;
+    min-height: 30px;
+    font-family: $font_mono;
+    color: $ink;
+}
+QLineEdit[role="axisField"]:hover {
+    border-color: $mute;
+}
+QLineEdit[role="axisField"]:focus {
+    border: $focus_w solid $focus;
+    padding: 0px 7px;
+}
+/* 어느 Zone에서 왔니? 펼친 LOT 아래 웨이퍼 줄들 — 왼쪽 가는 선으로 그 LOT 에 딸린 것임을 보인다. */
+QFrame[role="zoLotWafers"] {
+    background: transparent;
+    border: none;
+    border-left: 1px solid $line;
+    margin-left: 14px;
+}
+/* 어느 Zone에서 왔니? 왼쪽 바 하한 칸 — 고르기 줄(30px)에 맞춘 낮은 입력칸. */
+QLineEdit[role="zoParam"] {
+    background-color: $elev;
+    border: 1px solid $line;
+    border-radius: $radius_sm;
+    padding: 0px 6px;
+    min-height: 22px;           /* 보더 2 와 합쳐 24 — 위 고르기 줄보다 낮게 */
+    max-height: 22px;
+    font-family: $font_mono;
+    font-size: $font_caption_lg_sz;
+    color: $ink;
+}
+QLineEdit[role="zoParam"]:hover {
+    border-color: $mute;
+}
+QLineEdit[role="zoParam"]:focus {
+    border: $focus_w solid $focus;
+    padding: 0px 5px;
+}
+QLabel[role="axisDelta"] {
+    font-family: $font_mono;
+    color: $danger;
+}
+QLabel[role="axisDelta"][tone="ok"] {
+    color: $pass;
+}
+QLabel[role="axisNote"] {
+    color: $mute;
+    font-size: 11px;
+}
+QSlider[role="axis"]::groove:horizontal {
+    height: 4px;
+    background: $line2;
+    border-radius: 2px;
+}
+QSlider[role="axis"]::sub-page:horizontal {
+    background: $accent;
+    border-radius: 2px;
+}
+QSlider[role="axis"]::handle:horizontal {
+    width: 10px;
+    height: 10px;
+    margin: -4px 0px;
+    background: $elev;
+    border: 1px solid $ink;
+    border-radius: 6px;
+}
+QSlider[role="axis"]::handle:horizontal:hover {
+    background: $panel;
 }

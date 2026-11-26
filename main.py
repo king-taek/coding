@@ -214,6 +214,46 @@ def _setup_logging() -> None:
         log.propagate = False                  # 루트로 새어 stderr 에 중복 출력 방지
     except Exception:
         pass
+    _setup_crash_capture()
+
+
+_FAULT_FH = None        # faulthandler 가 쓰는 파일 — 닫히면 안 되므로 모듈이 쥔다
+
+
+def _setup_crash_capture() -> None:
+    """조용히 죽는 경우를 남긴다.
+
+    ★ ``app.log`` 에는 파이썬 로그만 간다.  네이티브 크래시(Qt abort·세그폴트)나, PyQt6 가 슬롯 안의
+    처리 안 된 예외로 앱을 끝내는 경우엔 **아무 흔적도 없이** 새 실행 로그만 이어졌다.
+      · ``faulthandler`` → 캐시 폴더 ``crash.log`` 에 죽는 순간의 파이썬 스택
+      · ``sys.excepthook`` → 처리 안 된 예외를 ``app.log`` 에 남긴다(훅이 있으면 PyQt6 가 abort 하지 않고 훅을 부른다)
+    진단 보조라 실패는 삼킨다."""
+    global _FAULT_FH
+    import faulthandler
+    import logging
+    import sys
+
+    from aoi_verification.app.utils import paths
+
+    try:
+        if _FAULT_FH is None:
+            _FAULT_FH = open(paths.cache_root() / "crash.log", "a", encoding="utf-8")
+            faulthandler.enable(file=_FAULT_FH, all_threads=True)
+    except Exception:
+        pass
+    try:
+        prev = sys.excepthook
+
+        def _hook(etype, value, tb):
+            try:
+                logging.getLogger("aoi").critical("처리 안 된 예외", exc_info=(etype, value, tb))
+            except Exception:
+                pass
+            prev(etype, value, tb)
+
+        sys.excepthook = _hook
+    except Exception:
+        pass
 
 
 _BOOT: list = []        # (구간 이름, time.monotonic()) — 시작 지연을 app.log 에 남기려는 기록

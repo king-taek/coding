@@ -11,7 +11,8 @@
 - 결함 X/Y: ``ColorImageGrabingInfo.ini`` 의 원시 X/Y(FaultX/FaultY), 없으면 점표기
   파일명의 앞 두 토큰.  die 좌표·KLA 좌표는 쓰지 않는다.
 - Scan 중심: 같은 폴더 ``ScanResultImageList.txt`` (Version=1) 의 [파일명, X, Y].
-- pixel: :func:`pixel_size.scan_pixel_size_xy`.  **못 읽으면 실패**다 — 다른 기능이
+- pixel: Scan 마다 그 **레시피의** 값(:func:`pixel_size.scan_pixel_size_xy_recipe`, 파일명
+  ``….t.N.jpeg`` 의 N — 다중 레시피는 배율이 달라 픽셀 크기가 4배 다를 수 있다).  **못 읽으면 실패**다 — 다른 기능이
   쓰는 0.77 기본값을 여기에 흘리지 않는다(배율이 틀리면 엉뚱한 곳을 자른다).
 - W/H 는 **실제 JPEG 크기**를 읽는다.  3168×1024 를 상수로 두지 않고, 크기가
   다르다고 2배 같은 보정을 추측하지도 않는다.  축 반전·교환·회전 없음.
@@ -38,8 +39,9 @@ from typing import Optional
 from . import abs_coord, camtek_ini, pixel_size
 from .ini_text import decode_ini_bytes
 
-__all__ = ["SCAN_LIST_NAME", "CROP_SIDE_UM", "Candidate", "ScanMatch",
-           "parse_manifest", "scan_uv", "crop_box", "rank_candidates", "resolve", "resolve_xy",
+__all__ = ["SCAN_LIST_NAME", "CROP_SIDE_UM", "Candidate", "ScanMatch", "ScanHit", "ScanDefects",
+           "is_scan_name", "defects_in", "load_image",
+           "parse_manifest", "scan_uv", "crop_box", "rank_candidates", "resolve", "resolve_xy", "resolve_xy_many",
            "cut", "load_crop", "crops_from", "load_full", "clear_caches"]
 
 _LOG = logging.getLogger("aoi.scan")
@@ -125,6 +127,17 @@ def crop_box(uv, pixel_xy, side_um: float = CROP_SIDE_UM) -> tuple[int, int, int
             cw, ch)
 
 
+def mark_box(box, frac: float = 0.5) -> tuple[int, int, int, int]:
+    """Scan 전체 위에 그리는 Defect 표시 네모 — Crop 범위 ``box`` 와 **중심은 같고** 폭·높이만 ``frac`` 배.
+
+    화면 표시 전용이다 — Crop 범위(:func:`crop_box`) · 잘라내는 크기 · 엑셀은 그대로 둔다.
+    정수 (left, top, w, h), 폭·높이는 최소 1px."""
+    left, top, w, h = box
+    nw, nh = max(1, round(w * frac)), max(1, round(h * frac))
+    cx, cy = left + w / 2.0, top + h / 2.0
+    return (math.floor(cx - nw / 2.0 + 0.5), math.floor(cy - nh / 2.0 + 0.5), nw, nh)
+
+
 def _coverage(box, size_wh) -> float:
     left, top, cw, ch = box
     ix = max(0, min(left + cw, size_wh[0]) - max(left, 0))
@@ -146,18 +159,20 @@ def rank_candidates(defect_xy, entries, pixel_xy,
                     side_um: float = CROP_SIDE_UM) -> list[Candidate]:
     """결함을 원본 안에 담은 Scan 들을 Crop 에 알맞은 순서로.
 
-    ``entries`` = [(경로, 중심XY, (W, H))].  규칙: coverage(요청 Crop 중 원본과 겹치는
+    ``entries`` = [(경로, 중심XY, (W, H))] 또는 [(…, 픽셀XY)] — 넷째 값이 있으면 그 Scan 은
+    ``pixel_xy`` 대신 그 값으로 계산한다(레시피별 픽셀 크기).  규칙: coverage(요청 Crop 중 원본과 겹치는
     비율) 내림차순 → 정규화 중심 거리 오름차순 → 파일명(casefold, 원래 이름) 순.
     manifest 중심이 가장 가까운 것을 고르지 않는다 — Scan 은 가로·세로 범위가 달라
     가까운 중심이 결함을 더 잘 담는다는 보장이 없다."""
     out: list[tuple[tuple, Candidate]] = []
-    for path, center, (w, h) in entries:
-        if w <= 0 or h <= 0:
+    for path, center, (w, h), *own in entries:
+        px = own[0] if own else pixel_xy
+        if w <= 0 or h <= 0 or px is None:
             continue
-        u, v = scan_uv(defect_xy, center, (w, h), pixel_xy)
+        u, v = scan_uv(defect_xy, center, (w, h), px)
         if not (0.0 <= u < w and 0.0 <= v < h):
             continue
-        box = crop_box((u, v), pixel_xy, side_um)
+        box = crop_box((u, v), px, side_um)
         cov = _coverage(box, (w, h))
         dist = ((u - w / 2) / (w / 2)) ** 2 + ((v - h / 2) / (h / 2)) ** 2
         name = Path(path).name
@@ -200,7 +215,7 @@ def _mtime(p: Path) -> int:
 
 # Scan 머리(W, H)를 동시에 몇 개까지 읽을까 — NAS 는 한 번 열 때마다 왕복 지연이 있어
 # 수백 장을 차례로 열면 수 초가 걸린다.  지연이 대부분이라 나눠 열면 그만큼 줄어든다.
-_SIZE_WORKERS = 16
+_SIZE_WORKERS = 48
 _index_lock = threading.Lock()
 
 
@@ -281,16 +296,182 @@ def resolve_xy(folder, xy, side_um: float = CROP_SIDE_UM) -> ScanMatch:
     return _resolve(folder, folder, lambda: xy, side_um)
 
 
+def resolve_xy_many(folder, xys, side_um: float = CROP_SIDE_UM) -> list:
+    """:func:`resolve_xy` 를 한 폴더의 결함 여럿에 — 목록·폴더 mtime stat 과 픽셀 크기 조회를 **한 번만** 한다.
+    결과는 ``xys`` 와 같은 순서·같은 값(하나씩 부른 것과 같다).  NAS 에서는 결함마다 stat 2번이 왕복이라
+    120개만 해도 1초 넘게 걸렸다(측정)."""
+    folder = Path(folder)
+    prep = _prepare(folder, folder)
+    return [_rank(prep, folder, folder, lambda xy=xy: xy, side_um) for xy in xys]
+
+
 def _resolve(folder: Path, color: Path, get_xy, side_um: float) -> ScanMatch:
+    return _rank(_prepare(folder, color), folder, color, get_xy, side_um)
+
+
+# ---------------------------------------------------------------------------
+# 거꾸로 — Scan 사진 한 장 → 그 안에 찍힌 Defect 들 (사진 정보 화면, 사용자 요청 2026-11-24)
+# ---------------------------------------------------------------------------
+NOT_LISTED = "not_listed"          # 이 Scan 이 목록 파일에 없다
+
+
+def _is_num(tok: str) -> bool:
+    try:
+        float(tok)
+        return True
+    except ValueError:
+        return False
+
+
+def is_scan_name(name: str) -> bool:
+    """Camtek Scan 사진 이름(``X.Y.t.jpeg`` · ``X.Y.t.N.jpeg``, X · Y 는 수)인가."""
+    toks = Path(name).stem.split(".")
+    if len(toks) == 4 and not toks[3].isdigit():
+        return False
+    return (len(toks) in (3, 4) and toks[2].lower() == "t"
+            and _is_num(toks[0]) and _is_num(toks[1]))
+
+
+@dataclass(frozen=True)
+class ScanHit:
+    """Scan 사진 안에 든 Defect 하나."""
+    path: Path                     # 그 Defect 의 Color 사진 경로 — 정보 조회 키(파일이 없어도 된다)
+    xy: tuple[float, float]        # 절대 X/Y(µm) — ColorImageGrabingInfo.ini
+    recipe: int                    # 그 Defect 를 찍은 레시피(``RecipeNumber``, 없으면 0)
+    uv: tuple[float, float]        # Scan 원본 픽셀
+    box: tuple[int, int, int, int]  # 300 µm Crop 범위
+
+
+@dataclass(frozen=True)
+class ScanDefects:
+    """:func:`defects_in` 결과.  ``status == OK`` 인데 ``hits`` 가 비면 '이 사진 안에 Defect 없음'."""
+    status: str
+    scan_path: Path
+    size_wh: Optional[tuple[int, int]] = None
+    pixel_xy: Optional[tuple[float, float]] = None
+    hits: tuple[ScanHit, ...] = field(default_factory=tuple)
+
+    @property
+    def ok(self) -> bool:
+        return self.status == OK
+
+
+def _hit_order(scan_recipe: Optional[int]):
+    """같은 레시피 Defect 먼저, 그다음 위→아래 · 왼쪽→오른쪽(사진을 읽는 순서)."""
+    same = scan_recipe if scan_recipe is not None else 1
+    return lambda h: (h.recipe not in (same, 0), h.uv[1], h.uv[0], h.path.name.casefold())
+
+
+def defects_in(scan_path, side_um: float = CROP_SIDE_UM) -> ScanDefects:
+    """Scan 사진 한 장 → 그 안에 든 Defect 들.  :func:`rank_candidates` 의 역방향이다 —
+    같은 :func:`scan_uv` · 같은 포함 조건(``0 ≤ u < W``, ``0 ≤ v < H``) · 같은 :func:`crop_box`.
+    그래서 INI 에 좌표가 있는 Color 사진에서 이 Scan 을 찾았다면, 이 Scan 에서도 그 Defect 가 같은 자리에 나온다.
+    (정방향은 INI 항목이 없으면 Color 파일명의 점표기로 물러서지만, 거꾸로는 INI 에 적힌 Defect 만 셀 수 있다.)
+
+    값은 전부 그 폴더 파일에서 읽는다: 중심 = ``ScanResultImageList.txt``(Scan 파일명의 두 수치는
+    절대좌표가 아니라 쓰지 않는다), 크기 = 실제 JPEG, 픽셀 = 그 Scan 레시피의 값(못 읽으면 실패),
+    Defect = ``ColorImageGrabingInfo.ini`` 의 X/Y.  레시피는 거르지 않는다(정방향도 거르지 않는다) —
+    같은 레시피를 먼저 늘어놓는다.  정렬 사진(``.wlup``)·Scan 이름은 Defect 가 아니라 뺀다.
+    Color 사진 항목이 없는 Defect(Surface.flt 에만 있는 것)는 아직 보이지 않는다.
+    예외를 밖으로 내지 않는다."""
+    scan = Path(scan_path)
+    folder = scan.parent
+    try:
+        lst = folder / SCAN_LIST_NAME
+        if not lst.exists():
+            return ScanDefects(NO_MANIFEST, scan)
+        status, rows = parse_manifest(decode_ini_bytes(lst.read_bytes()))
+        if status != OK:
+            return ScanDefects(status, scan)
+        center = next(((x, y) for n, x, y in rows if n.casefold() == scan.name.casefold()), None)
+        if center is None:
+            return ScanDefects(NOT_LISTED, scan)
+        wh = _image_size(str(scan))
+        if wh is None or wh[0] <= 0 or wh[1] <= 0:
+            return ScanDefects(UNREADABLE, scan)
+        recipe_n = tile_recipe(scan.name)
+        px = pixel_size.scan_pixel_size_xy_recipe(folder, recipe_n)
+        if px is None:
+            return ScanDefects(NO_PIXEL_SIZE, scan, wh)
+        from .wafer_geometry import is_alignment_photo
+        abs_xy = camtek_ini.load_abs_folder(folder)
+        if not abs_xy:
+            return ScanDefects(NO_COORDINATES, scan, wh, px)
+        names = camtek_ini.load_name_folder(folder)
+        recipes = camtek_ini.load_recipe_folder(folder)
+        try:
+            with os.scandir(folder) as it:
+                real = {Path(e.name).stem.lower(): e.path for e in it
+                        if e.is_file() and Path(e.name).suffix.lower() in (".jpeg", ".jpg")}
+        except OSError:
+            real = {}
+        hits = []
+        w, h = wh
+        for stem, xy in abs_xy.items():
+            name = names.get(stem, stem)
+            if is_alignment_photo(name) or is_scan_name(name):
+                continue
+            u, v = scan_uv(xy, center, wh, px)
+            if not (0.0 <= u < w and 0.0 <= v < h):
+                continue
+            # 사진이 폴더에 있으면 그 실제 경로, 없으면 INI 섹션 이름 그대로(어느 쪽이든 stem 이 INI 키와 같다).
+            path = Path(real[stem]) if stem in real else folder / name
+            if path.stem.lower() != stem:
+                path = folder / (name + ".jpeg")      # 섹션 이름에 확장자가 없을 때 — stem 이 잘리지 않게
+            hits.append(ScanHit(path, xy, int(recipes.get(stem, 0) or 0), (u, v),
+                                crop_box((u, v), px, side_um)))
+        hits.sort(key=_hit_order(recipe_n))
+        return ScanDefects(OK, scan, wh, px, tuple(hits))
+    except Exception:
+        _LOG.exception("Scan 사진 안 Defect 찾기 실패: %s", scan)
+        return ScanDefects(UNREADABLE, scan)
+
+
+def tile_recipe(name: str) -> Optional[int]:
+    """Scan 파일명 ``X.Y.t.N.jpeg`` 의 레시피 번호 N.  ``X.Y.t.jpeg``(단일 레시피)면 None."""
+    toks = Path(name).stem.split(".")
+    if len(toks) >= 2 and toks[-2].lower() == "t" and toks[-1].isdigit():
+        return int(toks[-1])
+    return None
+
+
+def _with_recipe_px(folder: Path, rows) -> tuple:
+    """행마다 그 Scan 레시피의 픽셀 크기를 붙인다 — 못 읽은 레시피의 행은 None(후보에서 빠진다)."""
+    cache: dict = {}
+    out = []
+    for path, center, wh in rows:
+        n = tile_recipe(Path(path).name)
+        if n not in cache:
+            cache[n] = pixel_size.scan_pixel_size_xy_recipe(folder, n)
+        out.append((path, center, wh, cache[n]))
+    return tuple(out)
+
+
+def _prepare(folder: Path, color: Path):
+    """폴더 단위 준비물 — ``(상태, 행들(+레시피별 픽셀 크기), 폴더 픽셀 크기)``.  못 읽으면 상태에 이유가 있다."""
     try:
         status, rows = _index(str(folder), _mtime(folder / SCAN_LIST_NAME),
                               _mtime(folder))
+        if status != OK:
+            return status, rows, None, None
+        rows = _with_recipe_px(folder, rows)
+        base = pixel_size.scan_pixel_size_xy(folder)
+        return status, rows, (base or next((r[3] for r in rows if r[3]), None)), None
+    except Exception as e:
+        _LOG.exception("Scan 연결 실패: %s", color)
+        return UNREADABLE, (), None, e
+
+
+def _rank(prep, folder: Path, color: Path, get_xy, side_um: float) -> ScanMatch:
+    status, rows, px, err = prep
+    try:
+        if err is not None:
+            return ScanMatch(UNREADABLE, color)
         if status != OK:
             return ScanMatch(status, color)
         xy = get_xy()
         if xy is None:
             return ScanMatch(NO_COORDINATES, color)
-        px = pixel_size.scan_pixel_size_xy(folder)
         if px is None:
             return ScanMatch(NO_PIXEL_SIZE, color, xy)
         cands = rank_candidates(xy, rows, px, side_um)
@@ -360,15 +541,75 @@ def load_crop(match: ScanMatch):
     return None
 
 
+_SENTINEL = 1          # 맨 아래 줄이 통째로 이 값이면 '거기까지 안 풀렸다' 로 보고 전체 디코드로 돌아간다
+
+
+def _decode_top(path, bottom: int):
+    """JPEG 위쪽 ``bottom`` 줄만 푼 이미지(나머지 줄은 쓰지 않는다) — 못 하면 None(호출부가 전체 디코드).
+
+    JPEG 는 위에서부터 한 줄씩 풀리므로 Crop 아래쪽은 풀 필요도, 읽을 필요도 없다(측정: 위 200줄 3 ms ·
+    전체 15 ms, NAS 에서는 읽는 바이트도 같은 비율로 준다).  **푼 줄은 전체 디코드와 같은 값이다**(테스트로 확인).
+    일부러 일찍 멈추면 디코더가 '깨짐' 코드를 돌려줘 진짜 깨진 파일과 구분이 안 되므로, 버퍼를 한 값으로 채워 두고
+    맨 아래 줄이 그대로면(= 거기까지 못 풀었다) None 을 돌려 전체 디코드가 판정하게 한다."""
+    from PIL import Image
+    with Image.open(path) as im:
+        if (im.format != "JPEG" or im.mode not in ("L", "RGB") or len(im.tile) != 1
+                or im.tile[0].codec_name != "jpeg" or bottom >= im.height):
+            return None
+        im.load_prepare()
+        im.im = Image.core.fill(im.mode, im.size, _SENTINEL if im.mode == "L" else (_SENTINEL,) * 3)
+        codec, _ext, offset, args = im.tile[0]
+        dec = Image._getdecoder(im.mode, codec, args, im.decoderconfig)
+        dec.setimage(im.im, (0, 0, im.width, bottom))
+        im.fp.seek(offset)
+        rest = b""
+        while True:
+            fresh = im.fp.read(65536)
+            if not fresh and not rest:
+                return None                     # 파일이 줄 수를 못 채우고 끝남 — 전체 디코드가 오류로 알린다
+            rest += fresh
+            n, _err = dec.decode(rest)
+            if n < 0:
+                break
+            if n == 0 and not fresh:
+                return None                     # 더 줄 데이터가 없는데 디코더도 못 나아감
+            rest = rest[n:]                      # 디코더가 덜 쓴 뒷부분은 다음 덩어리 앞에 붙인다(ImageFile.load 와 같다)
+        im.tile = []                             # crop() 이 다시 풀려 하지 않게
+        ext = im.crop((0, bottom - 1, im.width, bottom)).getextrema()
+        if all(b == (_SENTINEL, _SENTINEL) for b in (ext if im.mode == "RGB" else (ext,))):
+            return None
+        return im.copy()
+
+
 def crops_from(path, boxes) -> Optional[list]:
     """한 Scan 원본을 **한 번만** 디코드해 ``boxes`` 를 전부 자른다(공유 디코드 캐시를 거치지 않는다 —
-    스레드 여럿이 서로 다른 원본을 동시에 열어도 캐시를 밀어내지 않는다).  못 읽으면 None."""
+    스레드 여럿이 서로 다른 원본을 동시에 열어도 캐시를 밀어내지 않는다).  못 읽으면 None.
+
+    Crop 이 닿는 맨 아래 줄까지만 푼다(:func:`_decode_top`) — 그것이 안 되면 전체 디코드."""
     from PIL import Image
     try:
-        with Image.open(path) as src:
-            im = src.copy()      # EXIF 회전을 적용하지 않는다(raw 규약 — _decode 와 같다)
-        im.load()
+        im = None
+        if boxes:
+            need = max(min(b[1] + b[3], 1 << 30) for b in boxes)
+            if need >= 1:
+                try:
+                    im = _decode_top(path, need)
+                except Exception:
+                    im = None                    # 부분 디코드 실패 — 아래 전체 디코드가 같은 파일을 판정한다
+        if im is None:
+            with Image.open(path) as src:
+                im = src.copy()  # EXIF 회전을 적용하지 않는다(raw 규약 — _decode 와 같다)
+            im.load()
         return [cut(im, b) for b in boxes]
+    except Exception:
+        _LOG.warning("Scan 원본을 읽지 못함: %s", path)
+        return None
+
+
+def load_image(path):
+    """Scan 원본(raw, EXIF 회전 없음).  못 읽으면 None."""
+    try:
+        return _decode(Path(path))
     except Exception:
         _LOG.warning("Scan 원본을 읽지 못함: %s", path)
         return None

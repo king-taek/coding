@@ -33,6 +33,8 @@ HEX + 디코딩 정답값 동봉)을 brute-force 해 확정했다.  레이아웃
      쓰고, 아니면 **빈 결과**(측정정보 없음) — 틀린 수치보다 빈칸이 낫다.  152 사이드카
      110/110(장비 25대)이 ``_FIELDS`` 와 같은 자리였다(관측 2026-11-15).
   3. ``recipe`` 칸이 없는 레이아웃(120, AOI-10·11 의 136)은 recipe 를 ``None`` 으로 둔다.
+     ``Type``(Defect 종류 비트) · ``reclassify``(분류 번호)는 이름 표시용이라 **사이드카에서만** 읽고,
+     없으면 ``None`` 이다(이름 줄만 빠진다).
   · 120·136 의 Contrast 오프셋은 사이드카 값이다(파일 등급) — 실물 13 파일 값이 전부 0 이라
     값으로는 검산하지 못했다.  회귀 가드: ``test_surface_flt_layouts.py``(실물 바이트).
 
@@ -70,14 +72,19 @@ _FIELDS: dict[str, tuple[Optional[int], str]] = {
     "contrast":       (136, "d"),
     "zone":           (61,  "B"),
     "recipe":         (62,  "B"),
+    # 아래 둘은 사이드카에서만 읽는다 — 사이드카 없는 152 배치에는 위치를 정하지 않는다(하드코딩 금지).
+    "type":           (None, "i"),
+    "reclassify":     (None, "h"),
 }
 
-# 사이드카 필드 이름 → RawRecord 필드.  recipe 만 없어도 된다.
+# 사이드카 필드 이름 → RawRecord 필드.  recipe · Type · reclassify 는 없어도 된다.
 _SIDECAR_NAMES = {
     "ActualX": "actual_x", "ActualY": "actual_y", "area": "area",
     "BlobBreadth": "blob_breadth", "BlobFeretMax": "blob_feret_max",
     "Contrast": "contrast", "zone": "zone", "recipe": "recipe",
+    "Type": "type", "reclassify": "reclassify",
 }
+_OPTIONAL = ("recipe", "type", "reclassify")
 # 사이드카 Vartype(VARIANT 형) → struct 포맷.  실물에 나온 것: 2·3·4·5·17·22.
 _VARTYPE_FMT = {2: "h", 3: "i", 4: "f", 5: "d", 16: "b", 17: "B", 18: "H",
                 19: "I", 22: "i", 23: "I"}
@@ -85,8 +92,8 @@ _RE_SIZE = re.compile(r'<RecordSize\b[^>]*\bSize="(\d+)"')
 _RE_FIELD = re.compile(r"<Field\b([^>]*)>")
 _RE_ATTR = re.compile(r'(\w+)="([^"]*)"')
 
-# 모든 오프셋이 채워졌는지 — 하나라도 None 이면 파서는 비활성(빈 결과).
-_SCHEMA_READY: bool = all(off is not None for off, _ in _FIELDS.values())
+# 필수 오프셋이 모두 채워졌는지 — 하나라도 None 이면 파서는 비활성(빈 결과).
+_SCHEMA_READY: bool = all(off is not None for k, (off, _) in _FIELDS.items() if k not in _OPTIONAL)
 
 # Surface.flt 파일명 후보 — 대소문자 두 가지.
 _FLT_CANDIDATES = ("Surface.flt", "surface.flt")
@@ -94,7 +101,8 @@ _FLT_CANDIDATES = ("Surface.flt", "surface.flt")
 RawRecord = namedtuple(
     "RawRecord",
     ["actual_x", "actual_y", "area", "blob_breadth", "blob_feret_max", "contrast",
-     "zone", "recipe"],
+     "zone", "recipe", "type", "reclassify"],
+    defaults=(None, None),     # type · reclassify — 사이드카에만 있다
 )
 
 
@@ -176,7 +184,7 @@ def _parse_flt_by_field(data: bytes, size: int, fields: dict) -> tuple[RawRecord
         vals: dict[str, Optional[float]] = {}
         ok = True
         for name in RawRecord._fields:
-            offset, fmt = fields[name]
+            offset, fmt = fields.get(name, (None, "B"))
             if offset is None:
                 vals[name] = None
                 continue
@@ -211,11 +219,19 @@ def _sidecar_layout(flt: Path) -> Optional[tuple[int, dict]]:
             continue
         fmt = _VARTYPE_FMT.get(int(a["Vartype"])) if a.get("Vartype", "").isdigit() else None
         if fmt is None or not a.get("Offset", "").isdigit():
+            if key in ("type", "reclassify"):     # 이름 표시용 칸 — 못 읽어도 수치는 그대로 쓴다
+                continue
             return None
         fields[key] = (int(a["Offset"]), fmt)
     fields.setdefault("recipe", (None, "B"))
+    fields.setdefault("type", (None, "i"))
+    fields.setdefault("reclassify", (None, "h"))
     if set(fields) != set(RawRecord._fields):
         return None
+    for key in ("type", "reclassify"):      # 이름 표시용 칸이 레코드 밖이면 그 칸만 버린다(수치는 그대로)
+        off, fmt = fields[key]
+        if off is not None and off + struct.calcsize(_BYTE_ORDER + fmt) > size:
+            fields[key] = (None, fmt)
     if any(off is not None and off + struct.calcsize(_BYTE_ORDER + fmt) > size
            for off, fmt in fields.values()):
         return None

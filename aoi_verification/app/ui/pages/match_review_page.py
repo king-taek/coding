@@ -19,9 +19,9 @@ from pathlib import Path
 
 from PyQt6.QtCore import (QEvent, QObject, QPoint, QRect, QRectF, Qt, QTimer,
                           pyqtSignal)
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPixmap, QTextDocument
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPixmap
 from PyQt6.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout,
-                             QLabel, QMenu, QScrollArea, QSizePolicy,
+                             QLabel, QScrollArea, QSizePolicy,
                              QVBoxLayout, QWidget)
 
 from ... import i18n
@@ -37,6 +37,7 @@ from ..widgets.app_logo import build_logo_label
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.no_wheel_slider import NoWheelSlider
 from ..widgets.zoom_window import FullscreenViewer
+from ..widgets import photo_menu
 from ..widgets import sheet_host as sheets
 from ... import config as _config
 from ...coords import number_risk as _number_risk
@@ -60,6 +61,7 @@ _ARROW_W = 24
 # 슬롯 이름 열 폭.  화살표와 같은 이유로 상수다 — 행(`slot_host`)·예약폭 계산·헤더
 # 세 곳이 **같은 값**을 봐야 한다.  예전엔 96 이 세 군데에 따로 적혀 있었다.
 _SLOT_W = 96
+_SLOT_HEAD_CHARS = 8      # 슬롯 이름 윗줄 글자 수(나머지는 아랫줄)
 # ✕/↩ 토글 열 폭.  헤더·행·예약폭 계산 세 곳이 공유한다.
 # ★ 예전엔 `PROFILE.toggle_w`(스위치 트랙 크기 토큰)를 빌려 썼는데, 이 열은 스위치가
 #   아니라 컴팩트 버튼이라 이름과 쓰임이 어긋났다 — 토큰을 스위치에 맞게 고치면 이
@@ -238,9 +240,13 @@ class _LazyThumb(QLabel):
         self.setPixmap(ph)
         # 우클릭 컨텍스트 메뉴 (크게보기). 차순위 타일 내부 썸네일은 상위
         # _RunnerUpTile 이 좌우 비교 뷰어를 직접 열도록 비활성화한다 (#4).
+        # 왼쪽 클릭도 같은 '크게 보기'(현택님: 사진 클릭하면 크게) — 차순위 타일 안의
+        # 썸네일(메뉴 끔)은 클릭이 '교체' 라 건드리지 않는다.
+        self._click_to_view = bool(enable_context_menu)
         if enable_context_menu:
             self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             self.customContextMenuRequested.connect(self._on_context_menu)
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def paintEvent(self, event):  # noqa: N802
         super().paintEvent(event)
@@ -275,14 +281,21 @@ class _LazyThumb(QLabel):
         self._apply_scaled()
 
     def _on_context_menu(self, pos) -> None:
-        menu = QMenu(self)
-        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
-        chosen = menu.exec(self.mapToGlobal(pos))
-        if chosen is act:
-            if self._on_view is not None:
-                self._on_view()
-            else:
-                _open_fullscreen(self._path, self.window())
+        if photo_menu.ask(self, self.mapToGlobal(pos), self._path):
+            self._view_large()
+
+    def _view_large(self) -> None:
+        if self._on_view is not None:
+            self._on_view()
+        else:
+            _open_fullscreen(self._path, self.window())
+
+    def mousePressEvent(self, event):  # noqa: N802
+        if self._click_to_view and event.button() == Qt.MouseButton.LeftButton:
+            self._view_large()
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
 
 class _PairCrossOut(QWidget):
@@ -365,15 +378,17 @@ class _RunnerUpTile(QFrame):
             self.swap_requested.emit(self.item, self.score)
         super().mousePressEvent(event)
 
-    # ★ 더블클릭 확대는 제거했다 — 후보를 연달아 눌러 교체하다 보면 두 번째 클릭이
-    #   더블클릭으로 붙어 원하지 않는 비교 창이 떴다(사용자 지적).  프레스는 '교체'라는
-    #   잦은 동작이고 확대는 드문 동작이라, 같은 버튼의 연타에 둘을 겹치면 잦은 쪽이
-    #   드문 쪽을 오발한다.  확대는 아래 우클릭 메뉴로만 연다.
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        # 더블클릭 = 크게 보기(현택님 2026-11-24 결정으로 바꿈 — 예전엔 오발 때문에 뺐다).
+        # 첫 번째 누름은 이미 교체를 했다 — 교체한 뒤 크게 보는 것은 괜찮다(같은 결정).
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.view_requested.emit(self.item)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def _on_context_menu(self, pos) -> None:
-        menu = QMenu(self)
-        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
-        chosen = menu.exec(self.mapToGlobal(pos))
-        if chosen is act:
+        if photo_menu.ask(self, self.mapToGlobal(pos), self.item.path):
             self.view_requested.emit(self.item)
 
 
@@ -446,8 +461,8 @@ class _MatchRow(QFrame):
         self._slot_label.setProperty("role", "slotHead")
         # ★ 좁은 열(96px)이라 웨이퍼 ID 는 대부분 넘친다.  평범한 QLabel 은 말줄임 없이
         #   **그냥 잘라** 버려서 어느 슬롯인지 알 수 없었다(툴팁도 없었다).
-        #   **가운데** 생략인 이유: 실제 ID 는 앞이 공통이다(W75483·04XYG4 / W75483·03XYC2).
-        #   뒤를 자르면 서로 다른 웨이퍼가 똑같이 렌더된다 — `_SlotTile._elide` 와 같은 판단.
+        #   그래서 전체를 두 줄(앞 8자 / 나머지)로 보인다 — 실제 ID 는 앞이 공통이라
+        #   (W75483·04XYG4 / W75483·03XYC2) 한 줄로 줄이면 서로 다른 웨이퍼가 같아 보인다.
         self._slot_label.setWordWrap(False)       # 공백 없는 ID 는 줄바꿈이 안 듣고
         self._slot_label.setToolTip(match.slot)   # 최소 폭만 부풀린다(가로 넘침).
         self._elide_slot()
@@ -696,15 +711,19 @@ class _MatchRow(QFrame):
         return max(0, int(fit))
 
     def _elide_slot(self) -> None:
-        """슬롯 이름을 열 폭에 맞춰 **가운데** 생략.  전체 이름은 툴팁이 갖는다.
+        """슬롯 이름 전체를 두 줄로(앞 8자 / 나머지).  전체 이름은 툴팁이 갖는다.
 
-        ``_SLOT_W`` 가 고정이라 한 번만 계산해도 되지만, 폭이 바뀔 때를 대비해
-        ``resizeEvent`` 에서도 다시 부른다(`_SlotTile._elide` 와 같은 형태).
+        가운데를 줄이면 앞뒤가 같은 두 슬롯(W7548304XYG4 / W7548306XYG4)이 똑같이
+        보였다.  둘째 줄이 열 폭을 넘을 때만 그 줄을 가운데 생략한다.
+        ``resizeEvent`` 에서도 다시 부른다.
         """
-        avail = max(40, (self._slot_label.width() or _SLOT_W) - 4)
-        fm = QFontMetrics(self._slot_label.font())
-        self._slot_label.setText(fm.elidedText(
-            self.match.slot, Qt.TextElideMode.ElideMiddle, avail))
+        name = self.match.slot
+        head, tail = name[:_SLOT_HEAD_CHARS], name[_SLOT_HEAD_CHARS:]
+        if tail:
+            avail = max(40, (self._slot_label.width() or _SLOT_W) - 4)
+            fm = QFontMetrics(self._slot_label.font())
+            tail = fm.elidedText(tail, Qt.TextElideMode.ElideMiddle, avail)
+        self._slot_label.setText(f"{head}\n{tail}" if tail else head)
 
     def _grid_cols(self) -> int:
         """아래 추가 줄 후보 열 수 — 가용 폭에 맞게(가로 스크롤 방지, #3)."""
@@ -1105,12 +1124,14 @@ class MatchReviewPage(QWidget):
 
         bar = QHBoxLayout()
         bar.setSpacing(12)
-        self._tally_label = QLabel("", self)
-        self._tally_label.setTextFormat(Qt.TextFormat.RichText)
-        # 낱말만 봐서는 '매치 없음' 과 '매치 실패' 가 같은 말로 읽힌다 — 넷의
-        # 차이를 화면에서 바로 확인할 수 있게 한다 (U-13).
-        self._tally_label.setToolTip(i18n.KO.TALLY_TOOLTIP)
-        bar.addWidget(self._tally_label)
+        # 통계는 왼쪽 칩(표시만, 누르는 기능 없음).  낱말만 봐서는 '매치 없음' 과
+        # '매치 실패' 가 같은 말로 읽히므로 칩마다 차이를 설명하는 툴팁을 단다 (U-13).
+        self._chip_host = QWidget(self)
+        self._chip_lay = QHBoxLayout(self._chip_host)
+        self._chip_lay.setContentsMargins(0, 0, 0, 0)
+        self._chip_lay.setSpacing(8)
+        self._chips: dict[str, QLabel] = {}
+        bar.addWidget(self._chip_host)
         bar.addStretch(1)
         # ※ '확인 필요만' 필터는 제거했다 — 상단 탤리(일치·허용 초과·매치 없음)가 이미
         #   '무엇을 확인해야 하는지'를 말한다.  행을 숨기는 필터는 그 위에 상태를 하나
@@ -1299,6 +1320,9 @@ class MatchReviewPage(QWidget):
         # ★ 세대 토큰 — 배치 생성 도중 다시 들어오면(결과에서 검토로 복귀 등) 옛 배치가
         #   새 목록에 행을 섞어 넣는다.  토큰이 바뀐 배치는 스스로 멈춘다.
         self._load_gen = getattr(self, "_load_gen", 0) + 1
+        if getattr(self, "_pending_rows", None):
+            # 옛 배치가 만들던 중이면 그 덮개가 남지 않게 걷는다.
+            self._loading.hide_overlay()
         self._pending_rows = []
         if getattr(self, "_row_batch_timer", None) is not None:
             self._row_batch_timer.stop()
@@ -1346,9 +1370,7 @@ class MatchReviewPage(QWidget):
         self._current_row = None
 
         if not self._matches:
-            empty = QLabel(i18n.KO.REVIEW_EMPTY_HINT_CROSS_A
-                           if self._cross and not self._reverse
-                           else i18n.KO.REVIEW_EMPTY_HINT)
+            empty = QLabel(i18n.KO.REVIEW_EMPTY_HINT)
             empty.setProperty("role", "mutedPad")
             self._list_layout.addWidget(empty)
         elif self._lanes:
@@ -1794,53 +1816,62 @@ class MatchReviewPage(QWidget):
         self._update_summary()
 
     def _update_summary(self) -> None:
-        """상단 탤리 갱신 — 일치는 기준선으로 항상, 예외(초과/매치 없음/실패)는
-        0 이 아닐 때만 노출해 시선을 예외로 모은다. 숫자는 mono·tabular."""
+        """상단 통계 칩 갱신 — 유지·일치는 항상, 예외(초과/매치 없음/실패)는
+        0 이 아닐 때만 노출해 시선을 예외로 모은다."""
         ok, over, none = tally(self._matches, self._unmatched_keys,
                                self._coord_mode)
-
-        def seg(label_fmt, n, color):
-            # 라벨은 색, 숫자는 mono tabular 로 자릿수 흔들림 없이.
-            txt = label_fmt.format(n="")  # '일치 ' 처럼 숫자 자리 비움
-            return (f"<span style='color:{color}'>{txt.strip()} "
-                    f"<span style='font-family:{theme.FONT_MONO}'>{n}</span></span>")
-
-        sep = f"<span style='color:{theme.LINE2}'>&nbsp;&nbsp;</span>"
-        parts = [seg(i18n.KO.TALLY_OK_FMT, ok, theme.PASS)]
-        if over > 0:
-            parts.append(seg(i18n.KO.TALLY_OVER_FMT, over, theme.DANGER))
-        if none > 0:
-            parts.append(seg(i18n.KO.TALLY_NO_MATCH_FMT, none, theme.INK2))
-        if self._coord_failed_count > 0:
-            # 매치 실패(좌표 미검출)는 이 화면에서 조치 불가 → 정보성 mute.
-            parts.append(seg(i18n.KO.TALLY_COORD_FAILED_FMT,
-                             self._coord_failed_count, theme.MUTE))
-        self._tally_label.setText(sep.join(parts))
-        self._pulse_changed_tally(
-            [("ok", ok), ("over", over), ("none", none),
-             ("fail", self._coord_failed_count)], parts, sep)
         kept = len(self._matches) - len(self._unmatched_keys)
-        self.btn_done.setText(
-            i18n.KO.BTN_FINISH_REVIEW_KEPT_NONE_FMT.format(n=kept, m=none) if none
-            else i18n.KO.BTN_FINISH_REVIEW_KEPT_FMT.format(n=kept))
+        self._set_chips([
+            ("kept", i18n.KO.TALLY_KEPT_FMT, kept, theme.INK, True),
+            ("ok", i18n.KO.TALLY_OK_FMT, ok, theme.PASS, True),
+            ("over", i18n.KO.TALLY_OVER_FMT, over, theme.DANGER, over > 0),
+            ("none", i18n.KO.TALLY_NO_MATCH_FMT, none, theme.INK2, none > 0),
+            ("fail", i18n.KO.TALLY_COORD_FAILED_FMT,
+             self._coord_failed_count, theme.MUTE,
+             self._coord_failed_count > 0),
+        ])
+        self._pulse_changed_tally(
+            [("kept", kept), ("ok", ok), ("over", over), ("none", none),
+             ("fail", self._coord_failed_count)])
 
-    def _pulse_changed_tally(self, counts, parts, sep) -> None:
-        """P14B — 바뀐 칸 뒤에만 연한 강조색이 한 번 지나간다.  숫자는 즉시 바뀐다(보간 없음).
+    def _set_chips(self, specs) -> None:
+        """통계 칩 — 표시만(누르는 기능 없음).  0 인 예외 칩은 숨긴다."""
+        for key, fmt, n, color, shown in specs:
+            chip = self._chips.get(key)
+            if chip is None:
+                chip = self._chips[key] = QLabel(self._chip_host)
+                chip.setObjectName("tallyChip_" + key)
+                c = QColor(color)
+                chip.setStyleSheet(
+                    f"QLabel#tallyChip_{key} {{ color: {color};"
+                    f" background: rgba({c.red()},{c.green()},{c.blue()},36);"
+                    " border-radius: 11px; padding: 3px 12px;"
+                    " font-weight: 600; }")
+                chip.setToolTip(i18n.KO.TALLY_TOOLTIP)
+                self._chip_lay.addWidget(chip)
+            chip.setText(fmt.format(n=n))
+            chip.setVisible(shown)
 
-        칸 = 0 이 아닌 항목(일치는 늘).  처음 그릴 때와 칸 구성이 같은 값이면 아무것도 안 한다."""
-        segs = [(k, n) for k, n in counts if k == "ok" or n > 0]
+    def _pulse_changed_tally(self, counts) -> None:
+        """P14B — 바뀐 칩 뒤에만 연한 강조색이 한 번 지나간다.  숫자는 즉시 바뀐다(보간 없음).
+
+        칩 = 유지·일치는 늘, 나머지는 0 이 아닐 때.  처음 그릴 때와 같은 값이면 아무것도 안 한다."""
+        segs = [(k, n) for k, n in counts if k in ("kept", "ok") or n > 0]
         old = getattr(self, "_tally_segs", None)
         self._tally_segs = segs
-        lbl = self._tally_label
-        if old is None or old == segs or not motion.enabled() or not lbl.isVisible():
+        host = self._chip_host
+        if old is None or old == segs or not motion.enabled() or not host.isVisible():
             return
         prev = dict(old)
-        changed = {i for i, (k, n) in enumerate(segs) if prev.get(k) != n}
+        changed = {k for k, n in segs if prev.get(k) != n}
         band = getattr(self, "_tally_band", None)
         if band is None:
-            band = self._tally_band = _TallyPulse(lbl)
-        band.setGeometry(lbl.rect())
-        band.set_spans(_rich_spans(lbl, parts, sep, changed))
+            band = self._tally_band = _TallyPulse(host)
+        host.layout().activate()
+        band.setGeometry(host.rect())
+        band.set_spans([QRectF(c.geometry()).adjusted(-3, 0, 3, 0)
+                        for k, c in self._chips.items()
+                        if k in changed and c.isVisibleTo(host)])
         band.show()
         band.raise_()
         motion.pulse(band, duration=motion.DUR_SLOW)
@@ -1859,30 +1890,8 @@ class MatchReviewPage(QWidget):
         self.finished.emit(kept, unmatched_refs)
 
 
-def _rich_width(label, html: str) -> float:
-    d = QTextDocument()
-    d.setDefaultFont(label.font())
-    d.setDocumentMargin(0)
-    d.setHtml(html)
-    return d.idealWidth()
-
-
-def _rich_spans(label, parts, sep, wanted) -> list:
-    """리치 텍스트 라벨에서 ``wanted`` 번째 칸들의 가로 범위(라벨 좌표)."""
-    pad = 5
-    x = label.contentsRect().left() + label.margin()
-    sep_w = _rich_width(label, sep)
-    out = []
-    for i, html in enumerate(parts):
-        w = _rich_width(label, html)
-        if i in wanted:
-            out.append(QRectF(x - pad, 0, w + 2 * pad, label.height()))
-        x += w + sep_w
-    return out
-
-
 class _TallyPulse(QWidget):
-    """탤리 라벨 위 투명 띠 — ``motion.pulse`` 가 모는 ``_pulse`` 만큼 칸 뒤를 물들인다(P14B)."""
+    """탤리 칩 줄 위 투명 띠 — ``motion.pulse`` 가 모는 ``_pulse`` 만큼 칸 뒤를 물들인다(P14B)."""
 
     ALPHA = 0.22
 

@@ -84,7 +84,7 @@ def test_all_rows_stay_visible_and_done_passes_everything(qapp):
     page._on_done()
     kept, unmatched = got[0]
     assert len(kept) + len(unmatched) == 3
-    assert len(unmatched) == 1 and unmatched[0].note == "미매칭 (사용자 검토)"
+    assert len(unmatched) == 1 and unmatched[0].note == "매치 없음 (사용자 검토)"
     page.deleteLater()
 
 
@@ -209,8 +209,8 @@ def test_compact_toggle_touch_target_and_intent(qapp):
 def test_view_larger_reads_as_a_button(qapp):
     """★ '크게 보기'는 **버튼으로 보여야** 한다 — 사용자 보고: "버튼처럼 안 보임".
 
-    사진 더블클릭 확대를 없앤 뒤로 이것이 좌우 비교 뷰어로 가는 **유일하게 눈에 보이는
-    경로**다(썸네일 우클릭 메뉴는 발견되지 않는다).  링크형(테두리 없음·$mute·12px)은
+    사진 클릭 · 더블클릭 말고 좌우 비교 뷰어로 가는 **눈에 보이는 유일한 버튼**이다
+    (썸네일 우클릭 메뉴는 발견되지 않는다).  링크형(테두리 없음·$mute·12px)은
     '눌러도 되는 것'으로 읽히지 않아 기능이 없는 것과 같았다.
 
     '펼치기/접기'는 이동이 아니라 제자리 펼침이므로 링크로 남는다(캐럿 ▾/▴ 이 말한다) —

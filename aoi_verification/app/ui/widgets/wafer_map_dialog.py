@@ -6,6 +6,12 @@
   **사진(1장 또는 여러 장)을 창에 끌어다 놓으면** 그 결함들만 볼 수 있다 — 놓은
   사진의 폴더에서 웨이퍼 기하를 읽으므로 원·격자는 그대로다(여러 폴더면 첫 사진 것).
   매칭 전이라 점은 한 색(결함)이다.
+  고른 사진 맵이 떠 있을 때 사진을 더 넣으면 **'현재 map 에 추가 / 새로 그리기'** 를 묻는다
+  (사용자 요청 2026-11-24).  추가는 옛 목록 + 새 목록을 **한꺼번에 놓은 것과 똑같이**
+  다시 계산한다(옛 사진이 앞 — 원·격자 기준 폴더가 그대로).  그 계산으로 먼저 넣은 사진의
+  col / row · 위치가 바뀌면(예: 함께 넣은 폴더 때문에 좌표 프레임이 바뀜) 알린다.
+  흑백 Scan 사진(``X.Y.t.N.jpeg``)을 넣으면 **그 안에 든 Defect 들**을 찍는다 — 사진 정보
+  화면과 같은 계산(:func:`scan_image.defects_in`)이고, 점은 그 Defect 의 Color 사진 좌표다.
 * **결과 단계**(``WaferMapDialog(parent, result=...)``): 슬롯을 고르면 기준/검증 맵을
   나란히, '전체' 를 고르면 LOT 의 모든 슬롯을 한 맵에 합산한다.  점은 매치됨/미매치.
 
@@ -47,7 +53,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
-from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QFrame,
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFrame,
                              QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget)
 
 from ..folder_picker import FolderPicker
@@ -60,10 +66,13 @@ from ...models.result import FinalResult
 from ...models.slot import _list_images, list_slot_dirs
 from ...utils import image_io
 from .. import theme
-from ..drop_paths import install_paste, local_paths, split_paths
+from ..drop_overlay import drop_clear, drop_feedback
+from ..deferred import call_later
+from ..drop_paths import guess_kinds, install_paste, local_paths, split_paths
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
+from .tool_open_save import EmptyOpen
 from .no_wheel_slider import NoWheelSlider
 from .wafer_map_view import DOT_R, DOT_R_MAX, DOT_R_MIN, WaferMapView, count_text
 from .window_controls import set_window_fullscreen
@@ -207,6 +216,41 @@ def _chip(color: str, label: str, n: int) -> str:
             f"{i18n.KO.WAFER_MAP_COUNT_FMT.format(n=n)}")
 
 
+def expand_scans(paths: list[Path]) -> list[Path]:
+    """흑백 Scan 사진을 **그 안에 든 Defect 의 Color 사진**들로 바꾼다(순서 유지 · 중복 한 번).
+
+    Scan 은 INI 에 좌표 항목이 없어 그대로는 맵에 못 놓는다.  :func:`scan_image.defects_in`
+    (사진 정보 화면과 같은 계산 — 값은 전부 그 폴더 파일)이 고른 Defect 의 경로를 넣으면,
+    점 좌표는 그 Defect 의 Color 사진과 **같은 생산자**(``resolve_batch``)가 정한다.
+    Defect 를 못 찾은 Scan 은 그대로 둔다 — '좌표 없음' 으로 세어 사라지지 않게.
+    디스크를 읽으므로 워커에서 부른다."""
+    from ...coords import scan_image
+    out: list[Path] = []
+    for p in paths:
+        if scan_image.is_scan_name(p.name):
+            found = scan_image.defects_in(p)
+            if found.ok and found.hits:
+                out.extend(h.path for h in found.hits)
+                continue
+        out.append(p)
+    return list(dict.fromkeys(out))
+
+
+def moved_points(before: dict, data: MapData, tol_um: float = 1.0) -> int:
+    """먼저 찍혀 있던 사진 중 다시 계산한 맵에서 **번호·위치가 바뀐** 장 수.
+
+    ``before`` = ``{path: (col, row, x, y)}``.  맵에서 빠진 사진도 바뀐 것으로 센다.
+    평면 위치는 ``tol_um`` 까지 같다고 본다.  순수 — 헤드리스."""
+    now = {p.path: p for p in data.points}
+    n = 0
+    for path, (col, row, x, y) in before.items():
+        p = now.get(path)
+        if (p is None or (p.col, p.row) != (col, row)
+                or abs(p.x - x) > tol_um or abs(p.y - y) > tol_um):
+            n += 1
+    return n
+
+
 def classify_folder(folder: Path) -> tuple[str, dict[str, Path]]:
     """``("slot", {})`` — 사진이 바로 든 폴더, ``("lot", {슬롯명: 경로})`` — 슬롯
     폴더들이 든 폴더, ``("empty", {})`` — 둘 다 아님.  순수 — 헤드리스."""
@@ -226,9 +270,10 @@ class WaferMapDialog(QDialog):
         self.setWindowTitle(i18n.KO.WAFER_MAP_TITLE)
         self._result = result
         self._folder: Optional[Path] = None
-        self._folder_picker = FolderPicker(self)
+        self._folder_picker = FolderPicker(self, purpose="wafer_map")
         self._folder_picker.picked.connect(self._on_folder_picked)
         self._images: list[Path] = []                 # 끌어놓은 사진만 볼 때
+        self._pending_images: list[Path] = []         # 추가 / 새로 그리기를 물을 사진
         self._lot_slots: dict[str, Path] = {}         # LOT 폴더일 때만
         self._selected: Optional[set[str]] = None     # None = 전체
         self._rot = 0                                 # 노치 방향(90° 단위)
@@ -238,6 +283,10 @@ class WaferMapDialog(QDialog):
         self._token = 0
         self._build_thread: Optional[_MapBuild] = None
         self._build()
+        if result is None:      # 폴더를 고르기 전엔 가운데 큰 [폴더 선택] 하나(현택님 2026-11-24)
+            self._empty_open = EmptyOpen(self, i18n.KO.WAFER_MAP_PICK_FOLDER, self._on_pick,
+                                         i18n.KO.EMPTY_DROP_HINT, preview="map")
+            self._empty_open.set_empty(not folder)
         self._loading = LoadingOverlay(self)
         if result is not None:
             self._on_slot_changed()
@@ -251,11 +300,6 @@ class WaferMapDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(theme.PROFILE.section_gap // 2)
-
-        self.sub = QLabel(i18n.KO.WAFER_MAP_SUBTITLE, self)
-        self.sub.setProperty("role", "subtitle")
-        self.sub.setWordWrap(True)
-        root.addWidget(self.sub)
 
         # ★ 상단줄을 **위젯으로 싼다** — 전체화면에서 줄 하나를 통째로 감추려면
         #   레이아웃이 아니라 위젯이어야 한다(QHBoxLayout 에는 setVisible 이 없다).
@@ -275,7 +319,7 @@ class WaferMapDialog(QDialog):
             self.slot_combo.currentIndexChanged.connect(self._on_slot_changed)
             top.addWidget(self.slot_combo)
         else:
-            self.pick_btn = NeonButton(i18n.KO.WAFER_MAP_PICK_FOLDER, role="primary")
+            self.pick_btn = NeonButton(i18n.KO.WAFER_MAP_PICK_FOLDER, role="ghost")
             self.pick_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
             self.pick_btn.clicked.connect(self._on_pick)
             self.pick_btn.setAutoDefault(False)
@@ -308,6 +352,28 @@ class WaferMapDialog(QDialog):
         self.empty.setWordWrap(True)
         root.addWidget(self.empty)
 
+        # 폴더를 찾을 수 없을 때 — 가운데에 안내 · 경로 · [다른 폴더 선택]
+        self.missing = QWidget(self)
+        mlay = QVBoxLayout(self.missing)
+        mlay.setSpacing(8)
+        mlay.addStretch(1)
+        self.missing_title = QLabel(i18n.KO.WAFER_MAP_FOLDER_MISSING, self.missing)
+        self.missing_title.setProperty("role", "muted")
+        self.missing_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mlay.addWidget(self.missing_title)
+        self.missing_path = QLabel("", self.missing)
+        self.missing_path.setProperty("role", "monoMuted")
+        self.missing_path.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.missing_path.setWordWrap(True)
+        mlay.addWidget(self.missing_path)
+        self.missing_btn = NeonButton(i18n.KO.WAFER_MAP_PICK_OTHER_FOLDER, role="primary")
+        self.missing_btn.setAutoDefault(False)
+        self.missing_btn.clicked.connect(self._on_pick)
+        mlay.addWidget(self.missing_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        mlay.addStretch(1)
+        self.missing.hide()
+        root.addWidget(self.missing, stretch=1)
+
         maps = QHBoxLayout()
         maps.setSpacing(theme.PROFILE.card_pad)
         self.left = _MapPanel(self)
@@ -337,22 +403,21 @@ class WaferMapDialog(QDialog):
         self.exit_btn.clicked.connect(lambda: self.set_fullscreen(False))
         self.exit_btn.hide()
         self.resize(1100, 720)
+        self._set_view_enabled(False)           # 지도가 생기기 전에는 보기 옵션을 끈다
 
     def _add_view_options(self, top) -> None:
-        """보기 옵션 — die 색칠 · 점 크기 · 노치 방향.  두 단계 모두, 두 맵에 **함께** 건다."""
-        self.fill_btn = NeonButton(i18n.KO.WAFER_MAP_FILL_DIES, role="ghost")
-        self.fill_btn.setCheckable(True)
+        """보기 옵션 — die 색칠 · 점 크기 · 노치 방향.  두 단계 모두, 두 맵에 **함께** 건다.
+
+        켜기/끄기는 체크박스다(F10, 현택님 2026-11-24) — 누르는 버튼이면 눌린 상태가
+        잘 안 보이고, 설정·결과 화면의 같은 일과 모양이 달랐다."""
+        self.fill_btn = QCheckBox(i18n.KO.WAFER_MAP_FILL_DIES, self)
         self.fill_btn.setToolTip(i18n.KO.WAFER_MAP_FILL_DIES_TIP)
-        self.fill_btn.setAutoDefault(False)
         self.fill_btn.toggled.connect(self._on_fill_toggled)
         top.addWidget(self.fill_btn)
         # 결과 단계에서만, die 색칠이 켜졌을 때만 보인다(_on_fill_toggled).
-        self.unmatched_first_btn = NeonButton(i18n.KO.WAFER_MAP_UNMATCHED_FIRST,
-                                              role="ghost")
-        self.unmatched_first_btn.setCheckable(True)
+        self.unmatched_first_btn = QCheckBox(i18n.KO.WAFER_MAP_UNMATCHED_FIRST, self)
         self.unmatched_first_btn.setChecked(True)
         self.unmatched_first_btn.setToolTip(i18n.KO.WAFER_MAP_UNMATCHED_FIRST_TIP)
-        self.unmatched_first_btn.setAutoDefault(False)
         self.unmatched_first_btn.toggled.connect(self._on_unmatched_first_toggled)
         self.unmatched_first_btn.hide()
         top.addWidget(self.unmatched_first_btn)
@@ -363,7 +428,6 @@ class WaferMapDialog(QDialog):
         self.dot_slider.setRange(DOT_R_MIN, DOT_R_MAX)
         self.dot_slider.setValue(int(DOT_R))
         self.dot_slider.setFixedWidth(120)
-        self.dot_slider.setToolTip(i18n.KO.WAFER_MAP_DOT_SIZE_TIP)
         self.dot_slider.valueChanged.connect(self._on_dot_size)
         top.addWidget(self.dot_slider)
         self.notch_btn = NeonButton("", role="ghost")
@@ -383,12 +447,23 @@ class WaferMapDialog(QDialog):
     def _views(self):
         return (self.left.view, self.right.view)
 
+    def _set_view_enabled(self, on: bool) -> None:
+        """지도가 있을 때만 보기 옵션(die 색칠 · 점 크기 · 노치 · 전체화면)을 켠다."""
+        self._map_shown = on
+        self.fill_btn.setEnabled(on)
+        self.unmatched_first_btn.setEnabled(on)
+        self.notch_btn.setEnabled(on)
+        self.full_btn.setEnabled(on)
+        dots = on and not self.fill_btn.isChecked()
+        self.dot_label.setEnabled(dots)
+        self.dot_slider.setEnabled(dots)
+
     def _on_fill_toggled(self, on: bool) -> None:
         for view in self._views():
             view.set_fill_dies(on)
         self.unmatched_first_btn.setVisible(on and self._result is not None)
-        self.dot_label.setEnabled(not on)
-        self.dot_slider.setEnabled(not on)
+        self.dot_label.setEnabled(self._map_shown and not on)
+        self.dot_slider.setEnabled(self._map_shown and not on)
 
     def _on_dot_size(self, r: int) -> None:
         for view in self._views():
@@ -425,7 +500,6 @@ class WaferMapDialog(QDialog):
         if on == self._fullscreen:
             return
         self._fullscreen = on
-        self.sub.setVisible(not on)
         self._top_host.setVisible(not on)
         # 경고 배너는 전체화면에서도 남긴다 — 맵만 크게 볼 때가 칸을 세는 때다.
         self.disclaimer.setVisible(not on and self.left.isVisibleTo(self))
@@ -477,9 +551,13 @@ class WaferMapDialog(QDialog):
         super().keyPressEvent(event)
 
     # ------------------------------------------------------------------
-    def _render_empty(self, text: str = "") -> None:
+    def _render_empty(self, text: str = "", missing: Optional[Path] = None) -> None:
+        self._set_view_enabled(False)
+        self.missing.setVisible(missing is not None)
+        if missing is not None:
+            self.missing_path.setText(str(missing))
         self.empty.setText(text or i18n.KO.WAFER_MAP_NO_FOLDER)
-        self.empty.show()
+        self.empty.setVisible(missing is None)
         self.warn_banner.hide()
         self.disclaimer.hide()
         self.left.hide()
@@ -489,6 +567,8 @@ class WaferMapDialog(QDialog):
     def _show_maps(self, left: tuple[str, MapData],
                    right: Optional[tuple[str, MapData]]) -> None:
         self.empty.hide()
+        self.missing.hide()
+        self._set_view_enabled(True)
         sides = [left] + ([right] if right is not None else [])
         text = self.warning_text(sides)
         # 칸·번호가 틀렸을 가능성이 크면 빨간 큰 배너로 — 주황 한 줄은 지나치기 쉽다.
@@ -599,13 +679,15 @@ class WaferMapDialog(QDialog):
         self._folder = folder
         self._images = []
         self.folder_label.setText(str(folder))
-        self.pick_btn.setText(i18n.KO.WAFER_MAP_PICK_FOLDER_ANOTHER)
+        self._empty_open.set_empty(False)
         self._lot_slots = {}
         self._selected = None
         self.slots_btn.hide()
 
         def job(report):
             report(i18n.KO.WAFER_MAP_LOADING_SCAN)
+            if not folder.is_dir():
+                return MapData(None, (), ()), None, ("missing", {})
             kind, slots = classify_folder(folder)
             if kind == "empty":
                 return MapData(None, (), ()), None, (kind, slots)
@@ -619,7 +701,9 @@ class WaferMapDialog(QDialog):
             kind, slots = extra or ("empty", {})
             self._lot_slots = slots
             self.slots_btn.setVisible(kind == "lot")
-            if kind == "empty":
+            if kind == "missing":
+                self._render_empty(missing=folder)
+            elif kind == "empty":
                 self._render_empty(i18n.KO.WAFER_MAP_NO_IMAGES)
             else:
                 self._show_folder_map(data)
@@ -635,19 +719,38 @@ class WaferMapDialog(QDialog):
     # ------------------------------------------------------------------
     # 사진 끌어놓기
     # ------------------------------------------------------------------
+    def hideEvent(self, event):         # noqa: N802
+        drop_clear(self)                # 끌던 중에 숨겨져도 표시가 남지 않게
+        super().hideEvent(event)
+
     def dragEnterEvent(self, event):    # noqa: N802
         # 디스크를 만지지 않는다(NAS) — 로컬 경로가 있으면 받고, 분류는 놓을 때.
         md = event.mimeData()
-        if md is not None and local_paths(md):
-            event.acceptProposedAction()
-        else:
+        paths = local_paths(md) if md is not None else []
+        if not paths:
+            drop_clear(self)
             event.ignore()
+            return
+        kinds = guess_kinds(paths)
+        K = i18n.KO
+        if "image" in kinds:
+            text, ok = K.DROP_PILL_SHOW_ON_MAP, True
+        elif "folder" in kinds:
+            text, ok = K.DROP_PILL_FOLDER_MAP, True
+        else:
+            text, ok = K.DROP_PILL_ONLY_FOLDER_PHOTO, False
+        drop_feedback(self, event, None, text, ok)
 
     def dragMoveEvent(self, event):     # noqa: N802
         self.dragEnterEvent(event)
 
+    def dragLeaveEvent(self, event):    # noqa: N802
+        drop_clear(self)
+        event.accept()
+
     def dropEvent(self, event):         # noqa: N802
         """사진(여러 장 가능) → 그 결함들만.  폴더 1개 → 폴더 맵."""
+        drop_clear(self)
         md = event.mimeData()
         paths = local_paths(md) if md is not None else []
         if not paths:
@@ -663,7 +766,7 @@ class WaferMapDialog(QDialog):
             is_image=lambda p: Path(p).suffix.lower() in exts)
         images = [p for p in images if os.path.exists(p)]
         if images:
-            self.show_images([Path(p) for p in images])
+            self._take_images([Path(p) for p in images])
         elif len(folders) == 1:
             self.show_folder(Path(folders[0]))
         elif folders:
@@ -672,6 +775,70 @@ class WaferMapDialog(QDialog):
             self._notice(i18n.KO.DROP_NOT_FOUND)
         else:
             self._notice(i18n.KO.DROP_WRONG_KIND_FOLDER)
+
+    def _take_images(self, paths: list[Path]) -> None:
+        """사진이 들어왔다 — 고른 사진 맵이 떠 있으면 추가 / 새로 그리기를 묻고, 빈 화면 ·
+        폴더 맵이면 묻지 않고 새로 그린다(사용자 결정 2026-11-24)."""
+        if not self._photo_map_shown():
+            self.show_images(paths)
+            return
+        self._pending_images = list(paths)
+        # ★ 끌어놓기 처리 **안에서** 시트(중첩 이벤트 루프)를 돌리지 않는다 — 끌던 쪽
+        #   (탐색기)이 놓기가 끝나기를 기다리며 멈춘다.  한 바퀴 뒤에 묻는다.
+        call_later(self, 0, self._ask_pending)
+
+    def _photo_map_shown(self) -> bool:
+        return bool(self._images) and not self.empty.isVisibleTo(self)
+
+    def _ask_pending(self) -> None:
+        paths, self._pending_images = self._pending_images, []
+        if not paths:
+            return
+        choice = self._ask_add_or_new(len(dict.fromkeys(paths)))
+        if choice == "add":
+            self.add_images(paths)
+        elif choice == "new":
+            self.show_images(paths)
+        # None(Esc) — 맵 그대로
+
+    def _ask_add_or_new(self, n: int):
+        """``"add"`` · ``"new"`` · ``None``(Esc).  두 선택지는 대등해 타일로, 기본값 없이
+        띄운다 — Enter 로 눌리지 않는다(사용자 규칙 2026-11-24)."""
+        host = sheets.host_for(self)
+        if host is None:                    # 시트를 띄울 곳이 없으면 공용 폴백(OS 창)
+            K = i18n.KO
+            return sheets.choose(
+                self, K.WAFER_MAP_MORE_TITLE_FMT.format(n=n), "",
+                [("add", K.WAFER_MAP_MORE_ADD, "option"),
+                 ("new", K.WAFER_MAP_MORE_NEW, "option")], tiles=True)
+        sheet = self.add_or_new_sheet(n)
+        try:
+            host.run(sheet, chrome=False)
+            return sheet.picked()
+        finally:
+            sheet.deleteLater()
+
+    @staticmethod
+    def add_or_new_sheet(n: int):
+        """묻는 시트 — 공용 선택 타일(:func:`sheet_host.choose` 와 같은 모양)에서 **Enter 만
+        끈다**.  QDialog 안의 버튼은 기본이 autoDefault 라, 그대로 두면 Enter 가 첫 타일
+        ('추가')을 눌렀다(실측)."""
+        K = i18n.KO
+        sheet = sheets._ChoiceSheet(
+            K.WAFER_MAP_MORE_TITLE_FMT.format(n=n), "",
+            [("add", K.WAFER_MAP_MORE_ADD, "option"),
+             ("new", K.WAFER_MAP_MORE_NEW, "option")], tiles=True)
+        for btn in sheet.findChildren(NeonButton):
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
+        return sheet
+
+    def add_images(self, paths: list[Path]) -> None:
+        """지금 찍힌 사진에 ``paths`` 를 더해 다시 그린다 — 한꺼번에 놓은 것과 같은 계산."""
+        data = self.left.view.data()
+        before = ({} if data is None else
+                  {p.path: (p.col, p.row, p.x, p.y) for p in data.points})
+        self.show_images(list(self._images) + list(paths), before=before)
 
     def _on_no_path(self, has_image: bool) -> None:
         self._notice(i18n.KO.DROP_NO_PATH_IMAGE if has_image
@@ -713,7 +880,7 @@ class WaferMapDialog(QDialog):
     def show_image(self, path: Path) -> None:
         self.show_images([path])
 
-    def show_images(self, paths: list[Path]) -> None:
+    def show_images(self, paths: list[Path], *, before: Optional[dict] = None) -> None:
         """끌어놓은 사진만 맵에 — 원·격자는 **첫 사진이 든 폴더**의 기하 그대로다.
 
         LOT/웨이퍼 단위로는 점이 수천 개라 몇 결함을 짚기 어렵다(사용자 요청).  폴더를
@@ -721,6 +888,7 @@ class WaferMapDialog(QDialog):
         paths = list(dict.fromkeys(paths))          # 같은 사진 두 번은 한 번으로
         self._images = paths
         self._folder = paths[0].parent
+        self._empty_open.set_empty(False)
         self._lot_slots = {}
         self._selected = None
         self.slots_btn.hide()
@@ -729,12 +897,17 @@ class WaferMapDialog(QDialog):
 
         def job(report):
             report(i18n.KO.WAFER_MAP_LOADING_COORDS)
-            return build_map(resolve_batch(paths, _coord_progress(report))), None, None
+            placed = expand_scans(paths)
+            return build_map(resolve_batch(placed, _coord_progress(report))), None, None
 
-        self._start_build(
-            job,
-            lambda d, _r, _e: self._show_folder_map(d, i18n.KO.WAFER_MAP_NO_COORD),
-            i18n.KO.WAFER_MAP_LOADING_COORDS)
+        def done(data, _right, _extra):
+            self._show_folder_map(data, i18n.KO.WAFER_MAP_NO_COORD)
+            # 추가로 다시 그렸을 때만 — 먼저 넣은 사진이 옮겨졌으면 알린다(Fable 검토).
+            n = moved_points(before, data) if before else 0
+            if n:
+                self._notice(i18n.KO.WAFER_MAP_MOVED_FMT.format(n=n))
+
+        self._start_build(job, done, i18n.KO.WAFER_MAP_LOADING_COORDS)
 
     def single_image(self) -> Optional[Path]:
         return self._images[0] if len(self._images) == 1 else None

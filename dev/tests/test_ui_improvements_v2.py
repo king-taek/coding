@@ -427,13 +427,13 @@ def test_confirm_toast_does_not_move_the_header_buttons(qapp):
         dlg.show()
         qapp.processEvents()
         before = [w.x() for w in (dlg.btn_prev, dlg.btn_skip,
-                                  dlg.btn_confirm, dlg.btn_close)]
+                                  dlg.btn_confirm)]
         text = i18n.KO.UNMATCHED_REVIEW_DONE_FMT.format(n=3)
         dlg._show_toast(text)
         dlg.layout().activate()
         qapp.processEvents()
         after = [w.x() for w in (dlg.btn_prev, dlg.btn_skip,
-                                 dlg.btn_confirm, dlg.btn_close)]
+                                 dlg.btn_confirm)]
         assert before == after, f"토스트에 버튼이 밀렸다: {before} → {after}"
         # 문구가 잘리지도 않는다(자리를 좁게 예약해 두면 그쪽으로 망가진다).
         assert dlg._toast.width() >= dlg._toast.sizeHint().width()

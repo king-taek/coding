@@ -24,13 +24,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from . import abs_coord, pixel_size, recipe_name, surface_flt, zone_name
-from .models import DefectGeometry, SURFACE_LEN_FACTOR
+from . import abs_coord, camtek_ini, class_names, height_flt, pixel_size, recipe_name, surface_flt, zone_name
+from .models import DefectGeometry, KIND_HEIGHT, SURFACE_LEN_FACTOR
 from .surface_flt import RawRecord
 
 __all__ = ["resolve", "GeometryResult", "GEOMETRY_MATCH_TOL"]
 
 _LOG = logging.getLogger("aoi.coords")
+
+# 사진 정보 ``Type`` 0 = Surface — EquipmentClassifications.ini [SURFACE] 의 ``-1 =0`` 과 같다(파일).
+_SURFACE_PHOTO_TYPE = 0
 
 # 보고서 기준: 좌표 거리 ≤ 5 µm 면 동일 defect 로 강하게 판단.
 GEOMETRY_MATCH_TOL: float = 5.0
@@ -94,12 +97,43 @@ def _nearest(records: tuple[RawRecord, ...],
     return best
 
 
+def _resolve_height(image_path: Path, folder: Path) -> GeometryResult:
+    """Height 사진(사진 정보 ``Type=2``) → Height.flt 레코드.  Surface.flt 로는 **절대** 가지 않는다 —
+    예전에는 옆에 있는 다른 Surface Defect 의 값이 붙었다(AOI-16 T254 Height 사진 6장, 관측 2026-11-23)."""
+    if not height_flt.has_flt(folder):
+        # 결과 파일이 하나도 없으면 예전처럼 '미지원 자재' — Surface.flt 만 있으면 '정보 없음'.
+        return GeometryResult("no_data" if surface_flt.has_flt(folder) else "no_flt", None)
+    xy = abs_coord.absolute_xy(Path(image_path))
+    rec = height_flt.nearest(height_flt.load_folder(folder), xy, GEOMETRY_MATCH_TOL) if xy else None
+    if rec is None:
+        return GeometryResult("no_data", None)
+    recipe = None if rec.recipe is None else int(rec.recipe)
+    px = pixel_size.scan_pixel_size_xy(folder)
+    zone_nm = zone_name.name_for(folder, int(rec.zone), recipe) or ""
+    return GeometryResult("ok", DefectGeometry(
+        area_um2=None, width_um=None, length_um=None, contrast=None,
+        zone=int(rec.zone), recipe=recipe,
+        pixel_um=px[0] if px else SURFACE_LEN_FACTOR,
+        zone_name=zone_nm,
+        recipe_name="" if recipe is None else recipe_name.name_for(folder, recipe) or "",
+        kind=KIND_HEIGHT, height_um=float(rec.height),
+        type_name=class_names.type_name(folder, height_flt.HEIGHT_PHOTO_TYPE, rec.type),
+        class_name=class_names.class_name(folder, rec.reclassify),
+    ))
+
+
 def resolve(image_path: Path) -> GeometryResult:
-    """이미지 → GeometryResult.  실패 사유를 status 로 구분."""
+    """이미지 → GeometryResult.  실패 사유를 status 로 구분.
+
+    사진 정보 파일의 ``Type`` 이 결과 파일을 정한다 — 2 면 Height.flt(:func:`_resolve_height`),
+    그 밖(0 · 키 없음 · 확인 안 된 값)은 예전처럼 Surface.flt."""
     try:
         if not surface_flt._SCHEMA_READY:
             return GeometryResult("disabled", None)
         folder = Path(image_path).parent
+        photo_type = camtek_ini.load_type_folder(folder).get(Path(image_path).stem.lower())
+        if photo_type == height_flt.HEIGHT_PHOTO_TYPE:
+            return _resolve_height(Path(image_path), folder)
         if not surface_flt.has_flt(folder):
             return GeometryResult("no_flt", None)
         records = surface_flt.load_folder(folder)
@@ -125,9 +159,13 @@ def resolve(image_path: Path) -> GeometryResult:
             zone=int(rec.zone),
             recipe=recipe,
             pixel_um=px_x,
-            zone_name=zone_name.name_for(folder, int(rec.zone)) or "",
+            zone_name=zone_name.name_for(folder, int(rec.zone), recipe) or "",
             recipe_name=("" if recipe is None
                          else recipe_name.name_for(folder, recipe) or ""),
+            # 종류 이름은 Surface 사진(Type 0)만 — 다른 검사(예: Type 1 Solder)의 사전으로 Surface 비트를 읽지 않는다.
+            type_name=(class_names.type_name(folder, _SURFACE_PHOTO_TYPE, rec.type)
+                       if photo_type == _SURFACE_PHOTO_TYPE else ""),
+            class_name=class_names.class_name(folder, rec.reclassify),
         )
         return GeometryResult("ok", geom)
     except Exception:

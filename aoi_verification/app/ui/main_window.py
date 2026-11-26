@@ -45,6 +45,7 @@ from ..workers import thumb_plan      # 순수 로직(Qt·numpy 없음) — 무�
 from .pages.setup_page import SetupInput, SetupPage
 from .widgets.journey_rail import JourneyRail
 from .widgets.loading_overlay import LoadingOverlay
+from .widgets import kla_side_dialog
 from .widgets import sheet_host as sheets
 from .widgets.sheet_host import SheetHost
 from .widgets.window_controls import add_fullscreen_shortcut
@@ -293,6 +294,9 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._credit_label = QLabel(i18n.KO.CREDIT, self._status_bar)
         self._apply_statusbar_theme()
         self._status_bar.addWidget(self._credit_label)
+        # 상태줄 알림이 떠 있는 동안 크레딧을 숨긴다 — 페이지 전환(_sync_statusbar)이
+        # 크레딧을 다시 보이게 하면 알림 글자와 겹쳐 그려졌다.
+        self._status_bar.messageChanged.connect(self._on_status_message)
         self._mem_label = QLabel("", self._status_bar)
         self._mem_label.setProperty("role", "muted")
         self._status_bar.addPermanentWidget(self._mem_label)
@@ -490,6 +494,7 @@ class MainWindow(MultiValFlow, QMainWindow):
                 from ..utils import updater
                 info = updater.check_for_update()
             except Exception:
+                _LOG.exception("시작 때 업데이트 확인 실패")
                 info = None
             if info:
                 self._update_found.emit(info)
@@ -512,6 +517,7 @@ class MainWindow(MultiValFlow, QMainWindow):
                 from ..utils import updater
                 status, info = updater.manual_check()
             except Exception:
+                _LOG.exception("수동 업데이트 확인 실패")
                 status, info = "unknown", {}
             if status == "update":
                 self._update_found.emit(info)
@@ -519,9 +525,9 @@ class MainWindow(MultiValFlow, QMainWindow):
                 self._update_none.emit(i18n.KO.UPDATE_LATEST)
             else:
                 reason = (info or {}).get("error", "")
-                msg = i18n.KO.UPDATE_UNKNOWN
+                msg = i18n.KO.UPDATE_CONNECT_FAILED
                 if reason:
-                    msg = f"{msg}{i18n.KO.CAUSE_PREFIX}{reason}"
+                    _LOG.warning("업데이트 확인 실패: %s", reason)   # 기술 사유는 로그로
                 self._update_none.emit(msg)
 
         threading.Thread(target=_work, name="update-check-manual",
@@ -531,6 +537,12 @@ class MainWindow(MultiValFlow, QMainWindow):
         btn = getattr(getattr(self, "_setup_page", None), "update_btn", None)
         if btn is not None:
             btn.setEnabled(not busy)
+            if busy:
+                self._update_btn_text = btn.text()
+                btn.setText(i18n.KO.UPDATE_BTN_CHECKING)
+            elif getattr(self, "_update_btn_text", None):
+                btn.setText(self._update_btn_text)
+                self._update_btn_text = None
 
     def _on_update_none(self, msg: str) -> None:
         # 최신이거나 확인 불가인 결과다 — 중립 제목을 쓴다('업데이트 있음' 은 실제로
@@ -546,7 +558,6 @@ class MainWindow(MultiValFlow, QMainWindow):
         on = not _prefs.load().dev_mode
         _prefs.patch(dev_mode=on)
         self._dev_btn.setVisible(on)
-        self._setup_page.threshold_btn.setVisible(on)                      # Threshold 미리보기는 개발자 모드 도구
         self._cpair_collect_btn.setVisible(on)                            # [Conder짝수집-임시] 이 줄 삭제
         self._sync_statusbar(self._stack.currentWidget())
         self._status_bar.showMessage(
@@ -625,6 +636,7 @@ class MainWindow(MultiValFlow, QMainWindow):
                     info["repo"], info["branch"], info["sha"], progress=_report,
                     dev=dev)
             except Exception:
+                _LOG.exception("업데이트 다운로드·적용 실패")
                 ok = False
             self._update_applied.emit(bool(ok), info or {})
 
@@ -705,7 +717,7 @@ class MainWindow(MultiValFlow, QMainWindow):
                     # 실패가 아니라 '의도적 보류' 다 — 무엇을 받아야 하는지 정확히 알린다.
                     msg = i18n.KO.UPDATE_NEEDS_NEW_BUNDLE
                 elif updater.last_error():
-                    msg = f"{msg}{i18n.KO.CAUSE_PREFIX}{updater.last_error()}"
+                    _LOG.warning("업데이트 적용 실패: %s", updater.last_error())
             except Exception:
                 pass
             sheets.warn(self, i18n.KO.UPDATE_FAILED_TITLE, msg)
@@ -718,6 +730,8 @@ class MainWindow(MultiValFlow, QMainWindow):
             if updater.update_pending():     # exe 모드 — 교체는 다음 실행 때 런처가 한다
                 msg = i18n.KO.UPDATE_DONE_RESTART_STAGED
             elif updater.deps_changed():     # 필요한 패키지 목록이 바뀐 경우 갱신 안내 추가
+                # 개발 트리용 명령(pip install -r requirements.txt / run_this_before.py)은 화면에 두지 않는다.
+                _LOG.warning("requirements.txt 가 바뀌었다 — 의존성 갱신 필요(개발 트리: scripts/run_this_before.py)")
                 msg = msg + i18n.KO.UPDATE_DEPS_CHANGED
         except Exception:
             pass
@@ -926,12 +940,11 @@ class MainWindow(MultiValFlow, QMainWindow):
 
     def _start_openvino_install(self) -> None:
         from ..learning.openvino_installer import OpenVinoInstallWorker
-        self._loading.show_overlay(i18n.KO.OPENVINO_INSTALL_PROGRESS)
+        self._loading.show_overlay(i18n.KO.OPENVINO_INSTALL_PROGRESS, cancelable=True)
         self._openvino_worker = OpenVinoInstallWorker(parent=self)
+        # 고정 문구 — pip 로그 한 줄마다 덮개를 다시 띄우지 않고 app.log 로 보낸다.
         self._openvino_worker.signals.progress.connect(
-            lambda line: self._loading.show_overlay(
-                i18n.KO.OPENVINO_INSTALL_PROGRESS + "\n" + line[-80:]
-            )
+            lambda line: _LOG.info("OpenVINO 설치: %s", line[-200:])
         )
         self._openvino_worker.signals.finished.connect(
             self._on_openvino_install_finished
@@ -945,6 +958,8 @@ class MainWindow(MultiValFlow, QMainWindow):
         if ok:
             sheets.info(self, i18n.KO.OPENVINO_OFFER_TITLE,
                         i18n.KO.OPENVINO_INSTALL_DONE)
+        elif message == i18n.KO.OPENVINO_ERR_CANCELLED:
+            return                           # 사용자가 [중지] 했다 — 실패 안내를 띄우지 않는다
         else:
             sheets.warn(
                 self, i18n.KO.OPENVINO_OFFER_TITLE,
@@ -1007,21 +1022,16 @@ class MainWindow(MultiValFlow, QMainWindow):
     def _ask_kla_side(self) -> Optional[str]:
         """매칭 실패 폴더가 있을 때 'KLA 가 어느 쪽인가?' 를 묻는다.
 
-        반환 "ref"/"val"/"both" 또는 None(KLA 아님 → 파일명/OCR 자동 매칭 건너뜀)."""
+        반환 "ref"/"val"/"both", None(KLA 아님 → 파일명/OCR 자동 매칭 건너뜀),
+        또는 ``kla_side_dialog.CANCEL``([취소]·Esc → 검증 시작을 멈춘다)."""
         # ★ 네 경우(기준/검증/둘다/KLA 아님)를 모두 유지한다 — 한쪽만 추가하지 말 것
-        #   (CLAUDE.md 규칙).  강조 문장은 인라인 HTML 대신 시트의 warn 라벨이 담당한다
-        #   (색을 f-string 으로 굽지 않는다).
-        # ★ `tiles=True` — 넷은 **대등한 선택지**다.  예전엔 '기준' 만 파란 주 버튼이라
-        #   "왜 저것만 강조돼 있지?" 로 읽혔다(사용자 지적).  정답이 정해져 있지 않으면
-        #   기본값을 세우지도 않는다(`default` 없음).  순서는 읽는 순서대로.
-        return sheets.choose(
-            self, i18n.KO.KLA_ASK_TITLE, i18n.KO.KLA_ASK_SIDE_BODY,
-            [("ref", i18n.KO.KLA_SIDE_REF, "option"),
-             ("val", i18n.KO.KLA_SIDE_VAL, "option"),
-             ("both", i18n.KO.KLA_SIDE_BOTH, "option"),
-             (None, i18n.KO.KLA_SIDE_NONE, "option")],
-            heading=i18n.KO.KLA_ASK_SIDE_HEADING, tiles=True,
-        )
+        #   (CLAUDE.md 규칙).  그림 카드 넷, 한 번 눌러 확정(현택님 2026-11-24, K1 A안).
+        dlg = kla_side_dialog.KlaSideDialog(self)
+        try:
+            sheets.run(dlg)
+            return dlg.answer
+        finally:
+            dlg.deleteLater()
 
     def _resolve_and_merge_kla(self, sr: ScanResult, kla_side: str,
                                on_done) -> None:
@@ -1046,6 +1056,27 @@ class MainWindow(MultiValFlow, QMainWindow):
         except Exception:
             _LOG.exception("KLA 정보파일/OCR 해석 실패 — 해석 없이 다음 단계로 진행")
             once()
+
+    def _read_kla_info(self, jobs: list, then) -> None:
+        """정보파일 읽기를 백그라운드에서 돌리고 끝나면 ``then({(side, 이름): WaferID})`` 를 부른다.
+
+        UI 스레드에서 폴더마다 읽으면 덮개 애니메이션까지 멈춘다 — 진행은 시그널로 덮개에 보낸다."""
+        if not jobs:
+            then({})
+            return
+        from ..workers.kla_info_read import KlaInfoReadWorker
+        self._loading.set_progress(0, 0, i18n.KO.LOAD_KLA_INFO)    # busy → 0 에서 안 멈춤
+        worker = KlaInfoReadWorker(jobs, parent=self)
+        self._kla_info_worker = worker         # GC 방지 참조 보관
+        worker.signals.progress.connect(
+            lambda d, t: self._loading.set_progress(d, t, i18n.KO.LOAD_KLA_INFO))
+
+        def _done(read: dict) -> None:
+            self._kla_info_worker = None
+            then(read)
+
+        worker.signals.done.connect(_done)
+        worker.start()
 
     def _kla_resolve_impl(self, sr: ScanResult, kla_side: str, on_done) -> None:
         do_ref = kla_side in ("ref", "both")
@@ -1078,148 +1109,161 @@ class MainWindow(MultiValFlow, QMainWindow):
         info_val: dict[str, str] = {}
         img0_ref: dict[str, Path] = {}
         img0_val: dict[str, Path] = {}
+        read_jobs: list = []
         for n in list(sr.ref_only):
             ii = imgs_of(n, True)
             if ii:
                 img0_ref[n] = ii[0].path
             if do_ref:
                 d = dir_of(n, True)
-                w = kla_info.read_wafer_id(d) if d else None
-                if w:
-                    info_ref[n] = w
+                if d:
+                    read_jobs.append(("ref", n, d))
         for n in list(sr.val_only):
             ii = imgs_of(n, False)
             if ii:
                 img0_val[n] = ii[0].path
             if do_val:
                 d = dir_of(n, False)
-                w = kla_info.read_wafer_id(d) if d else None
-                if w:
-                    info_val[n] = w
-        # 정보파일이 비어 헤더를 못 읽은 KLA 폴더 — 파일 이름의 WaferID 와 카세트 슬롯
-        # 번호가 **둘 다** 상대 폴더와 맞을 때만 짝짓는다(사용자 결정 2026-10-25).
-        # 둘 다 KLA 면 상대에 `ActiveSlot` 이 없어 이 경로를 쓰지 않는다.
-        self._kla_broken = []
-        if kla_side in ("ref", "val"):
-            kla_is_ref = kla_side == "ref"
-            known = info_ref if kla_is_ref else info_val
-            ids, self._kla_broken = wafer_ids_from_broken_info(
-                {n: dir_of(n, kla_is_ref)
-                 for n in (sr.ref_only if kla_is_ref else sr.val_only)},
-                {n: dir_of(n, not kla_is_ref)
-                 for n in (sr.val_only if kla_is_ref else sr.ref_only)},
-                known)
-            known.update(ids)
-            for n, w, ok in self._kla_broken:
-                _LOG.warning("KLA 정보파일이 비어 있음: %s (이름의 WaferID %s, 슬롯 번호로 짝 %s)",
-                             n, w, "지음" if ok else "못 지음")
-        merge_unmatched_by_wafer_id(sr, info_ref, info_val)
+                if d:
+                    read_jobs.append(("val", n, d))
 
-        # 메타 작성 + 다음 단계 — OCR 결과(있으면)를 반영해 최종 메타를 만든다.
-        # 판독에 성공한 폴더는 **사진이 없어도**(image=None) slot명을 갖는다 → 수동
-        # 매핑에서 미리보기만 없고 선택은 가능하다.
-        def build_meta(names, is_kla, info, ocr, img0, is_ref) -> dict:
-            meta: dict[str, dict] = {}
-            for n in names:
-                img = img0.get(n)
-                if is_kla and n in info:
-                    d = dir_of(n, is_ref)
-                    meta[n] = {"slot": info[n], "method": "info", "image": img,
-                               "slot_no": kla_info.read_slot_no(d) if d else None}
-                elif is_kla and n in ocr:
-                    meta[n] = {"slot": ocr[n], "method": "ocr", "image": img}
-                elif img is None:
-                    meta[n] = {"slot": None, "method": "none", "image": None}
-                elif is_kla:
-                    meta[n] = {"slot": None, "method": "unread", "image": img}
-                else:
-                    meta[n] = {"slot": None, "method": "plain", "image": img}
-            return meta
+        def _after_info(read: dict) -> None:
+            for (side, n), w in read.items():
+                (info_ref if side == "ref" else info_val)[n] = w
+            # 정보파일이 비어 헤더를 못 읽은 KLA 폴더 — 파일 이름의 WaferID 와 카세트 슬롯
+            # 번호가 **둘 다** 상대 폴더와 맞을 때만 짝짓는다(사용자 결정 2026-10-25).
+            # 둘 다 KLA 면 상대에 `ActiveSlot` 이 없어 이 경로를 쓰지 않는다.
+            self._kla_broken = []
+            if kla_side in ("ref", "val"):
+                kla_is_ref = kla_side == "ref"
+                known = info_ref if kla_is_ref else info_val
+                ids, self._kla_broken = wafer_ids_from_broken_info(
+                    {n: dir_of(n, kla_is_ref)
+                     for n in (sr.ref_only if kla_is_ref else sr.val_only)},
+                    {n: dir_of(n, not kla_is_ref)
+                     for n in (sr.val_only if kla_is_ref else sr.ref_only)},
+                    known)
+                known.update(ids)
+                for n, w, ok in self._kla_broken:
+                    _LOG.warning("KLA 정보파일이 비어 있음: %s (이름의 WaferID %s, 슬롯 번호로 짝 %s)",
+                                 n, w, "지음" if ok else "못 지음")
+            merge_unmatched_by_wafer_id(sr, info_ref, info_val)
 
-        def finalize(ocr_ref=None, ocr_val=None) -> None:
-            ocr_ref = ocr_ref or {}
-            ocr_val = ocr_val or {}
-            # 병합된 slot명(WaferID) → KLA 하위폴더명 매핑(엑셀 B열 회색 표기용).
-            # 둘 다 KLA 면 같은 WaferID 에 ref/val 두 폴더명이 걸리므로 **병기**한다
-            # (덮어쓰면 검증 쪽만 남아 어느 폴더인지 알 수 없다).
-            kla: dict[str, str] = {}
+            # 메타 작성 + 다음 단계 — OCR 결과(있으면)를 반영해 최종 메타를 만든다.
+            # 판독에 성공한 폴더는 **사진이 없어도**(image=None) slot명을 갖는다 → 수동
+            # 매핑에서 미리보기만 없고 선택은 가능하다.
+            def build_meta(names, is_kla, info, ocr, img0, is_ref) -> dict:
+                meta: dict[str, dict] = {}
+                for n in names:
+                    img = img0.get(n)
+                    if is_kla and n in info:
+                        d = dir_of(n, is_ref)
+                        meta[n] = {"slot": info[n], "method": "info", "image": img,
+                                   "slot_no": kla_info.read_slot_no(d) if d else None}
+                    elif is_kla and n in ocr:
+                        meta[n] = {"slot": ocr[n], "method": "ocr", "image": img}
+                    elif img is None:
+                        meta[n] = {"slot": None, "method": "none", "image": None}
+                    elif is_kla:
+                        meta[n] = {"slot": None, "method": "unread", "image": img}
+                    else:
+                        meta[n] = {"slot": None, "method": "plain", "image": img}
+                return meta
 
-            def add(wid, folder: str) -> None:
-                key = str(wid).upper()
-                prev = kla.get(key)
-                kla[key] = f"{prev} / {folder}" if prev and prev != folder else folder
+            def finalize(ocr_ref=None, ocr_val=None) -> None:
+                ocr_ref = ocr_ref or {}
+                ocr_val = ocr_val or {}
+                # 병합된 slot명(WaferID) → KLA 하위폴더명 매핑(엑셀 B열 회색 표기용).
+                # 둘 다 KLA 면 같은 WaferID 에 ref/val 두 폴더명이 걸리므로 **병기**한다
+                # (덮어쓰면 검증 쪽만 남아 어느 폴더인지 알 수 없다).
+                kla: dict[str, str] = {}
 
-            if do_ref:
-                for n, w in {**info_ref, **ocr_ref}.items():
-                    if w:
-                        add(w, n)
-            if do_val:
-                for n, w in {**info_val, **ocr_val}.items():
-                    if w:
-                        add(w, n)
-            self._kla_folders = kla
-            self._slot_meta_ref = build_meta(list(sr.ref_only), do_ref, info_ref,
-                                             ocr_ref, img0_ref, True)
-            self._slot_meta_val = build_meta(list(sr.val_only), do_val, info_val,
-                                             ocr_val, img0_val, False)
-            self._ocr_worker = None
-            on_done()
+                def add(wid, folder: str) -> None:
+                    key = str(wid).upper()
+                    prev = kla.get(key)
+                    kla[key] = f"{prev} / {folder}" if prev and prev != folder else folder
 
-        def finalize_in_slot(ocr_ref=None, ocr_val=None) -> None:
-            """Qt 슬롯에서 쓰는 finalize — 예외가 슬롯 밖으로 나가지 않게 한다.
-            finalize 가 on_done 전에 죽었으면 다음 단계가 영영 안 이어지므로 on_done 도
-            이어 준다(바깥 `_resolve_and_merge_kla` 의 once 가 중복 호출을 막는다)."""
-            try:
-                finalize(ocr_ref, ocr_val)
-            except Exception:
-                _LOG.exception("KLA 메타 작성 실패 — 메타 없이 다음 단계로 진행")
+                if do_ref:
+                    for n, w in {**info_ref, **ocr_ref}.items():
+                        if w:
+                            add(w, n)
+                if do_val:
+                    for n, w in {**info_val, **ocr_val}.items():
+                        if w:
+                            add(w, n)
+                self._kla_folders = kla
+                self._slot_meta_ref = build_meta(list(sr.ref_only), do_ref, info_ref,
+                                                 ocr_ref, img0_ref, True)
+                self._slot_meta_val = build_meta(list(sr.val_only), do_val, info_val,
+                                                 ocr_val, img0_val, False)
                 self._ocr_worker = None
                 on_done()
 
-        # 2) [OCR] **정보파일에서 WaferID 를 못 읽은 폴더에만** 헤더 OCR (사진이 있어야
-        #    가능).  정보파일에서 읽혔으면 그 값을 신뢰하고 OCR 을 건너뛴다(불필요한
-        #    OCR·응답없음 방지).  OCR 은 백그라운드 워커에서 → UI 비차단.
-        jobs: list = []
-        if do_ref:
-            for n in list(sr.ref_only):
-                if n in img0_ref and n not in info_ref:
-                    jobs.append(("ref", n, [it.path for it in imgs_of(n, True)]))
-        if do_val:
-            for n in list(sr.val_only):
-                if n in img0_val and n not in info_val:
-                    jobs.append(("val", n, [it.path for it in imgs_of(n, False)]))
-
-        if jobs and wafer_id.ocr_available():
-            from ..workers.wafer_id_ocr import WaferIdOcrWorker
-            self._loading.show_overlay(
-                i18n.KO.LOAD_KLA_OCR, step=(1, 3),
-                steps=self._journey_steps())
-            worker = WaferIdOcrWorker(jobs, parent=self)
-            self._ocr_worker = worker          # GC 방지 참조 보관
-
-            def _on_progress(d: int, t: int) -> None:
-                self._loading.set_progress(
-                    d, t, i18n.KO.LOAD_KLA_OCR)
-
-            def _on_ocr_done(ocr_ref: dict, ocr_val: dict) -> None:
+            def finalize_in_slot(ocr_ref=None, ocr_val=None) -> None:
+                """Qt 슬롯에서 쓰는 finalize — 예외가 슬롯 밖으로 나가지 않게 한다.
+                finalize 가 on_done 전에 죽었으면 다음 단계가 영영 안 이어지므로 on_done 도
+                이어 준다(바깥 `_resolve_and_merge_kla` 의 once 가 중복 호출을 막는다)."""
                 try:
-                    # 1차(정보파일) 결과도 **함께** 넘긴다 — OCR dict 만 넘기면 정보파일로
-                    # 읽은 쪽의 WaferID 키가 사라져 같은 WaferID 인데도 병합에 실패한다.
-                    merge_unmatched_by_wafer_id(
-                        sr, {**info_ref, **ocr_ref}, {**info_val, **ocr_val})
+                    finalize(ocr_ref, ocr_val)
                 except Exception:
-                    # Qt 슬롯 밖으로 예외가 나가면 PyQt6 가 프로세스를 끝낸다.
-                    _LOG.exception("OCR 결과 병합 실패 — 병합 없이 계속")
-                finally:
-                    finalize_in_slot(ocr_ref, ocr_val)
+                    _LOG.exception("KLA 메타 작성 실패 — 메타 없이 다음 단계로 진행")
+                    self._ocr_worker = None
+                    on_done()
 
-            worker.signals.progress.connect(_on_progress)
-            worker.signals.done.connect(_on_ocr_done)
-            worker.signals.failed.connect(lambda _msg: finalize_in_slot())
-            worker.start()
-            return
+            # 2) [OCR] **정보파일에서 WaferID 를 못 읽은 폴더에만** 헤더 OCR (사진이 있어야
+            #    가능).  정보파일에서 읽혔으면 그 값을 신뢰하고 OCR 을 건너뛴다(불필요한
+            #    OCR·응답없음 방지).  OCR 은 백그라운드 워커에서 → UI 비차단.
+            jobs: list = []
+            if do_ref:
+                for n in list(sr.ref_only):
+                    if n in img0_ref and n not in info_ref:
+                        jobs.append(("ref", n, [it.path for it in imgs_of(n, True)]))
+            if do_val:
+                for n in list(sr.val_only):
+                    if n in img0_val and n not in info_val:
+                        jobs.append(("val", n, [it.path for it in imgs_of(n, False)]))
 
-        finalize()
+            if jobs and wafer_id.ocr_available():
+                from ..workers.wafer_id_ocr import WaferIdOcrWorker
+                self._loading.show_overlay(
+                    i18n.KO.LOAD_KLA_OCR, step=(1, 3),
+                    steps=self._journey_steps(), cancelable=True)
+                worker = WaferIdOcrWorker(jobs, parent=self)
+                self._ocr_worker = worker          # GC 방지 참조 보관
+
+                def _on_progress(d: int, t: int) -> None:
+                    self._loading.set_progress(
+                        d, t, i18n.KO.LOAD_KLA_OCR)
+
+                def _on_ocr_done(ocr_ref: dict, ocr_val: dict) -> None:
+                    try:
+                        # 1차(정보파일) 결과도 **함께** 넘긴다 — OCR dict 만 넘기면 정보파일로
+                        # 읽은 쪽의 WaferID 키가 사라져 같은 WaferID 인데도 병합에 실패한다.
+                        merge_unmatched_by_wafer_id(
+                            sr, {**info_ref, **ocr_ref}, {**info_val, **ocr_val})
+                    except Exception:
+                        # Qt 슬롯 밖으로 예외가 나가면 PyQt6 가 프로세스를 끝낸다.
+                        _LOG.exception("OCR 결과 병합 실패 — 병합 없이 계속")
+                    finally:
+                        finalize_in_slot(ocr_ref, ocr_val)
+
+                worker.signals.progress.connect(_on_progress)
+                worker.signals.done.connect(_on_ocr_done)
+                worker.signals.failed.connect(lambda _msg: finalize_in_slot())
+                worker.start()
+                return
+
+            finalize()
+
+        def _after_info_safe(read: dict) -> None:
+            # Qt 슬롯 밖으로 예외가 나가면 PyQt6 가 프로세스를 끝낸다 — 바깥 `once` 가 중복을 막는다.
+            try:
+                _after_info(read)
+            except Exception:
+                _LOG.exception("KLA 정보파일/OCR 해석 실패 — 해석 없이 다음 단계로 진행")
+                on_done()
+
+        self._read_kla_info(read_jobs, _after_info_safe)
 
     def _apply_slot_pairs(self, sr: ScanResult, pairs) -> None:
         """(ref폴더명, val폴더명) 쌍을 통합 — val 사진을 ref slot명으로 합치고 제거."""
@@ -1392,12 +1436,14 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._stage = ""
         self._loading.hide_overlay()
         _LOG.warning("폴더 스캔 실패: %s", message)
-        sheets.warn(self, i18n.KO.APP_TITLE,
+        sheets.warn(self, i18n.KO.SCAN_FAIL_TITLE,
                     self._leg_message(
                         i18n.KO.WARN_SCAN_FAILED_FMT.format(detail=message)))
         if self._multi() and self._leg_idx > 0:
             # 앞 장비들의 매칭은 끝났다 — 이 장비만 빼고 이어 간다.
             self._multi_after_match_empty()
+        else:
+            wakelock.release()               # 세션이 여기서 끝난다 — 화면보호기 억제를 푼다
 
     def _on_scan_done(self, token: int, sr: ScanResult) -> None:
         """스캔이 끝났다 — 여기서부터는 예전 `_on_start` 의 나머지 그대로다.
@@ -1435,6 +1481,10 @@ class MainWindow(MultiValFlow, QMainWindow):
             side = self._kla_machine_side(inp)
             if side is None:
                 side = self._ask_kla_side()
+                if side == kla_side_dialog.CANCEL:
+                    # [취소]·Esc — 'KLA 아님' 과 달리 진행하지 않고 설정 화면으로.
+                    self._cancel_scan()
+                    return
             if side:
                 # OCR 은 백그라운드 워커에서 → 끝나면 on_done 으로 다음 단계 진행.
                 self._resolve_and_merge_kla(
@@ -1461,10 +1511,12 @@ class MainWindow(MultiValFlow, QMainWindow):
         common = sr.common_slot_names
         if not common:
             self._loading.hide_overlay()
-            sheets.warn(self, i18n.KO.APP_TITLE,
+            sheets.warn(self, i18n.KO.NO_SLOTS_TITLE,
                         self._leg_message(i18n.KO.WARN_NO_SLOTS))
             if self._multi() and self._leg_idx > 0:
                 self._multi_after_match_empty()      # 이 장비만 빼고 이어 간다
+            else:
+                wakelock.release()           # 세션이 여기서 끝난다 — 화면보호기 억제를 푼다
             return
         self._continue_start_after_scan(common)
 
@@ -1686,6 +1738,20 @@ class MainWindow(MultiValFlow, QMainWindow):
         if self._stage == "scan":
             self._cancel_scan()
             return
+        exp = getattr(self, "_extract_exporter", None)
+        if exp is not None and exp.isRunning():
+            self._cancel_extract_export(exp)
+            return
+        # 멈춤 장치가 있는 워커만 — OCR 은 남은 폴더를 건너뛰고(못 읽은 폴더는 수동 매핑으로),
+        # OpenVINO 설치는 pip 을 끝낸다.
+        for attr in ("_ocr_worker", "_openvino_worker"):
+            w = getattr(self, attr, None)
+            try:
+                if w is not None and w.isRunning():
+                    w.stop()
+                    return
+            except RuntimeError:
+                pass
         if self._b_wait_queue is not None:
             # 교차검증 2차 진입의 썸네일 마무리 — 멈추고 들어간다(남은 것은 화면이 만든다).
             if self._b_wait_pool is not None:
@@ -1756,7 +1822,8 @@ class MainWindow(MultiValFlow, QMainWindow):
         for slot in sorted(slots, key=lambda s: s.name):
             queue.extend(slot.ref_images)
         if not queue:
-            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
+            wakelock.release()
+            sheets.warn(self, i18n.KO.NO_IMAGES_TITLE, i18n.KO.WARN_NO_IMAGES)
             return
         pool = self._build_val_pool_by_slot()
         self._calibrate_then(queue, pool, auto_mode=True)
@@ -2038,7 +2105,8 @@ class MainWindow(MultiValFlow, QMainWindow):
         #   검토 화면으로 갔다가, 돌아와서 아래 `_show_page(self._match_page)` 가
         #   그걸 덮어써 **텅 빈 Stage 2** 에 사용자를 세워 둔다.
         if not queue:
-            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
+            wakelock.release()
+            sheets.warn(self, i18n.KO.NO_IMAGES_TITLE, i18n.KO.WARN_NO_IMAGES)
             return
 
         # 매칭 대상 풀 = 같은 Slot 의 검증(val) 쪽 모든 사진
@@ -2159,7 +2227,11 @@ class MainWindow(MultiValFlow, QMainWindow):
         if self._input is None or self._scan is None or self._calib_next is None:
             return
         ref_dir, val_dir, auto_args = self._notch_guess
-        self._ask_notch(ref_dir, val_dir, res, auto_args)
+        if not self._ask_notch(ref_dir, val_dir, res, auto_args):
+            # [취소]·Esc·✕ — 매칭을 시작하지 않고 설정 화면으로(매칭 [중지] 와 같은 정리).
+            self._calib_next = None
+            self._on_match_cancelled()
+            return
         self._after_notch()
 
     @staticmethod
@@ -2171,8 +2243,11 @@ class MainWindow(MultiValFlow, QMainWindow):
         return not (notch.is_none(ref_dir) and res is not None
                     and res.direction is not None and notch.is_none(res.direction))
 
-    def _ask_notch(self, ref_dir: str, val_dir: str, res, auto_args=None) -> None:
-        """감지 결과로 `_notch_dirs`(매칭 전용)를 정한다 — 둘 다 아래가 아니면 창으로 확인받는다."""
+    def _ask_notch(self, ref_dir: str, val_dir: str, res, auto_args=None) -> bool:
+        """감지 결과로 `_notch_dirs`(매칭 전용)를 정한다 — 둘 다 아래가 아니면 창으로 확인받는다.
+
+        창에서 [취소]·Esc·✕ 면 False — 부르는 쪽이 매칭 시작을 접는다(예전엔 닫기 = 확인이었다)."""
+        from PyQt6.QtWidgets import QDialog
         from ..coords import notch
         from .widgets.notch_dialog import NotchDialog
         self._notch_dirs = ()
@@ -2180,7 +2255,9 @@ class MainWindow(MultiValFlow, QMainWindow):
             dlg = NotchDialog(self._input.ref_machine, self._input.val_machine,
                               ref_dir, val_dir, parent=self,
                               auto_args=auto_args, auto_result=res)
-            sheets.run(dlg)
+            if sheets.run(dlg) != QDialog.DialogCode.Accepted:
+                _LOG.info("Notch 방향 창 취소 — 매칭을 시작하지 않음")
+                return False
             dirs = dlg.dirs
         else:
             dirs = (notch.DEFAULT, notch.DEFAULT)
@@ -2189,6 +2266,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         if any(not notch.is_none(d) for _r, d in pairs):
             self._notch_dirs = pairs
             _LOG.info(i18n.KO.NOTCH_LOG_FMT.format(dirs=", ".join(f"{r}={d}" for r, d in pairs)))
+        return True
 
     def _on_calib_progress(self, done: int, total: int) -> None:
         self._loading.set_progress(done, total, i18n.KO.COORD_CAL_LOADING)
@@ -2327,6 +2405,8 @@ class MainWindow(MultiValFlow, QMainWindow):
         try:
             candidates_by_ref = self._match_page.build_candidates_by_ref(merged)
         except Exception:
+            _LOG.exception("차순위 후보 만들기 실패")
+            self._status_bar.showMessage(i18n.KO.CANDIDATES_FAILED, 6000)
             candidates_by_ref = None
         # 좌표 매칭 모드 정보 전달 — 검토 화면에서 거리(µm) 표시 + 통계 3분류.
         self._match_review_page.load_state(
@@ -2436,6 +2516,8 @@ class MainWindow(MultiValFlow, QMainWindow):
         try:
             candidates_by_ref = self._match_page.build_candidates_by_ref(base)
         except Exception:
+            _LOG.exception("차순위 후보 만들기 실패")
+            self._status_bar.showMessage(i18n.KO.CANDIDATES_FAILED, 6000)
             candidates_by_ref = None
         self._match_review_page.load_state(
             base, score_cache=ctx.score_cache, val_pool=val_pool,
@@ -2479,7 +2561,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         if not sr.slots:
             self._loading.hide_overlay()
             wakelock.release()
-            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.EXTRACT_NONE_FOUND)
+            sheets.warn(self, i18n.KO.EXTRACT_SUMMARY_TITLE, i18n.KO.EXTRACT_NONE_FOUND)
             return
         # KLA 여부는 **묻지 않는다**(사용자 지적: "KLA인지 확인하는거 왜뜨냐").  매칭은
         # 짝이 안 맞을 때만 묻지만 예전 추출은 Camtek 폴더에도 매번 물었다.  호기가 K-n
@@ -2511,10 +2593,8 @@ class MainWindow(MultiValFlow, QMainWindow):
                                    steps=self._journey_steps())
         QApplication.processEvents()
         info: dict[str, str] = {}
-        for name, slot in sr.slots.items():
-            wid = kla_info.read_wafer_id(slot.ref_dir) if slot.ref_dir else None
-            if wid:
-                info[name] = wid
+        read_jobs = [("ref", name, slot.ref_dir)
+                     for name, slot in sr.slots.items() if slot.ref_dir]
 
         def finalize(ocr=None) -> None:
             try:
@@ -2523,21 +2603,34 @@ class MainWindow(MultiValFlow, QMainWindow):
                 self._ocr_worker = None
                 on_done()
 
-        jobs = [("ref", n, [it.path for it in s.ref_images])
-                for n, s in sorted(sr.slots.items()) if n not in info]
-        if jobs and wafer_id.ocr_available():
-            from ..workers.wafer_id_ocr import WaferIdOcrWorker
-            self._loading.show_overlay(i18n.KO.LOAD_KLA_OCR, step=(1, 3),
-                                       steps=self._journey_steps())
-            worker = WaferIdOcrWorker(jobs, parent=self)
-            self._ocr_worker = worker          # GC 방지 참조 보관
-            worker.signals.progress.connect(
-                lambda d, t: self._loading.set_progress(d, t, i18n.KO.LOAD_KLA_OCR))
-            worker.signals.done.connect(lambda ocr_ref, _val: finalize(ocr_ref))
-            worker.signals.failed.connect(lambda _msg: finalize())
-            worker.start()
-            return
-        finalize()
+        def after_info_safe(read: dict) -> None:
+            # Qt 슬롯 밖으로 예외가 나가면 PyQt6 가 프로세스를 끝낸다.
+            try:
+                after_info(read)
+            except Exception:
+                _LOG.exception("KLA 정보파일/OCR 해석 실패 — 해석 없이 다음 단계로 진행")
+                finalize()
+
+        def after_info(read: dict) -> None:
+            for (_side, name), wid in read.items():
+                info[name] = wid
+            jobs = [("ref", n, [it.path for it in s.ref_images])
+                    for n, s in sorted(sr.slots.items()) if n not in info]
+            if jobs and wafer_id.ocr_available():
+                from ..workers.wafer_id_ocr import WaferIdOcrWorker
+                self._loading.show_overlay(i18n.KO.LOAD_KLA_OCR, step=(1, 3),
+                                           steps=self._journey_steps(), cancelable=True)
+                worker = WaferIdOcrWorker(jobs, parent=self)
+                self._ocr_worker = worker          # GC 방지 참조 보관
+                worker.signals.progress.connect(
+                    lambda d, t: self._loading.set_progress(d, t, i18n.KO.LOAD_KLA_OCR))
+                worker.signals.done.connect(lambda ocr_ref, _val: finalize(ocr_ref))
+                worker.signals.failed.connect(lambda _msg: finalize())
+                worker.start()
+                return
+            finalize()
+
+        self._read_kla_info(read_jobs, after_info_safe)
 
     def _on_extract_select_finished(self) -> None:
         """후보 선별이 끝났다 — 오른쪽(고른 사진)이 곧 추출 대상이다."""
@@ -2566,30 +2659,24 @@ class MainWindow(MultiValFlow, QMainWindow):
         from ..workers import exporter as ex
 
         from_select = self._stack.currentWidget() is self._select_page
-        # 저장 방식(Recipe 나누기)을 여기서 고른다(사용자 결정) — 마지막 선택이 기본.
+        # 저장 방식(Recipe 나누기)을 여기서 고른다(사용자 결정) — 방식마다 그림 한 줄,
+        # 강조 없이 대등하게(현택님 2026-11-24, K2 B안).
         layouts = [(ex.RECIPE_LAYOUT_SINGLE, i18n.KO.EXTRACT_SAVE_SINGLE),
                    (ex.RECIPE_LAYOUT_SHEETS, i18n.KO.EXTRACT_SAVE_SHEETS),
                    (ex.RECIPE_LAYOUT_COLUMNS, i18n.KO.EXTRACT_SAVE_COLUMNS)]
-        last = getattr(_prefs.load(), "extract_recipe_layout", ex.RECIPE_LAYOUT_SINGLE)
-        if last not in dict(layouts):
-            last = ex.RECIPE_LAYOUT_SINGLE
-        choice = sheets.choose(
-            self, i18n.KO.EXTRACT_SUMMARY_TITLE,
-            i18n.KO.EXTRACT_SUMMARY_FMT.format(wafers=len(result.slot_images),
-                                               n=len(result.unmatched_refs))
-            + "\n\n" + i18n.KO.EXTRACT_SUMMARY_LAYOUT_HINT,
-            [(key, label, "primary" if key == last else "ghost")
-             for key, label in layouts]
-            + [("back", i18n.KO.EXTRACT_SUMMARY_BACK if from_select
-                else i18n.KO.EXTRACT_SUMMARY_CANCEL, "ghost")],
-            default=last)
+        from .widgets import extract_save_dialog
+        dlg = extract_save_dialog.ExtractSaveDialog(
+            layouts, len(result.slot_images), len(result.unmatched_refs), parent=self)
+        try:
+            sheets.run(dlg)
+            choice = dlg.choice
+        finally:
+            dlg.deleteLater()
         dst = None
         if choice in dict(layouts) and self._working_xlsx is not None:
-            _prefs.patch(extract_recipe_layout=choice)
             from .widgets.save_name_dialog import SaveNameDialog
             dlg = SaveNameDialog(self._working_xlsx.name, self._working_xlsx.parent,
-                                 parent=self, body=i18n.KO.EXTRACT_SAVE_NAME_BODY,
-                                 fields=self._title_fields_now)
+                                 parent=self, fields=self._title_fields_now)
             if sheets.run(dlg) and dlg.chosen is not None:
                 dst = self._working_xlsx.with_name(dlg.chosen)
         if dst is None:
@@ -2609,7 +2696,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._extract_layout = layout
         self._rail.set_current(2)            # 추출 레일의 마지막 단계 '저장'
         self._rail.set_navigable(())
-        self._loading.show_overlay(i18n.KO.LOAD_EXPORT)
+        self._loading.show_overlay(i18n.KO.LOAD_EXPORT, cancelable=True)
         # Wafer Map 시트는 설정 화면 스위치로 끌 수 있다(사용자 결정) — 렌더러가 없으면
         # exporter 가 그 시트를 만들지 않는다.
         with_map = bool(getattr(self._input, "extract_wafer_map", True))
@@ -2624,6 +2711,19 @@ class MainWindow(MultiValFlow, QMainWindow):
         exporter.signals.failed.connect(self._on_extract_export_failed)
         exporter.start()
 
+    def _cancel_extract_export(self, exporter) -> None:
+        """추출 저장 [중지] — 워커는 임시 파일에만 쓰고 멈추면 지우므로 반쯤 쓴 파일이 남지 않는다."""
+        for sig in (exporter.signals.done, exporter.signals.failed):
+            try:
+                sig.disconnect()
+            except TypeError:
+                pass
+        exporter.stop()
+        self._loading.hide_overlay()
+        self._sync_rail(self._stack.currentWidget())
+        if self._stack.currentWidget() is not self._select_page:
+            self._new_session()
+
     def _on_extract_export_done(self, path: str) -> None:
         self._loading.hide_overlay()
         self._extract_saved = Path(path)
@@ -2637,7 +2737,7 @@ class MainWindow(MultiValFlow, QMainWindow):
 
         path = self._extract_saved
         choice = sheets.choose(
-            self, i18n.KO.APP_TITLE, i18n.KO.SAVE_SUCCESS_FMT.format(path=path),
+            self, i18n.KO.SAVE_SUCCESS_TITLE, i18n.KO.SAVE_SUCCESS_FMT.format(path=path),
             [("open_file", i18n.KO.BTN_OPEN_SAVED_FILE, "primary"),
              ("open_dir", i18n.KO.BTN_OPEN_SAVED_FOLDER, "ghost"),
              ("close", i18n.KO.MSG_BTN_CLOSE, "ghost")],
@@ -2655,7 +2755,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         body = (i18n.KO.SAVE_FAIL_LOCKED_FMT.format(error=msg) if locked
                 else i18n.KO.SAVE_FAIL_FMT.format(error=msg))
         choice = sheets.choose(
-            self, i18n.KO.APP_TITLE, body,
+            self, i18n.KO.SAVE_FAIL_TITLE, body,
             [("retry", i18n.KO.BTN_RETRY_SAVE, "primary"),
              ("close", i18n.KO.MSG_BTN_CLOSE, "ghost")],
             default="retry")
@@ -3200,8 +3300,15 @@ class MainWindow(MultiValFlow, QMainWindow):
         다시 띄우지 않는다 — 크레딧·메모리 사용량 모두 안 보인다(사용자 요청 2026-10-30)."""
         setup = getattr(self, "_setup_page", None)
         on_setup = page is setup and setup is not None
-        self._credit_label.setVisible(not on_setup)
+        self._credit_label.setVisible(
+            not on_setup and not self._status_bar.currentMessage())
         self._status_bar.setVisible(not on_setup or _prefs.load().dev_mode)
+
+    def _on_status_message(self, text: str) -> None:
+        """알림이 사라지면 크레딧을 되돌린다(설정 화면은 계속 숨김)."""
+        setup = getattr(self, "_setup_page", None)
+        on_setup = setup is not None and self._stack.currentWidget() is setup
+        self._credit_label.setVisible(not text and not on_setup)
 
     def _apply_statusbar_theme(self) -> None:
         """상태바 크레딧 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯)."""
@@ -3528,6 +3635,11 @@ class MainWindow(MultiValFlow, QMainWindow):
                 pre.wait(500)
         except Exception:
             _LOG.warning("종료 중 점수 사전 계산 워커 정리 실패 — 계속 종료합니다", exc_info=True)
+        try:
+            from .pages.match_page import stop_live_matchers
+            stop_live_matchers()
+        except Exception:
+            _LOG.warning("종료 중 매칭 워커 정리 실패 — 계속 종료합니다", exc_info=True)
         # OpenVINO 설치 워커 정리.
         try:
             if (self._openvino_worker is not None

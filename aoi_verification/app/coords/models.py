@@ -59,18 +59,28 @@ class DefectCoord:
 
 @dataclass(frozen=True)
 class DefectGeometry:
-    """Surface.flt 레코드에서 뽑은 결함 핵심 정보(예시 기준 6개 항목).
+    """결과 파일(Surface.flt · Height.flt) 레코드에서 뽑은 결함 핵심 정보.
 
-    area/width/length 는 µm 환산값, contrast 는 원값, zone/recipe 는 분류 코드."""
-    area_um2: float     # area(px²) × pixel_um²
-    width_um: float     # BlobBreadth(px) × pixel_um
-    length_um: float    # BlobFeretMax(px) × pixel_um
-    contrast: float     # Surface.flt Contrast (그대로)
+    area/width/length 는 µm 환산값, contrast 는 원값, zone/recipe 는 분류 코드.
+    ``kind == KIND_HEIGHT``(Height.flt) 이면 area/width/length/contrast 는 ``None`` 이고
+    ``height_um`` 이 채워진다 — 그 레코드에는 그 값들이 없다."""
+    area_um2: Optional[float]     # area(px²) × pixel_um²
+    width_um: Optional[float]     # BlobBreadth(px) × pixel_um
+    length_um: Optional[float]    # BlobFeretMax(px) × pixel_um
+    contrast: Optional[float]     # Surface.flt Contrast (그대로)
     zone: int           # Surface.flt zone 코드 (예: 1=PI Opening, 63=Scan Area)
     recipe: Optional[int]  # Surface.flt recipe 코드. 그 칸이 없는 레이아웃(구형 장비)은 None
     pixel_um: float     # 환산에 쓴 2D 스캔 픽셀 크기(µm/px). 결과 폴더에서 읽음(없으면 0.77)
     zone_name: str = ""    # recipe 파일의 ZoneName(자재별). 없으면 빈 문자열(코드만 표시)
     recipe_name: str = ""  # recipe 파일의 RecipeName(자재별). 없으면 빈 문자열(코드만 표시)
+    kind: str = "Surface"  # 결과 파일 — KIND_SURFACE | KIND_HEIGHT (장비 Export Type 의 앞부분)
+    height_um: Optional[float] = None   # Height.flt height (Export 의 Height 값)
+    type_name: str = ""    # 종류 이름(EquipmentClassifications.ini, 예: Missing Bump). 없으면 빈 문자열
+    class_name: str = ""   # 분류 이름(ManReClassify.ini, 예: B R Height LSL = Export Classify). 없으면 빈 문자열
+
+
+KIND_SURFACE = "Surface"
+KIND_HEIGHT = "Height"
 
 
 # ── Camtek INI 변환 폴백 상수 ────────────────────────────────────────────

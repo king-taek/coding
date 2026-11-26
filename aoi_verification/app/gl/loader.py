@@ -118,6 +118,23 @@ def load_image(path) -> GlImage:
                    color, str(p), warnings)
 
 
+_GRAY_MODES = ("1", "L", "I;16", "I;16L", "I;16B")
+
+
+def is_color(path) -> bool:
+    """:func:`load_image` 가 이 사진을 컬러로 볼까.  머리(모드)만으로 회색이면 디코드하지 않는다.
+
+    못 읽는 사진은 :class:`GlLoadError` 를 낸다(GL 로도 못 연다)."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            if im.mode in _GRAY_MODES:
+                return False
+    except Exception:
+        pass                                # Pillow 가 못 여는 형식은 아래 디코드가 판정한다
+    return load_image(path).color
+
+
 def guess_raw_side(nbytes: int, bits: int, header: int = 0) -> int:
     """파일 크기로 정사각형 한 변을 추정한다.  딱 맞지 않으면 0."""
     px = (nbytes - header) // (2 if bits > 8 else 1)
@@ -153,6 +170,7 @@ class ViewLoad:
     target_box: tuple | None = None           # Scan 안의 결함 300㎛ 상자 (left, top, w, h)
     scan_missing: bool = False                # 컬러인데 Scan 을 못 찾았다
     source_path: str = ""                     # 사용자가 연 원래 파일
+    scan_status: str = ""                     # Scan 을 못 찾은 이유(scan_image 상태 값, 찾았으면 "")
 
 
 def load_for_view(path) -> ViewLoad:
@@ -164,10 +182,13 @@ def load_for_view(path) -> ViewLoad:
     g = load_image(path)
     if not g.color:
         return ViewLoad(g, source_path=str(path))
+    why = ""
     try:
         from ..coords import scan_image
         match = scan_image.resolve(path)
+        why = match.status
         if match.ok:
+            why = scan_image.UNREADABLE        # 후보는 있는데 하나도 못 읽으면 이 이유다
             for cand in match.candidates:
                 full = scan_image.load_full(cand)
                 if full is None:
@@ -176,5 +197,5 @@ def load_for_view(path) -> ViewLoad:
                 scan = GlImage(np.ascontiguousarray(gray), 8, False, str(cand.path), [])
                 return ViewLoad(scan, cand.path.name, tuple(cand.box), False, str(path))
     except Exception:
-        pass                                   # 아래에서 컬러 밝기로 되돌아간다
-    return ViewLoad(g, scan_missing=True, source_path=str(path))
+        why = "unreadable_scan"                # 아래에서 컬러 밝기로 되돌아간다
+    return ViewLoad(g, scan_missing=True, source_path=str(path), scan_status=why)

@@ -200,16 +200,15 @@ def test_tally_pulse_marks_only_changed_segments(styled_qapp, motion_on, monkeyp
     page.resize(1280, 800)
     page.show()
     _spin(styled_qapp, 20)
-    got = {}
-    monkeypatch.setattr(mrp, "_rich_spans",
-                        lambda lbl, parts, sep, changed: got.setdefault("c", changed) or [])
-    parts, sep = ["a", "b"], " "
-    page._pulse_changed_tally([("ok", 3), ("over", 1)], parts, sep)   # 처음 — 없음
-    assert "c" not in got
-    page._pulse_changed_tally([("ok", 3), ("over", 1)], parts, sep)   # 같은 값 — 없음
-    assert "c" not in got
-    page._pulse_changed_tally([("ok", 4), ("over", 1)], parts, sep)
-    assert got["c"] == {0}
+    spans = []
+    monkeypatch.setattr(mrp._TallyPulse, "set_spans", lambda self, sp: spans.append(sp))
+    page._pulse_changed_tally([("kept", 3), ("ok", 3), ("over", 1)])   # 처음 — 없음
+    assert not spans
+    page._pulse_changed_tally([("kept", 3), ("ok", 3), ("over", 1)])   # 같은 값 — 없음
+    assert not spans
+    page._set_chips([("ok", "{n}", 4, "#000000", True), ("over", "{n}", 1, "#000000", True)])
+    page._pulse_changed_tally([("kept", 3), ("ok", 4), ("over", 1)])
+    assert len(spans) == 1 and len(spans[0]) == 1      # 바뀐 '일치' 칩 하나만
     page.deleteLater()
 
 

@@ -212,6 +212,7 @@ def _win_stub():
     win._scan_worker = None
     win._thumb_pool = None
     win._thumbs_handled = False
+    win._extract_exporter = win._ocr_worker = win._openvino_worker = None
     win._scan = object()
     win._loading = _FakeOverlay()
     win._setup_page = object()

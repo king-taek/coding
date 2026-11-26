@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
+from PyQt6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel,
                               QVBoxLayout, QWidget)
 
 from ... import i18n
@@ -15,6 +15,7 @@ from .. import motion
 from .. import theme
 from ...models.result import FinalResult
 from ...workers.exporter import ExcelExporter
+from ..folder_picker import SavePicker
 from ..widgets.app_logo import build_logo_label
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
@@ -84,11 +85,15 @@ class ResultPage(QWidget):
         self._coord_mode: bool = False
         self._tolerance: float = _DFLT_TOL
         self._loading = LoadingOverlay(self)
+        self._loading.cancel_requested.connect(self._on_export_cancel)
         self._exporter: ExcelExporter | None = None
         # 이번 결과를 한 번이라도 저장했는가 — [새 검증 시작] 확인의 근거(U-06).
         self._exported = False
         # 여러 검증 장비 — 엑셀 저장 때 장비마다의 결과를 받아 오는 함수(None = 한 장비).
         self._results_provider = None
+        # 세션 없이 결과만 보일 때의 저장 위치 창 — 비동기(`ui/folder_picker.py`).
+        self._save_picker = SavePicker(self, purpose="result_save")
+        self._save_picker.picked.connect(self._on_save_picked)
         self._build()
 
     # ------------------------------------------------------------------
@@ -158,6 +163,8 @@ class ResultPage(QWidget):
             i18n.KO.EXPORT_UNMATCHED_ORIGINAL_LABEL, self,
         )
         self.unmatched_original_chk.setChecked(False)
+        # 시작부터 포커스 테두리가 뜨지 않게 — 눌렀을 때만 포커스를 받는다.
+        self.unmatched_original_chk.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.unmatched_original_chk.setToolTip(
             i18n.KO.EXPORT_UNMATCHED_ORIGINAL_TOOLTIP
         )
@@ -167,6 +174,7 @@ class ResultPage(QWidget):
             i18n.KO.EXPORT_ORIGINAL_QUALITY_LABEL, self,
         )
         self.original_quality_chk.setChecked(False)
+        self.original_quality_chk.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.original_quality_chk.setToolTip(
             i18n.KO.EXPORT_ORIGINAL_QUALITY_TOOLTIP
         )
@@ -224,12 +232,13 @@ class ResultPage(QWidget):
         self.review_unmatched_btn = NeonButton(
             i18n.KO.BTN_REVIEW_UNMATCHED, role="ghost",
         )
-        self.review_unmatched_btn.setMinimumWidth(200)
+        # ★ 고정 최소 폭을 두지 않는다 — 200/240 px 하한 때문에 800×600 창에서 버튼 줄이
+        #   창보다 넓어져 [엑셀로 저장] 이 오른쪽 끝에서 잘렸다(실측 2026-11-24).
         self.review_unmatched_btn.clicked.connect(self._on_review_unmatched)
         bar.addWidget(self.review_unmatched_btn)
 
         self.export_btn = NeonButton(i18n.KO.BTN_EXPORT_EXCEL, role="primary")
-        self.export_btn.setMinimumWidth(240)
+        self.export_btn.setMinimumWidth(160)      # 주 버튼은 조금 넓게 — 줄이 창을 넘지 않는 만큼만
         self.export_btn.setMinimumHeight(46)
         self.export_btn.clicked.connect(self._on_export)
         bar.addWidget(self.export_btn)
@@ -363,7 +372,7 @@ class ResultPage(QWidget):
             return
         if self._val_pool is None:
             sheets.info(
-                self, i18n.KO.APP_TITLE, i18n.KO.UNMATCHED_REVIEW_EMPTY,
+                self, i18n.KO.UNMATCHED_SHEET_TITLE, i18n.KO.UNMATCHED_REVIEW_EMPTY,
             )
             return
         # 이미 결과에 들어간 모든 경로 — 중복 매칭 방지용. cross 모드에서
@@ -408,7 +417,7 @@ class ResultPage(QWidget):
         self.result_edited.emit(list(self._result.matches),
                                 list(self._result.unmatched_refs))
         sheets.info(
-            self, i18n.KO.APP_TITLE,
+            self, i18n.KO.UNMATCHED_SHEET_TITLE,
             i18n.KO.UNMATCHED_REVIEW_DONE_FMT.format(n=len(dlg.new_matches)),
         )
         # 요약 다시 그리기 (매칭 수 / 미매칭 수 갱신).
@@ -429,13 +438,11 @@ class ResultPage(QWidget):
 
     # ------------------------------------------------------------------
     def _build_stat_tiles(self, result: FinalResult) -> QHBoxLayout:
-        """핵심 수치를 큰 모노 숫자 타일로.
+        """핵심 수치를 큰 모노 숫자 타일로 — 매치 · 매치 없음 · 슬롯 불일치.
 
-        '허용 초과' 는 결과 객체에 따로 없다 — 검토 화면과 **같은 분류 함수**를 써서
-        센다(두 화면이 다른 기준으로 세면 사용자가 숫자 불일치를 먼저 발견한다)."""
-        from .match_review_page import tally
-
-        _ok, n_over, _none = tally(result.matches, set(), self._coord_mode)
+        ★ '허용 초과' 타일은 없다(현택님 2026-11-24 — 검토 뒤에는 매치 / 매치 없음만).
+          그 수는 `result.matches` 중 좌표 차이가 허용 오차를 넘은 **남긴 매치**의
+          부분집합이라 이미 '매치' 에 들어 있다 — 따로 더하거나 빼지 않는다."""
         n_match = len(result.matches)
         n_miss = len(result.unmatched_refs)
         n_slot = len(result.slot_only_ref) + len(result.slot_only_val)
@@ -444,7 +451,6 @@ class ResultPage(QWidget):
         row.setSpacing(10)
         specs = [
             (n_match, i18n.KO.STAT_MATCHED, "ok"),
-            (n_over, i18n.KO.STAT_OVER_TOLERANCE, "over" if n_over else "none"),
             (n_miss, i18n.KO.STAT_NO_MATCH, "over" if n_miss else "none"),
             (n_slot, i18n.KO.STAT_SLOT_MISMATCH, "none"),
         ]
@@ -452,12 +458,10 @@ class ResultPage(QWidget):
             # 교차검증 — '매치 없음' 을 어느 장비에만 있었는지로 나눠 보인다.
             n_val = sum(1 for u in result.unmatched_refs if u.side == "val")
             n_ref = n_miss - n_val
-            specs[2:3] = [
+            specs[1:2] = [
                 (n_ref, i18n.KO.STAT_ONLY_REF, "over" if n_ref else "none"),
                 (n_val, i18n.KO.STAT_ONLY_VAL, "over" if n_val else "none"),
             ]
-        if not self._coord_mode:
-            del specs[1]              # 유사도 모드엔 '허용 오차' 개념이 없다
         for value, caption, tone in specs:
             row.addWidget(self._stat_tile(value, caption, tone))
         row.addStretch(1)
@@ -552,15 +556,24 @@ class ResultPage(QWidget):
                 val=self._result.val_machine,
                 ts=ts,
             )
-            dst, _ = QFileDialog.getSaveFileName(
-                self, i18n.KO.SAVE_DIALOG_TITLE, filename,
-                "Excel (*.xlsx)",
-            )
-            if not dst:
-                return
-            self._save_path = Path(dst)
+            # 비동기 OS 창 — `exec()` 는 Windows 에서 UI 스레드를 세운다.  고르면
+            # `_on_save_picked` 가 저장을 시작하고, 취소하면 아무 일도 없다.
+            # 기본 폴더는 다른 저장과 같은 결과 폴더(현택님 2026-11-25 Q3 A안).
+            from ...utils import paths
+            self._save_picker.open(i18n.KO.SAVE_DIALOG_TITLE,
+                                   str(paths.results_dir() / filename),
+                                   "Excel (*.xlsx)", "xlsx")
+            return
+        self._start_export()
 
-        self._loading.show_overlay(i18n.KO.LOAD_EXPORT)
+    def _on_save_picked(self, dst: str) -> None:
+        if not dst or self._result is None:
+            return
+        self._save_path = Path(dst)
+        self._start_export()
+
+    def _start_export(self) -> None:
+        self._loading.show_overlay(i18n.KO.LOAD_EXPORT, cancelable=True)
         self._exporter = ExcelExporter(
             self._result, self._save_path, template_path=self._template_path,
             original_quality=self.original_quality_chk.isChecked(),
@@ -625,6 +638,19 @@ class ResultPage(QWidget):
             return None
         return target.with_name(dlg.chosen)
 
+    def _on_export_cancel(self) -> None:
+        """덮개 [중지] — 워커의 멈춤 장치(`stop`)를 건다.  워커는 임시 파일(.part)에만 쓰고
+        멈추면 그것을 지우므로 반쯤 쓴 결과 파일이 남지 않는다(이전 파일도 그대로)."""
+        exp = self._exporter
+        if exp is not None and exp.isRunning():
+            for sig in (exp.signals.done, exp.signals.failed):
+                try:
+                    sig.disconnect()
+                except TypeError:
+                    pass
+            exp.stop()
+        self._loading.hide_overlay()
+
     def _on_export_done(self, path: str) -> None:
         self._loading.hide_overlay()
         self._exported = True
@@ -665,7 +691,7 @@ class ResultPage(QWidget):
         if path is None:
             return
         choice = sheets.choose(
-            self, i18n.KO.APP_TITLE,
+            self, i18n.KO.SAVE_SUCCESS_TITLE,
             i18n.KO.SAVE_SUCCESS_FMT.format(path=path),
             [("open_file", i18n.KO.BTN_OPEN_SAVED_FILE, "primary"),
              ("open_dir", i18n.KO.BTN_OPEN_SAVED_FOLDER, "ghost"),
@@ -692,7 +718,7 @@ class ResultPage(QWidget):
         body = (i18n.KO.SAVE_FAIL_LOCKED_FMT.format(error=msg) if locked
                 else i18n.KO.SAVE_FAIL_FMT.format(error=msg))
         choice = sheets.choose(
-            self, i18n.KO.APP_TITLE, body,
+            self, i18n.KO.SAVE_FAIL_TITLE, body,
             [("retry", i18n.KO.BTN_RETRY_SAVE, "primary"),
              ("close", i18n.KO.MSG_BTN_CLOSE, "ghost")],
             default="retry",

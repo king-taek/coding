@@ -91,6 +91,11 @@ def mid_cache_dir() -> Path:
     return _ensure_dir(cache_root() / "mid")
 
 
+def scan_crop_cache_dir() -> Path:
+    """Overkill 튜닝의 Scan Crop(무손실 PNG) 영속 캐시 — 1일 TTL 정리 대상(``cache.prune_old_cache``)."""
+    return _ensure_dir(cache_root() / "scan_crops")
+
+
 def feature_cache_dir() -> Path:
     return _ensure_dir(cache_root() / "features")
 

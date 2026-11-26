@@ -103,12 +103,18 @@ def test_marked_row_keeps_candidates_and_crosses_out_the_pair(styled_qapp, tmp_p
     row.deleteLater()
 
 
-def test_done_button_counts_no_match(styled_qapp, tmp_path):
+def test_done_button_is_plain_and_counts_are_chips(styled_qapp, tmp_path):
+    """V27 — 버튼 글자는 '검토 완료' 뿐이고, 건수는 왼쪽 칩이 보여 준다."""
     ms = _ms(tmp_path)
     page = _page(ms)
-    assert page.btn_done.text() == i18n.KO.BTN_FINISH_REVIEW_KEPT_FMT.format(n=3)
+    assert page.btn_done.text() == i18n.KO.BTN_FINISH_REVIEW == "검토 완료"
+    assert page._chips["kept"].text() == i18n.KO.TALLY_KEPT_FMT.format(n=3)
+    assert page._chips["none"].isHidden()
     page._on_toggle(ms[0])
-    assert page.btn_done.text() == i18n.KO.BTN_FINISH_REVIEW_KEPT_NONE_FMT.format(n=2, m=1)
+    assert page.btn_done.text() == "검토 완료"
+    assert page._chips["kept"].text() == i18n.KO.TALLY_KEPT_FMT.format(n=2)
+    assert page._chips["none"].text() == i18n.KO.TALLY_NO_MATCH_FMT.format(n=1)
+    assert not page._chips["none"].isHidden()
     page.deleteLater()
 
 
@@ -124,3 +130,17 @@ def test_toggle_column_fits_the_longer_label(styled_qapp):
     fm = QFontMetrics(f)
     for text in (i18n.KO.BTN_NO_MATCH_COMPACT, i18n.KO.BTN_RESTORE_COMPACT):
         assert fm.horizontalAdvance(text) + 2 * 8 + 2 <= mrp._toggle_col_w(), text
+
+
+def test_similar_slot_names_stay_distinguishable(styled_qapp, tmp_path):
+    """V26 — 앞뒤가 같은 두 슬롯 이름이 가운데 줄임으로 같아 보이면 안 된다."""
+    from dataclasses import replace
+    ms = _ms(tmp_path, 2)
+    ms = [replace(ms[0], slot="W7548304XYG4"), replace(ms[1], slot="W7548306XYG4")]
+    page = _page(ms)
+    t0 = _row(page, ms[0])._slot_label.text()
+    t1 = _row(page, ms[1])._slot_label.text()
+    assert t0 != t1
+    assert t0 == "W7548304\nXYG4" and t1 == "W7548306\nXYG4"
+    assert _row(page, ms[0])._slot_label.toolTip() == "W7548304XYG4"
+    page.deleteLater()

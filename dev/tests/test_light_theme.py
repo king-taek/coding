@@ -174,7 +174,7 @@ def test_removed_strings_are_gone():
                  "LEGACY_SWITCH_DESC", "ENGINE_ACTIVE_COORD"):
         assert not hasattr(i18n.KO, gone), f"i18n.KO.{gone} 가 남아 있다"
     # 스위치 제목·툴팁·배지 문구는 그대로다.
-    assert i18n.KO.LEGACY_SWITCH_TITLE == "유사도 엔진(구형) 사용"
+    assert i18n.KO.LEGACY_SWITCH_TITLE == "유사도 매치"
     assert i18n.KO.LEGACY_MODE_HINT
     assert i18n.KO.ENGINE_ACTIVE_LEGACY_FMT
 
@@ -215,18 +215,17 @@ def test_setup_page_has_no_howto_and_no_dark_switch(page):
 
 
 def test_legacy_switch_has_no_description_but_still_works(page):
-    sw = page.legacy_switch
-    assert sw._desc is None, "구형 엔진 스위치 아래 설명 라벨이 남아 있다"
+    sw = page.legacy_switch            # 체크박스(F10) — 설명 라벨을 달 자리가 없다
     texts = "\n".join(_all_texts(page))
     for line in _REMOVED_LEGACY_DESC:
         assert line not in texts, "지운 두 줄 설명이 화면 어딘가에 남아 있다"
     # 제목·툴팁은 그대로.
-    assert sw._title.text() == i18n.KO.LEGACY_SWITCH_TITLE
+    assert sw.text() == i18n.KO.LEGACY_SWITCH_TITLE
     assert sw.toolTip() == i18n.KO.LEGACY_MODE_HINT
     # 조작 — 켜면 구형 하위 선택·임계치가 보이고 허용 오차가 잠긴다, 끄면 되돌아간다.
     for on in (True, False):
-        sw.set_on(on, emit=True)
-        assert sw.is_on() is on
+        sw.setChecked(on)
+        assert sw.isChecked() is on
         assert page.legacy_group.isHidden() is (not on)
         assert page._threshold_row.isHidden() is (not on)
         assert page._tol_row.isEnabled() is (not on)

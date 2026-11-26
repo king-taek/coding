@@ -493,3 +493,17 @@ def test_real_single_clustered_wafer_is_not_trusted():
             assert not cal.is_confident(a)
             return
     pytest.fail("31266524EWG5 가 자료에 없다")
+
+
+def test_dialog_weak_auto_text_shows_pairs_against_required(styled_qapp, tmp_path):
+    """W56 — 근거가 모자라면 '맞는 짝 지금 / 필요쌍' 숫자로(필요 수는 MIN_AUTO_SUPPORT 에서). 적용은 쌍을 고르기 전엔 꺼져 있고 primary."""
+    from aoi_verification.app.ui.widgets.coord_calibration_dialog import (
+        CoordCalibrationDialog)
+    entries, _shift = _make_entries(tmp_path)
+    auto = cal.AutoOffset(offset=(87.0, -91.0), support=cal.MIN_AUTO_SUPPORT - 2, runner_up=0, votes=10)
+    dlg = CoordCalibrationDialog(entries, kla_side="ref", auto=auto)
+    try:
+        assert f"맞는 짝 {cal.MIN_AUTO_SUPPORT - 2} / {cal.MIN_AUTO_SUPPORT}쌍" in dlg._warn.text()
+        assert not dlg._apply.isEnabled() and dlg._apply.property("role") == "primary"
+    finally:
+        dlg.deleteLater()

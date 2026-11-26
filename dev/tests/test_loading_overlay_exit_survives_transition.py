@@ -80,7 +80,7 @@ def test_exit_during_fade_out_still_reaches_the_end(styled_qapp, motion_on):
 
     ov = LoadingOverlay(page)
     ov.show_overlay("점수 계산 중", cancelable=True)
-    _spin(styled_qapp, 420)              # 최소표시 래치(350ms) 통과
+    _spin(styled_qapp, 620)              # 표시 지연(150ms) + 최소표시 래치(350ms) 통과
     ov.hide_overlay()                    # 퇴장 페이드 시작
     styled_qapp.processEvents()
     assert ov._hiding, "전제가 깨졌다 — 퇴장 페이드가 시작되지 않았다"
@@ -130,7 +130,7 @@ def test_pending_latch_does_not_lock_the_app_keyboard_forever(styled_qapp, motio
 
     ov = LoadingOverlay(page)
     ov.show_overlay("점수 계산 중입니다", cancelable=True)
-    _spin(styled_qapp, 120)              # 래치(350ms) 안에서
+    _spin(styled_qapp, 220)              # 표시 지연(150ms) 뒤, 래치(350ms) 안에서
     ov.hide_overlay()                    # → `_hide_pending` 상태
     styled_qapp.processEvents()
     assert ov._hide_pending, "전제가 깨졌다 — 래치 대기가 아니다"

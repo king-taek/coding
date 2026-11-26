@@ -1,29 +1,30 @@
 """Slot 의 모든 사진을 중간(800px) 크기로 보여주는 줌-뷰 윈도우.
 
 - 패널 종류(source) 별로 타이틀과 액션 버튼이 달라진다.
-- 단일 클릭 → 선택 토글(액션 버튼 활성화) / **우클릭 '크게 보기'** → 풀스크린 뷰어.
-  (더블클릭 확대는 제거했다 — 사진을 연달아 고를 때 오발했다.)
+- 단일 클릭 → 선택 토글(액션 버튼 활성화) / 더블클릭 · 우클릭 '크게 보기' → 풀스크린 뷰어.
 - 다중 선택 + 일괄 액션 지원.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Sequence
 
 from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, QThread, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (QColor, QImage, QPainter, QPen, QPixmap, QShortcut,
                          QKeySequence)
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
-                              QHBoxLayout, QLabel, QMenu, QScrollArea,
+                              QHBoxLayout, QLabel, QScrollArea,
                               QVBoxLayout, QWidget)
 
 from ... import i18n
 from .. import theme
+from ...coords import scan_image
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
 from .option_group import columns_for_width
+from . import photo_menu
 from . import sheet_host as sheets
 
 _BOX_PX = 3     # Scan 범위 박스 선 두께(화면 픽셀)
@@ -45,11 +46,7 @@ class _MidTile(QFrame):
     """
 
     clicked = pyqtSignal(object)         # ImageItem
-    # ★ 확대는 **우클릭 '크게 보기'** 로만 연다.  더블클릭 확대를 없앤 이유: 사진을
-    #   빠르게 연달아 고르다 보면 두 번째 클릭이 더블클릭으로 붙어 원하지 않는 풀스크린
-    #   창이 떠 버린다(사용자 지적).  선택은 프레스마다 토글되는 잦은 동작이고 확대는
-    #   드문 동작이라, 같은 버튼의 연타에 둘을 겹쳐 두면 잦은 쪽이 드문 쪽을 오발한다.
-    view_requested = pyqtSignal(object)  # ImageItem (크게 보기)
+    view_requested = pyqtSignal(object)  # ImageItem (크게 보기 — 더블클릭 · 우클릭)
     toggled = pyqtSignal(object, bool)   # (ImageItem, on)
 
     TILE_W = 360
@@ -135,16 +132,18 @@ class _MidTile(QFrame):
             self.clicked.emit(self.item)
         super().mousePressEvent(e)
 
-    def _on_context_menu(self, pos) -> None:
-        """우클릭 '크게 보기' — 이 타일의 유일한 확대 경로.
+    def mouseDoubleClickEvent(self, e):  # noqa: N802
+        # 더블클릭 = 크게 보기(현택님 2026-11-24).  첫 누름이 이미 선택을 토글했다 — 그대로 둔다
+        # (super 를 부르면 기본 구현이 누름을 한 번 더 만들어 선택이 되돌아간다).
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.view_requested.emit(self.item)
+            e.accept()
+            return
+        super().mouseDoubleClickEvent(e)
 
-        ★ 더블클릭을 없애면서 이 메뉴를 **새로 붙였다.**  다른 타일들은 원래 더블클릭과
-        우클릭 두 경로가 있었지만 이 타일만 더블클릭 하나였다 — 그대로 지우면 확대
-        기능이 사라졌을 것이다.  제스처를 없애는 것과 기능을 없애는 것은 다르다."""
-        menu = QMenu(self)
-        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
-        chosen = menu.exec(self.mapToGlobal(pos))
-        if chosen is act:
+    def _on_context_menu(self, pos) -> None:
+        """우클릭 — 모든 사진과 같은 메뉴(``photo_menu``)."""
+        if photo_menu.ask(self, self.mapToGlobal(pos), self.item.path):
             self.view_requested.emit(self.item)
 
 
@@ -180,6 +179,7 @@ class _OriginalLoader(QThread):
 
     class _Signals(QObject):
         loaded = pyqtSignal(QImage)
+        failed = pyqtSignal()
 
     def __init__(self, path: Path) -> None:
         super().__init__()                  # 부모 없음(위 주석)
@@ -190,9 +190,11 @@ class _OriginalLoader(QThread):
         try:
             img = QImage(str(self._path))
         except Exception:
-            return
+            img = QImage()
         if not img.isNull():
             self.signals.loaded.emit(img)
+        else:
+            self.signals.failed.emit()          # 복사·자르기 대기를 풀어 준다
 
 
 def _spawn_original_loader(path: Path) -> "_OriginalLoader":
@@ -222,10 +224,16 @@ class FullscreenViewer(QDialog):
 
     def __init__(self, image_path: Path, parent=None, *,
                  image: Optional[QImage] = None,
-                 overlay: Optional[tuple[int, int, int, int]] = None) -> None:
-        """``image`` 를 주면 그 픽셀을 그대로 보여 준다(mid·원본 로드 생략).
+                 overlay: Optional[tuple[int, int, int, int]] = None,
+                 others: Sequence[tuple[int, int, int, int]] = (),
+                 scan_slot: bool = False) -> None:
+        """``scan_slot`` 이면 이 Defect 의 Scan 사진이 있는지 알리는 표시와 [Scan image 보기] 를 단다 —
+        부모가 찾아 :meth:`set_scan_crop` 으로 알려 준다(없으면 표시만 '없음').
+        ``image`` 를 주면 그 픽셀을 그대로 보여 준다(mid·원본 로드 생략).
         ``overlay`` = 그 이미지 픽셀 좌표의 (left, top, w, h) 사각형 — 사진에 굽지 않고
-        그릴 때마다 위에 덧그린다(Scan 원본 위 Crop 범위 표시)."""
+        그릴 때마다 위에 덧그린다(Scan 원본 위 Crop 범위 표시).  ``others`` = 같은 Scan 안의 다른 Defect
+        범위들 — 보조색 가는 선으로 함께 그린다(고른 ``overlay`` 가 노랑으로 맨 위).  표시는 둘 다
+        :func:`coords.scan_image.mark_box` 로 줄인 크기다."""
         super().__init__(parent)
         self.setWindowTitle(image_path.name)
         self.setModal(True)
@@ -248,8 +256,10 @@ class FullscreenViewer(QDialog):
         self._last_drag = None
         self._loader: Optional[_OriginalLoader] = None
         self._overlay = overlay
+        self._others = tuple(tuple(b) for b in others)
         # 복사는 항상 원본 픽셀로 한다 — 화면용 `_pix` 는 상한 때문에 줄어 있을 수 있다.
         self._orig: Optional[QImage] = image
+        self._wait_orig = None            # 원본이 아직일 때 복사·자르기 — 도착하면 이어서 한다(UI 스레드에서 디코드하지 않는다)
         self._crop_mode = False
         self._crop_a: Optional[QPoint] = None      # 크롭 드래그 시작/현재(라벨 좌표)
         self._crop_b: Optional[QPoint] = None
@@ -295,6 +305,22 @@ class FullscreenViewer(QDialog):
             self._btn_box.clicked.connect(self._toggle_box)
             row.addWidget(self._btn_box)
             QShortcut(QKeySequence("B"), self, activated=self._toggle_box)
+        self._scan_img: Optional[QImage] = None     # 이 Defect 의 Scan Crop — 있으면 [Scan image 보기]
+        self._scan_on = False                       # 지금 Scan Crop 을 보는 중
+        self._late_orig: Optional[QImage] = None    # Scan 을 보는 사이 도착한 Color 원본
+        self._color_state: Optional[tuple] = None   # Scan 으로 바꾸기 전 (pix, orig, overlay)
+        self._scan_tag: Optional[QLabel] = None
+        self._btn_scan: Optional[NeonButton] = None
+        if scan_slot:
+            self._scan_tag = QLabel(i18n.KO.VIEWER_SCAN_CHECKING, self)
+            self._scan_tag.setProperty("role", "viewerHint")
+            row.addWidget(self._scan_tag)
+            self._btn_scan = NeonButton(i18n.KO.VIEWER_SCAN_VIEW, role="ghost")
+            self._btn_scan.setToolTip(i18n.KO.VIEWER_SCAN_TIP)
+            self._btn_scan.setStyleSheet(btn_css)
+            self._btn_scan.clicked.connect(self._toggle_scan)
+            self._btn_scan.setVisible(False)            # Scan 이 있다고 확인된 뒤에만
+            row.addWidget(self._btn_scan)
         row.addWidget(self._hint, 1)
         lay.addLayout(row)
         QShortcut(QKeySequence.StandardKey.Copy, self, activated=self._copy_original)
@@ -302,12 +328,47 @@ class FullscreenViewer(QDialog):
         if image is None:
             self._start_original_load()
 
+    # -- Scan image ------------------------------------------------------
+    def set_scan_crop(self, img: Optional[QImage]) -> None:
+        """부모가 이 Defect 의 Scan Crop 을 찾았다(``None`` = 없음).  표시를 바꾸고, 있으면 [Scan image 보기] 를 켠다."""
+        if self._scan_tag is None:
+            return
+        has = img is not None and not img.isNull()
+        self._scan_img = img if has else None
+        self._scan_tag.setText(i18n.KO.VIEWER_SCAN_YES if has else i18n.KO.VIEWER_SCAN_NONE)
+        if self._btn_scan is not None:
+            self._btn_scan.setVisible(has)
+
+    def _toggle_scan(self) -> None:
+        """Color 사진 ↔ Scan Crop 을 이 자리에서 바꾼다(뷰어를 또 열지 않는다)."""
+        if self._btn_scan is None or self._scan_img is None:
+            return
+        if not self._scan_on:
+            self._color_state = (self._pix, self._orig, self._overlay)
+            self._pix = QPixmap.fromImage(self._scan_img)
+            self._orig, self._overlay = self._scan_img, None
+        elif self._color_state is not None:
+            self._pix, self._orig, self._overlay = self._color_state
+            self._color_state = None
+        self._scan_on = not self._scan_on
+        self._btn_scan.setText(i18n.KO.VIEWER_SCAN_BACK if self._scan_on else i18n.KO.VIEWER_SCAN_VIEW)
+        self._fitted = False                        # 크기가 다른 사진이라 다시 창에 맞춘다
+        self._offset_x = self._offset_y = 0
+        self._redraw()
+        if not self._scan_on and self._late_orig is not None:
+            late, self._late_orig = self._late_orig, None
+            self._on_original_loaded(late)
+
     # -- 복사(원본 화질) -------------------------------------------------
-    def _original_image(self) -> QImage:
-        """복사할 원본 픽셀.  원본 디코드가 아직이면 여기서 한 번 읽는다."""
-        if self._orig is None or self._orig.isNull():
-            self._orig = QImage(str(self._path))
-        return self._orig
+    def _after_original(self, action) -> bool:
+        """원본이 있으면 True(바로 진행).  아직이면 백그라운드 디코드가 끝난 뒤 ``action`` 을 부르게 맡기고 False."""
+        if self._orig is not None and not self._orig.isNull():
+            return True
+        self._wait_orig = action
+        self._hint.setText(i18n.KO.VIEWER_ORIG_WAIT)
+        if self._loader is None or not self._loader.isRunning():
+            self._start_original_load(force=True)
+        return False
 
     def _flash(self, text: str) -> None:
         """조작 힌트 줄을 잠깐 알림으로 쓴다(부모 있는 타이머 — 창과 함께 죽는다)."""
@@ -318,10 +379,9 @@ class FullscreenViewer(QDialog):
         t.start(1600)
 
     def _copy_original(self) -> None:
-        img = self._original_image()
-        if img.isNull():
+        if not self._after_original(self._copy_original):
             return
-        QApplication.clipboard().setImage(img)
+        QApplication.clipboard().setImage(self._orig)
         self._flash(i18n.KO.VIEWER_COPIED_FULL)
 
     def _toggle_crop(self) -> None:
@@ -335,49 +395,48 @@ class FullscreenViewer(QDialog):
                            else i18n.KO.VIEWER_HINT)
         self._redraw()
 
-    def _crop_to_original(self) -> Optional[QImage]:
-        """드래그한 사각형을 **원본 픽셀 좌표**로 바꿔 잘라 낸다(화면 배율·상한과 무관)."""
+    def _crop_fraction(self) -> Optional[tuple]:
+        """드래그한 사각형을 화면용 사진의 비율 좌표 ``(왼, 위, 오른, 아래)`` 로 — 원본이 늦게 와도 같은 자리를 자른다."""
         if self._crop_a is None or self._crop_b is None:
             return None
-        orig = self._original_image()
         pw, ph = self._pix.width(), self._pix.height()
-        if orig.isNull() or pw <= 0 or ph <= 0:
+        if pw <= 0 or ph <= 0:
             return None
         cw, ch = self._view_size()
         sc = float(self._scale)
         x0 = (cw - pw * sc) / 2 + self._offset_x
         y0 = (ch - ph * sc) / 2 + self._offset_y
-        fx, fy = orig.width() / pw, orig.height() / ph
+        ax, ay = (self._crop_a.x() - x0) / sc / pw, (self._crop_a.y() - y0) / sc / ph
+        bx, by = (self._crop_b.x() - x0) / sc / pw, (self._crop_b.y() - y0) / sc / ph
+        return min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)
 
-        def to_src(pt: QPoint) -> tuple[float, float]:
-            return ((pt.x() - x0) / sc * fx, (pt.y() - y0) / sc * fy)
-
-        ax, ay = to_src(self._crop_a)
-        bx, by = to_src(self._crop_b)
+    def _copy_crop(self, frac: tuple) -> None:
+        """비율 좌표를 **원본 픽셀 좌표**로 바꿔 잘라 클립보드에 넣는다(화면 배율·상한과 무관)."""
+        if not self._after_original(lambda: self._copy_crop(frac)):
+            return
+        orig = self._orig
         import math
-        left = max(0, int(math.floor(min(ax, bx))))
-        top = max(0, int(math.floor(min(ay, by))))
-        right = min(orig.width(), int(math.ceil(max(ax, bx))))
-        bottom = min(orig.height(), int(math.ceil(max(ay, by))))
+        left = max(0, int(math.floor(frac[0] * orig.width())))
+        top = max(0, int(math.floor(frac[1] * orig.height())))
+        right = min(orig.width(), int(math.ceil(frac[2] * orig.width())))
+        bottom = min(orig.height(), int(math.ceil(frac[3] * orig.height())))
         if right - left < 2 or bottom - top < 2:
-            return None
-        return orig.copy(QRect(left, top, right - left, bottom - top))
+            return
+        crop = orig.copy(QRect(left, top, right - left, bottom - top))
+        if not crop.isNull():
+            QApplication.clipboard().setImage(crop)
+            self._flash(i18n.KO.VIEWER_COPIED_CROP.format(w=crop.width(), h=crop.height()))
 
     def _finish_crop(self) -> None:
-        crop = self._crop_to_original()
-        if crop is not None and not crop.isNull():
-            QApplication.clipboard().setImage(crop)
-            msg = i18n.KO.VIEWER_COPIED_CROP.format(w=crop.width(), h=crop.height())
-        else:
-            msg = ""
+        frac = self._crop_fraction()
         self._crop_mode = False
         self._crop_a = self._crop_b = None
         self._btn_crop.setText(i18n.KO.VIEWER_CROP)
         self._label.setCursor(Qt.CursorShape.ArrowCursor)
         self._hint.setText(i18n.KO.VIEWER_HINT)
         self._redraw()
-        if msg:
-            self._flash(msg)
+        if frac is not None:
+            self._copy_crop(frac)
 
     def _toggle_box(self) -> None:
         self._show_box = not self._show_box
@@ -387,13 +446,20 @@ class FullscreenViewer(QDialog):
         self._redraw()
 
     # -- 원본 화질로 교체 ------------------------------------------------
-    def _start_original_load(self) -> None:
-        """원본을 백그라운드에서 디코드.  헤드리스면 건너뛴다(테스트 결정성)."""
+    def _start_original_load(self, force: bool = False) -> None:
+        """원본을 백그라운드에서 디코드.  헤드리스면 건너뛴다(테스트 결정성) — 복사·자르기가 기다릴 때(``force``)만 돈다."""
         import os
-        if os.environ.get("QT_QPA_PLATFORM", "") == "offscreen":
+        if not force and os.environ.get("QT_QPA_PLATFORM", "") == "offscreen":
             return
         self._loader = _spawn_original_loader(self._path)
         self._loader.signals.loaded.connect(self._on_original_loaded)
+        self._loader.signals.failed.connect(self._on_original_failed)
+
+    def _on_original_failed(self) -> None:
+        """원본을 못 읽었다 — 기다리던 복사·자르기를 그만두고 힌트를 되돌린다."""
+        if self._wait_orig is not None:
+            self._wait_orig = None
+            self._hint.setText(i18n.KO.VIEWER_HINT)
 
     def closeEvent(self, e):  # noqa: N802
         """닫힐 때 로더 연결을 끊는다 — 죽어 가는 위젯으로 tick 이 들어가지 않게.
@@ -404,6 +470,7 @@ class FullscreenViewer(QDialog):
         if ld is not None:
             try:
                 ld.signals.loaded.disconnect(self._on_original_loaded)
+                ld.signals.failed.disconnect(self._on_original_failed)
             except (TypeError, RuntimeError):
                 pass
             self._loader = None
@@ -416,7 +483,13 @@ class FullscreenViewer(QDialog):
         갑자기 몇 배로 커진다.  사용자가 이미 줌/팬 했더라도 화면은 그대로다."""
         if img.isNull():
             return
+        if self._scan_on:               # Scan Crop 을 보는 중 — 늦게 온 Color 원본은 Color 로 돌아갈 때 적용한다
+            self._late_orig = img
+            return
         self._orig = img                # 복사용 — 아래 상한 축소 전의 원본
+        act, self._wait_orig = self._wait_orig, None
+        if act is not None:             # 원본을 기다리던 복사·자르기를 이어서 한다
+            act()
         # 지나치게 큰 원본은 뷰포트의 몇 배 선까지만 — 휠 줌 응답을 지키기 위해.
         cap = self._WORK_OVERSAMPLE * max(1, self.width(), self.height())
         if max(img.width(), img.height()) > cap:
@@ -572,20 +645,24 @@ class FullscreenViewer(QDialog):
                 self._scaled_cache = scaled
             p.drawPixmap(int(round(x)), int(round(y)), scaled)
         if self._overlay is not None and self._show_box:
-            left, top, ow, oh = self._overlay
-            rect = QRectF(x + left * sc, y + top * sc,
-                          max(1.0, ow * sc), max(1.0, oh * sc))
-            # 흑백 사진 위에서도 보이게 밝은 노랑 3px 선을 검은 테두리로 감싼다
-            # (선 두께는 확대 배율과 무관한 화면 픽셀).
+            # 다른 Defect 는 가는 보조색, 고른 Defect 는 굵은 노랑이 맨 위 — 흑백 사진 위에서도
+            # 보이게 검은 테두리로 감싼다(선 두께는 확대 배율과 무관한 화면 픽셀).
             p.setBrush(Qt.BrushStyle.NoBrush)
-            casing = QPen(QColor(0, 0, 0, 230))
-            casing.setWidth(_BOX_PX + 2)
-            p.setPen(casing)
-            p.drawRect(rect)
-            line = QPen(QColor(theme.VIEWER_BOX))
-            line.setWidth(_BOX_PX)
-            p.setPen(line)
-            p.drawRect(rect)
+            drawn = [(b, theme.VIEWER_ACCENT, _BOX_PX - 1) for b in self._others
+                     if tuple(b) != tuple(self._overlay)]
+            drawn.append((self._overlay, theme.VIEWER_BOX, _BOX_PX))
+            for box, color, width in drawn:
+                left, top, ow, oh = scan_image.mark_box(box)
+                rect = QRectF(x + left * sc, y + top * sc,
+                              max(1.0, ow * sc), max(1.0, oh * sc))
+                casing = QPen(QColor(0, 0, 0, 230))
+                casing.setWidth(width + 2)
+                p.setPen(casing)
+                p.drawRect(rect)
+                line = QPen(QColor(color))
+                line.setWidth(width)
+                p.setPen(line)
+                p.drawRect(rect)
         if self._crop_a is not None and self._crop_b is not None:
             r = QRect(self._crop_a, self._crop_b).normalized()
             p.setBrush(Qt.BrushStyle.NoBrush)

@@ -186,6 +186,26 @@ def test_gray_saved_as_rgb_is_not_color_but_real_color_is(tmp_path):
     assert lc.color and loader.W_COLOR in lc.warnings and lc.data.ndim == 2
 
 
+def test_is_color_matches_load_image(tmp_path):
+    """GL 보기 버튼 판정(`is_color`)은 뷰어가 쓰는 `load_image().color` 와 같아야 한다."""
+    cv2 = pytest.importorskip("cv2")
+    gray = np.full((16, 16), 90, np.uint8)
+    g3 = np.dstack([gray] * 3)
+    c = g3.copy()
+    c[..., 2] = 200
+    a16 = _img(16, 16)
+    cases = {"g.png": gray, "g3.png": g3, "c.png": c, "c.jpg": c, "g16.tif": a16}
+    for name, arr in cases.items():
+        p = tmp_path / name
+        p.write_bytes(cv2.imencode(p.suffix, arr)[1].tobytes())
+        assert loader.is_color(p) == loader.load_image(p).color, name
+    assert loader.is_color(tmp_path / "c.png") and not loader.is_color(tmp_path / "g16.tif")
+    bad = tmp_path / "bad.png"
+    bad.write_bytes(b"not an image")
+    with pytest.raises(loader.GlLoadError):
+        loader.is_color(bad)
+
+
 def test_load_missing_or_garbage_raises_korean_error(tmp_path):
     with pytest.raises(loader.GlLoadError):
         loader.load_image(tmp_path / "없음.png")
@@ -271,6 +291,7 @@ def test_color_photo_without_scan_falls_back_to_luminance(tmp_path, monkeypatch)
                         lambda p: scan_image.ScanMatch(scan_image.NO_MANIFEST, cpath))
     v = loader.load_for_view(cpath)
     assert v.scan_missing and v.target_box is None and v.image.color
+    assert v.scan_status == scan_image.NO_MANIFEST
 
 
 def test_scan_failure_never_blocks_opening(tmp_path, monkeypatch):
@@ -284,7 +305,8 @@ def test_scan_failure_never_blocks_opening(tmp_path, monkeypatch):
     def boom(p):
         raise RuntimeError("scan broke")
     monkeypatch.setattr(scan_image, "resolve", boom)
-    assert loader.load_for_view(cpath).scan_missing
+    v = loader.load_for_view(cpath)
+    assert v.scan_missing and v.scan_status == scan_image.UNREADABLE
 
 
 def test_gray_photo_is_not_sent_to_scan(tmp_path, monkeypatch):
@@ -296,3 +318,23 @@ def test_gray_photo_is_not_sent_to_scan(tmp_path, monkeypatch):
     (tmp_path / "g.png").write_bytes(cv2.imencode(".png", g)[1].tobytes())
     v = loader.load_for_view(tmp_path / "g.png")
     assert not called and v.scan_name == "" and not v.scan_missing
+
+
+# ---------------------------------------------------------------- 구역 비율(히스토그램 위 글자)
+def test_zone_ratios_follow_the_same_rule_as_the_overlay_and_stats():
+    h = np.zeros(256, np.int64)
+    h[10], h[70], h[71], h[199], h[200], h[255] = 2, 3, 5, 7, 11, 13
+    lo, mid, hi = analysis.zone_ratios(h, 70, 200)
+    tot = h.sum()
+    assert lo == pytest.approx((2 + 3) / tot * 100)         # 하한 '이하' — 하한 값 자신 포함
+    assert hi == pytest.approx((11 + 13) / tot * 100)       # 상한 '이상' — 상한 값 자신 포함
+    assert mid == pytest.approx((5 + 7) / tot * 100)
+    assert lo + mid + hi == pytest.approx(100.0)
+    vals = np.repeat(np.arange(256), h)
+    st = analysis.stats(vals, 70, 200)
+    assert lo == pytest.approx(st["below"] / st["n"] * 100)
+    assert hi == pytest.approx(st["above"] / st["n"] * 100)
+
+
+def test_zone_ratios_empty_histogram_is_all_zero():
+    assert analysis.zone_ratios(np.zeros(256, np.int64), 70, 200) == (0.0, 0.0, 0.0)

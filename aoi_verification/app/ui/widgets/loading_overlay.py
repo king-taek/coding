@@ -191,14 +191,14 @@ class _WaferMap(QWidget):
     CELL = 11                   # 다이 한 변(px)
     GAP = 2                     # 다이 사이 간격(px)
     RADIUS = 6.6                # 중앙에서 이 반지름(다이 단위) 안의 다이만 남긴다
-    PULSE_MS = 1600             # busy 물결 한 주기
-    RIPPLE_MS = 140             # busy 물결 — 반지름 1 당 지연
+    PULSE_MS = motion.LOADING_PULSE_MS             # busy 물결 한 주기
+    RIPPLE_MS = motion.LOADING_RIPPLE_MS             # busy 물결 — 반지름 1 당 지연
     # 물결의 골(가장 옅을 때).  ★ busy 와 결정형(켜진 다이)이 **같은** 진폭이다 — 사용자가
     # 3안 비교 후 고른 '진폭 축소'(.62↔1).  예전 .18↔1 은 색이 사라졌다 돌아와 요란했고,
     # busy 만 그대로 두면 '폴더 탐색 중' 과 '좌표 읽는 중' 이 딴 화면처럼 보인다.
     PULSE_MIN_ALPHA = 0.62
-    FADE_MS = 200               # 다이 하나가 켜질 때 회색 → 파란색 색 보간(사용자 요청)
-    GREY_FADE_MS = 200          # busy → 결정형 전환 때 전체 파란색 → 회색 페이드
+    FADE_MS = motion.LOADING_DIE_FADE_MS               # 다이 하나가 켜질 때 회색 → 파란색 색 보간(사용자 요청)
+    GREY_FADE_MS = motion.LOADING_GREY_FADE_MS          # busy → 결정형 전환 때 전체 파란색 → 회색 페이드
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -409,7 +409,7 @@ class _BusyStripe(QWidget):
     def start(self) -> None:
         if motion.enabled():
             self._anim.stop()
-            self._anim.setDuration(motion.dur(1100))   # 변형 모션 강도 반영
+            self._anim.setDuration(motion.dur(motion.LOADING_STRIPE_MS))   # 변형 모션 강도 반영
             self._anim.start()
         self.update()
 
@@ -476,7 +476,7 @@ class LoadingOverlay(QWidget):
     #   페이드는 옛 비율(180/300 = 0.6)을 유지해 두 속도가 그대로 살아 있게 한다.
     RISE_IN_MS = motion.DUR_LOADING              # 500
     FADE_IN_MS = int(RISE_IN_MS * 0.6)           # 300
-    FADE_OUT_MS = 140
+    FADE_OUT_MS = motion.LOADING_FADE_OUT_MS     # 140 — 실제는 max(110, dur(140)) = 112ms
     PANEL_W = 424                          # 메시지 길이로 패널 폭이 뛰지 않게 고정
     # 패널 테두리 두께 — QSS 의 `QWidget[role="loadingPanel"] { border: 1px … }` 와
     # **같은 값이어야 한다.**  바깥 레이아웃 여백이 이 값이라 본문이 테두리를 덮지 않는다.
@@ -489,9 +489,9 @@ class LoadingOverlay(QWidget):
     # 속도보다 느리면 지연이 쌓인다(30ms/장 재계산 = 1%/15ms).  MIN 구간(작은 증가)에서는
     # 속도가 폭에 비례해 떨어지므로 정상 지연 ≈ 실제속도 × MIN = 6~7% 에서 멈춘다 —
     # `test_dense_updates_track_the_real_progress` 의 10% 상한이 이 값을 지킨다.
-    VAL_PER_PCT_MS = 10
-    VAL_TWEEN_MIN_MS = 100      # 한 칸짜리 증가도 이만큼은 미끄러진다
-    VAL_TWEEN_MAX_MS = 600      # 마지막 보고 뒤 이 안에 반드시 닿는다(추격 상한)
+    VAL_PER_PCT_MS = motion.LOADING_VAL_PER_PCT_MS
+    VAL_TWEEN_MIN_MS = motion.LOADING_VAL_TWEEN_MIN_MS      # 한 칸짜리 증가도 이만큼은 미끄러진다
+    VAL_TWEEN_MAX_MS = motion.LOADING_VAL_TWEEN_MAX_MS      # 마지막 보고 뒤 이 안에 반드시 닿는다(추격 상한)
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -564,7 +564,7 @@ class LoadingOverlay(QWidget):
 
         # #8 중지 버튼 — cancelable=True 로 보여진 작업에서만.
         # ★ 인스턴스 스타일시트로 색을 굽지 않는다 — 색은 전역 QSS 의 role 이 칠한다.
-        self._cancel_btn = NeonButton(i18n.KO.BTN_STOP, role="danger",
+        self._cancel_btn = NeonButton(i18n.KO.BTN_STOP, role="ghost",
                                       parent=self._content)
         self._cancel_btn.setFixedWidth(120)
         # ★ 높이는 앱 공통 액션 등급(44)이 아니라 **패널 안 보조 조작 32** 다(개선안 2a).
@@ -672,6 +672,11 @@ class LoadingOverlay(QWidget):
         self._hide_timer = QTimer(self)          # 최소 표시 래치 — 같은 이유로 부모 있음
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(self._on_hide_latch)
+        # 표시 지연(M2) — 이 안에 끝나는 일은 덮개 그림을 아예 그리지 않는다(입력 차단은 즉시).
+        self._reveal_timer = QTimer(self)
+        self._reveal_timer.setSingleShot(True)
+        self._reveal_timer.timeout.connect(self._reveal)
+        self._veiled = False
 
         # 최소 표시 시간 가드 — 초단타 작업이 '깜빡'하지 않게(C9).
         self._shown_elapsed = QElapsedTimer()
@@ -832,7 +837,9 @@ class LoadingOverlay(QWidget):
     def _set_title(self, message: str) -> None:
         """표제를 적는다.  줄 수가 달라지면 패널 높이도 다시 잰다 — 안 재면 옛 높이에
         두 줄이 눌려 들어가 맵 아래가 잘린다."""
-        text = _wrap_friendly(message)
+        self._title_text = _wrap_friendly(message)     # 완료 표시가 꺼지면 돌아올 진짜 제목
+        text = (i18n.KO.LOADING_DONE_TITLE if getattr(self, "_done_state", False)
+                else self._title_text)
         if self._label.text() != text:
             # P19A — 단계가 넘어가면 옛 제목이 140ms 에 걷힌다.  0.2초 안에 또 바뀌면
             # 그냥 바꾼다(빠른 연속 변경이 깜빡임으로 보이지 않게).  진행 막대 계약은 그대로.
@@ -887,8 +894,17 @@ class LoadingOverlay(QWidget):
         숨겨져 지금까지와 똑같은 '문구 하나' 모드로 뜬다(하위 호환).  조건부 단계가
         끼어 총 단계 수가 세션마다 달라지는 흐름은 그대로 두면 된다.
         """
+        # ★ 이미 떠 있는(걷히는 중이 아닌) 덮개에서 다시 불리면 문구·단계만 바꾼다 —
+        #   등장 모션과 최소표시 래치를 처음부터 다시 걸면 덮개가 깜빡인다(M1).
+        if (self._active and self.isVisible() and not self._hiding
+                and not self._hide_pending):
+            self._set_title(message)
+            self.set_stage(step, steps)
+            self._cancel_btn.setVisible(bool(cancelable))
+            return
         self._active = True
         self._arming = True              # 아래 `show()` 가 부를 showEvent 의 재무장 억제
+        self._set_done_state(False)      # 이전 작업의 '완료' 제목이 새 덮개에 남지 않게
         self._set_title(message)
         self._apply_stage(step, steps)
         self._set_input_lock(True)
@@ -907,22 +923,14 @@ class LoadingOverlay(QWidget):
         self._fade_anim.stop()
         self._rise_anim.stop()
         self._rise_span = self.RISE_IN_PX
+        self._reveal_timer.stop()
+        self._veiled = False
         if motion.enabled():
-            # 중앙보다 조금 아래 + 투명에서 시작해 중앙에 안착.
-            self._attach_effect()
+            # 그림은 지연 뒤에 — 그 안에 끝나면 아무것도 그리지 않는다(입력은 이미 막혔다).
+            self._veiled = True
+            self._panel.hide()
             self._on_fade(0.0)
-            self._on_rise(0.0)
-            self._fade_anim.setStartValue(0.0)
-            self._fade_anim.setEndValue(1.0)
-            self._fade_anim.setDuration(self.FADE_IN_MS)
-            self._fade_anim.start()
-            # 위치는 더 길게 — 페이드가 끝난 뒤에도 남은 거리를 감속하며 좁힌다.
-            self._rise_anim.setStartValue(0.0)
-            self._rise_anim.setEndValue(1.0)
-            self._rise_anim.setDuration(self.RISE_IN_MS)
-            self._rise_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
-            self._rise_anim.start()
-            self._stagger_bar()
+            self._reveal_timer.start(motion.LOADING_REVEAL_DELAY_MS)
         else:
             self._detach_effect()
             self._on_fade(1.0)
@@ -930,6 +938,29 @@ class LoadingOverlay(QWidget):
             self._set_bar_slide(1.0)
         self._cover_parent()
         self._arming = False
+
+    def _reveal(self) -> None:
+        """표시 지연이 지났다 — 이제 그림을 올리고 등장 모션을 건다."""
+        if not self._veiled:
+            return
+        self._veiled = False
+        self._panel.show()
+        self._shown_elapsed.restart()      # 최소 표시 시간은 '보이기 시작한' 때부터
+        # 중앙보다 조금 아래 + 투명에서 시작해 중앙에 안착.
+        self._attach_effect()
+        self._on_fade(0.0)
+        self._on_rise(0.0)
+        self._fade_anim.setStartValue(0.0)
+        self._fade_anim.setEndValue(1.0)
+        self._fade_anim.setDuration(self.FADE_IN_MS)
+        self._fade_anim.start()
+        # 위치는 더 길게 — 페이드가 끝난 뒤에도 남은 거리를 감속하며 좁힌다.
+        self._rise_anim.setStartValue(0.0)
+        self._rise_anim.setEndValue(1.0)
+        self._rise_anim.setDuration(self.RISE_IN_MS)
+        self._rise_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+        self._rise_anim.start()
+        self._stagger_bar()
 
     def set_stage(self, step: tuple[int, int] | None,
                   steps: tuple[str, ...] | None = None) -> None:
@@ -1024,7 +1055,8 @@ class LoadingOverlay(QWidget):
                     first()
                     second()
                 self._hide_then = _both
-        if not self.isVisible():
+        if not self.isVisible() or self._veiled:
+            # 아직 아무것도 그리지 않았다 — 래치·페이드 없이 바로 끝낸다.
             self._finish_hide()
             return
         # ★ 최소 표시 래치는 **모션이 아니라 타이밍 위생**이다 — 이 검사를
@@ -1075,7 +1107,7 @@ class LoadingOverlay(QWidget):
         self._settle_progress()
         self._rise_span = self.RISE_OUT_PX     # 퇴장은 살짝만 내려간다
         self._attach_effect()
-        dur = max(110, motion.dur(self.FADE_OUT_MS))
+        dur = max(motion.LOADING_FADE_OUT_MIN_MS, motion.dur(self.FADE_OUT_MS))
         self._fade_anim.stop()
         self._fade_anim.setStartValue(self._fade)
         self._fade_anim.setEndValue(0.0)
@@ -1096,6 +1128,9 @@ class LoadingOverlay(QWidget):
         #   통하는 구간이 생긴다.  그게 바로 고치려던 그 증상이다.
         #   `_finish_hide` 는 모든 퇴장 경로가 지나는 단 하나의 지점이다.
         self._active = False           # 여기가 유일한 '끝' 이다
+        self._reveal_timer.stop()
+        self._veiled = False
+        self._panel.show()             # 다음 표시를 위해(그림 지연 중 숨겨 둔 패널)
         after = getattr(self, "_hide_then", None)
         self._hide_then = None
         self._set_input_lock(False)
@@ -1128,6 +1163,16 @@ class LoadingOverlay(QWidget):
         #   기본 잉크다.  셋을 다 칠하면 '한 화면에 강조 하나' 가 무너지고 완료가
         #   경고처럼 커진다.  맵은 아래 `finish_tick` 이 그 한 지점에서만 만진다.
         self._set_state(self._label, "done" if done else "")
+        # 100% 면 제목도 '완료' — 끝났는지 글자로 알 수 있게.  꺼지면 진짜 제목으로 되돌린다.
+        title = (i18n.KO.LOADING_DONE_TITLE if done
+                 else getattr(self, "_title_text", self._label.text()))
+        if self._label.text() != title:
+            self._label.setText(title)
+            lay = self._panel.layout()
+            if lay is not None:
+                lay.invalidate()
+                lay.activate()
+            self._place_panel()
 
     @staticmethod
     def _set_state(widget, value: str) -> None:
@@ -1245,6 +1290,10 @@ class LoadingOverlay(QWidget):
     def _rearm(self) -> None:
         """`hideEvent` 가 꺼 놓은 것들을 되살린다 — 아직 끝나지 않은 작업이므로."""
         self._set_input_lock(True)
+        if self._veiled:                   # 지연 중 전환이 끼면 곧바로 보인다
+            self._reveal_timer.stop()
+            self._veiled = False
+            self._panel.show()
         self._wafer.start()                # 동심 물결도 다시(busy·결정형 모두, 완료면 무동작)
         # 페이드/상승 애니메이션은 이미 멈췄다 — 다시 재생하면 깜빡이므로 최종값으로.
         self._on_fade(1.0)

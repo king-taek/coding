@@ -27,7 +27,9 @@ from ... import i18n
 from ...coords import calibration as cal
 from ...utils import image_io
 from .. import theme
+from . import photo_menu
 from .neon_button import NeonButton
+from . import popup_layout
 from .option_group import columns_for_width
 
 _SRC_TILE_PX = 120
@@ -79,9 +81,13 @@ class _PhotoTile(QFrame):
                  clickable: bool = True, parent=None) -> None:
         super().__init__(parent)
         self.key = key
+        self._path = path
         self._selected = False
         self._px = px
         self._name_text = path.name
+        # 더블클릭 = 크게 · 우클릭 = 모든 사진과 같은 메뉴(현택님 2026-11-24)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
         self.setObjectName("calTile")
         self.setProperty("role", "card-soft")
         if clickable:
@@ -139,6 +145,18 @@ class _PhotoTile(QFrame):
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.key)
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        # 첫 누름이 이미 골랐다 — 고른 뒤 크게 보는 것은 괜찮다(현택님 2026-11-24).
+        if event.button() == Qt.MouseButton.LeftButton:
+            event.accept()
+            photo_menu.open_large(self, self._path)
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _on_context_menu(self, pos) -> None:
+        if photo_menu.ask(self, self.mapToGlobal(pos), self._path):
+            photo_menu.open_large(self, self._path)
 
 
 class CoordCalibrationDialog(QDialog):
@@ -273,20 +291,14 @@ class CoordCalibrationDialog(QDialog):
         pl.addWidget(self._warn)
         root.addWidget(pairs_box)
 
-        bar = QHBoxLayout()
-        bar.setSpacing(8)
-        bar.addStretch(1)
         skip = NeonButton(i18n.KO.COORD_CAL_SKIP, role="ghost")
-        skip.setMinimumHeight(theme.PROFILE.control_h_lg)
         skip.clicked.connect(self.reject)
         skip.setAutoDefault(False)
         self._apply = NeonButton(i18n.KO.COORD_CAL_APPLY, role="primary")
-        self._apply.setMinimumHeight(theme.PROFILE.control_h_lg)
         self._apply.clicked.connect(self._on_apply)
         self._apply.setAutoDefault(False)
-        bar.addWidget(skip)
-        bar.addWidget(self._apply)
-        root.addLayout(bar)
+        root.addLayout(popup_layout.dialog_row(
+            QHBoxLayout(), cancels=[skip], primaries=[self._apply]))
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(1200, 860)
@@ -428,9 +440,7 @@ class CoordCalibrationDialog(QDialog):
                     dx=off[0], dy=off[1], n=self._auto.support))
             else:
                 self._result.setText("")
-            self._warn.setText("" if self._auto_weak is None else
-                               i18n.KO.COORD_CAL_AUTO_WEAK_FMT.format(
-                                   n=self._auto_weak.support, m=self._auto_weak.runner_up))
+            self._warn.setText(self._weak_text())
         else:
             res = cal.residuals([d for _v, d in self._pairs.values()], off)
             r = max(res) if res else 0.0
@@ -447,6 +457,15 @@ class CoordCalibrationDialog(QDialog):
                     warn = i18n.KO.COORD_CAL_AUTO_DIFF_FMT.format(ax=ax, ay=ay, d=d)
             self._warn.setText(warn)
         self._apply.setEnabled(off is not None)
+
+    def _weak_text(self) -> str:
+        """자동값을 못 믿는 이유 — 짝이 모자라면 '지금 / 필요' 숫자로, 모자라지 않으면 후보가 갈린 것."""
+        w = self._auto_weak
+        if w is None:
+            return ""
+        if w.support < cal.MIN_AUTO_SUPPORT:
+            return i18n.KO.COORD_CAL_AUTO_WEAK_FMT.format(n=w.support, need=cal.MIN_AUTO_SUPPORT)
+        return i18n.KO.COORD_CAL_AUTO_AMBIGUOUS_FMT.format(n=w.support, m=w.runner_up)
 
     def _on_apply(self) -> None:
         self.offset = self.current_offset()

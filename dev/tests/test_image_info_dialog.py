@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -24,7 +25,7 @@ pytest.importorskip("PyQt6.QtWidgets")
 pytest.importorskip("numpy")
 
 from PyQt6.QtCore import QMimeData, Qt, QUrl                # noqa: E402
-from PyQt6.QtWidgets import QApplication, QLabel            # noqa: E402
+from PyQt6.QtWidgets import QApplication, QFrame, QLabel    # noqa: E402
 
 from aoi_verification.app import i18n                       # noqa: E402
 from aoi_verification.app.ui.widgets.image_info_dialog import (  # noqa: E402
@@ -113,7 +114,9 @@ def test_numeric_rows_are_mono_and_status_is_a_stamp(qapp, isolated_cache,
     chips = [w.property("chip") for w in host.findChildren(QLabel)
              if w.property("chip")]
     assert "mono" in roles, "좌표·계측 값이 모노로 찍혀야 한다"
-    assert "colHead" in roles, "그룹마다 타이틀블록 컬럼 머리가 있어야 한다"
+    assert "infoGroupTitle" in roles, "그룹마다 제목이 있어야 한다"
+    boxes = [f for f in host.findChildren(QFrame) if f.property("role") == "infoBox"]
+    assert len(boxes) == roles.count("infoGroupTitle"), "그룹마다 음영 상자 하나"
     assert chips == ["none"], "측정정보 미지원은 스탬프 하나로"
     dlg.deleteLater()
 
@@ -123,7 +126,7 @@ def test_enter_does_not_refire_the_last_button(qapp, isolated_cache):
 
     맡기면 포커스가 '전체 복사'/'닫기' 에 있을 때 Enter 가 그 동작을 재발동한다."""
     dlg = ImageInfoDialog()
-    assert dlg.pick_btn.isDefault() is True
+    assert not hasattr(dlg, "pick_btn"), "위 왼쪽 [사진 선택] 은 뺐다(2026-11-25)"
     assert dlg.copy_btn.autoDefault() is False
     dlg.deleteLater()
 
@@ -177,7 +180,8 @@ def test_renders_kla_defect_rows(qapp, isolated_cache, tmp_path):
     dlg.deleteLater()
 
 
-def test_drop_accepts_only_image_files(qapp, isolated_cache, tmp_path):
+def test_drop_opens_photos_and_folders_only(qapp, isolated_cache, tmp_path, monkeypatch):
+    """드롭은 사진 · 폴더만 받는다 — 여러 개면 전부 넘겨 보기 목록으로."""
     img = tmp_path / "a.jpeg"
     img.write_bytes(b"x")
     other = tmp_path / "a.txt"
@@ -186,17 +190,36 @@ def test_drop_accepts_only_image_files(qapp, isolated_cache, tmp_path):
     class _Evt:
         def __init__(self, md):
             self._md = md
+            self.accepted = None
 
         def mimeData(self):
             return self._md
 
-    md_img = QMimeData()
-    md_img.setUrls([QUrl.fromLocalFile(str(other)), QUrl.fromLocalFile(str(img))])
-    assert ImageInfoDialog._dropped_image(_Evt(md_img)) == img
+        def acceptProposedAction(self):
+            self.accepted = True
 
-    md_none = QMimeData()
-    md_none.setUrls([QUrl.fromLocalFile(str(other))])
-    assert ImageInfoDialog._dropped_image(_Evt(md_none)) is None
+        def ignore(self):
+            self.accepted = False
+
+    dlg = ImageInfoDialog()
+    opened = []
+    monkeypatch.setattr(dlg, "open_many", opened.append)
+    try:
+        md_img = QMimeData()
+        md_img.setUrls([QUrl.fromLocalFile(str(other)), QUrl.fromLocalFile(str(img)),
+                        QUrl.fromLocalFile(str(tmp_path))])
+        evt = _Evt(md_img)
+        dlg.dropEvent(evt)
+        assert evt.accepted is True
+        assert [Path(p) for p in opened[0]] == [other, img, tmp_path]
+
+        md_none = QMimeData()
+        md_none.setUrls([QUrl.fromLocalFile(str(other))])
+        evt = _Evt(md_none)
+        dlg.dropEvent(evt)
+        assert evt.accepted is False and len(opened) == 1
+    finally:
+        dlg.deleteLater()
 
 
 def test_setup_page_opens_this_dialog(qapp, isolated_cache):
@@ -300,23 +323,256 @@ def test_paste_opens_image_and_flashes_notices(qapp, isolated_cache, tmp_path, m
     img.write_bytes(b"x")
     dlg = ImageInfoDialog()
     shown, flashed = [], []
-    monkeypatch.setattr(dlg, "show_image", lambda p: shown.append(p))
+    monkeypatch.setattr(dlg, "_load_photo", shown.append)
     monkeypatch.setattr(dlg, "_flash", flashed.append)
     try:
         dlg._on_paste_paths([str(img)])
         assert shown == [img] and not flashed
-        dlg._on_paste_paths([str(tmp_path / "a.txt")])
-        dlg._on_paste_paths([str(tmp_path / "nope.jpeg")])
-        dlg._on_paste_paths([str(tmp_path / "a.txt"), str(img)])   # 첫 사진을 연다
+        dlg._on_paste_paths([str(tmp_path / "a.txt"), str(img)])   # 사진만 추린다
         assert shown == [img, img]
         shown.clear()
-        flashed.clear()
         dlg._on_paste_paths([str(tmp_path / "a.txt")])
         dlg._on_paste_paths([str(tmp_path / "nope.jpeg")])
         dlg._on_paste_no_path(True)
         dlg._on_paste_no_path(False)
         assert shown == []
-        assert flashed == [i18n.KO.DROP_WRONG_KIND_IMAGE, i18n.KO.DROP_NOT_FOUND,
+        assert flashed == [i18n.KO.DROP_WRONG_KIND_IMAGE, i18n.KO.IMAGE_INFO_NO_PHOTOS,
                            i18n.KO.DROP_NO_PATH_IMAGE, i18n.KO.DROP_NOTHING_TO_PASTE]
+    finally:
+        dlg.deleteLater()
+
+
+def test_list_photos_reads_folders_and_files(tmp_path):
+    """폴더는 바로 안 사진만 이름순, 사진 아닌 것 · 없는 것은 빼고, 같은 파일은 한 번만."""
+    from aoi_verification.app.ui.widgets.image_info_dialog import list_photos
+    d = tmp_path / "slot"
+    (d / "sub").mkdir(parents=True)
+    for name in ("b.jpg", "A.jpeg", "note.txt"):
+        (d / name).write_bytes(b"x")
+    (d / "sub" / "c.jpg").write_bytes(b"x")
+    loose = tmp_path / "z.jpg"
+    loose.write_bytes(b"x")
+    got = list_photos([str(d), str(loose), str(d / "b.jpg"), str(tmp_path / "nope.jpg"),
+                       str(d / "note.txt")])
+    assert [p.name for p in got] == ["A.jpeg", "b.jpg", "z.jpg"]
+
+
+def test_many_photos_step_through_with_a_strip(qapp, isolated_cache, tmp_path, monkeypatch):
+    """여러 장 — 띠가 보이고 ◀ ▶ · 칸 클릭으로 넘긴다(끝에서 멈춘다).  한 장을 열면 띠가 사라진다."""
+    for i in range(20):
+        (tmp_path / f"p{i:02d}.jpg").write_bytes(b"x")
+    dlg = ImageInfoDialog()
+    shown = []
+    monkeypatch.setattr(dlg, "_load_photo", lambda p: (shown.append(p.name),
+                                                       setattr(dlg, "_path", p)))
+    try:
+        dlg.open_many([str(tmp_path)])
+        assert shown == ["p00.jpg"]
+        assert not dlg.strip_bar.isHidden()
+        assert dlg.photo_pos.text() == i18n.KO.IMAGE_INFO_PHOTO_POS_FMT.format(i=1, n=20)
+        assert not hasattr(dlg, "photo_prev") and not hasattr(dlg, "photo_next")   # 방향키만
+        dlg.step_photo(-1)                      # 맨 앞 — 멈춘다
+        assert shown == ["p00.jpg"]
+        dlg.step_photo(1)
+        dlg.go_photo(19)
+        dlg.step_photo(1)                       # 맨 뒤 — 멈춘다
+        assert shown == ["p00.jpg", "p01.jpg", "p19.jpg"]
+        # 띠는 지금 사진 앞뒤만 — 위젯 수가 사진 수와 무관하다.
+        assert len(dlg._strip_map) <= 13
+        assert str(tmp_path / "p19.jpg") in dlg._strip_map
+        tile = dlg._strip_map[str(tmp_path / "p15.jpg")]
+        tile.clicked.emit()
+        assert shown[-1] == "p15.jpg"
+        dlg.show_image(tmp_path / "p03.jpg")
+        assert dlg.strip_bar.isHidden() and dlg._paths == [tmp_path / "p03.jpg"]
+    finally:
+        dlg.deleteLater()
+
+
+def _lot(tmp_path):
+    """LOT 폴더 — 사진은 웨이퍼 하위 폴더에만 있다(실제 NAS 모양)."""
+    lot = tmp_path / "LOT1"
+    for name, slot, n in (("W_b", 5, 2), ("w_a", 3, 3)):
+        w = lot / name
+        w.mkdir(parents=True)
+        for i in range(n):
+            (w / f"{name}_{i}.jpg").write_bytes(b"x")
+        (w / "WaferInfo.ini").write_text(f"[AutoCycleInfo]\nActiveSlot={slot}\n")
+    (lot / "deep" / "deeper").mkdir(parents=True)
+    (lot / "deep" / "deeper" / "z.jpg").write_bytes(b"x")        # 두 단계 아래는 보지 않는다
+    return lot
+
+
+def test_list_photo_groups_lot_folder_looks_one_level_down(tmp_path):
+    from aoi_verification.app.ui.widgets.image_info_dialog import (
+        list_photo_groups, list_photos)
+    lot = _lot(tmp_path)
+    groups = list_photo_groups([str(lot)])
+    assert [(f.name, [p.name for p in ps]) for f, ps in groups] == [
+        ("w_a", ["w_a_0.jpg", "w_a_1.jpg", "w_a_2.jpg"]),        # 이름순(대소문자 무시)
+        ("W_b", ["W_b_0.jpg", "W_b_1.jpg"])]
+    assert len(list_photos([str(lot)])) == 5
+    # 사진이 바로 든 폴더는 하위 폴더를 보지 않는다 · 사진 파일은 부모 폴더별
+    w = lot / "w_a"
+    (w / "sub").mkdir()
+    (w / "sub" / "q.jpg").write_bytes(b"x")
+    assert [f.name for f, _ in list_photo_groups([str(w)])] == ["w_a"]
+    got = list_photo_groups([str(lot / "W_b" / "W_b_1.jpg"), str(lot / "w_a" / "w_a_0.jpg")])
+    assert [(f.name, [p.name for p in ps]) for f, ps in got] == [
+        ("W_b", ["W_b_1.jpg"]), ("w_a", ["w_a_0.jpg"])]
+
+
+def test_lot_folder_opens_and_group_chooser_picks_a_folder(qapp, isolated_cache, tmp_path,
+                                                           monkeypatch):
+    """LOT 폴더를 열면 두 웨이퍼 사진이 다 잡히고, 위 버튼으로 한 폴더만 골라 볼 수 있다."""
+    from aoi_verification.app.ui.widgets.image_info_dialog import _PhotoGroup
+    lot = _lot(tmp_path)
+    dlg = ImageInfoDialog()
+    shown = []
+    monkeypatch.setattr(dlg, "_load_photo", lambda p: (shown.append(p.name),
+                                                       setattr(dlg, "_path", p)))
+    try:
+        assert dlg.group_btn.isHidden()
+        dlg.open_many([str(lot)])
+        assert len(dlg._paths) == 5 and shown == ["w_a_0.jpg"]
+        assert not dlg.group_btn.isHidden()
+        assert dlg.group_btn.text() == i18n.KO.IMAGE_INFO_GROUP_BTN_FMT.format(
+            label=i18n.KO.IMAGE_INFO_GROUP_ALL_FMT.format(n=5))
+        g = dlg._photo_groups
+        assert [x.slot for x in g] == ["3", "5"] and all(x.lot == lot for x in g)
+        assert i18n.KO.IMAGE_INFO_GROUP_SLOT_FMT.format(slot="5", name="W_b", n=2) in \
+            [i18n.KO.IMAGE_INFO_GROUP_SLOT_FMT.format(slot=x.slot, name=x.folder.name,
+                                                      n=len(x.photos)) for x in g]
+        dlg.choose_group(1)
+        assert [p.name for p in dlg._paths] == ["W_b_0.jpg", "W_b_1.jpg"]
+        assert dlg._pos == 0 and shown[-1] == "W_b_0.jpg"
+        assert len(dlg._strip_map) == 2
+        assert dlg.group_btn.text() == i18n.KO.IMAGE_INFO_GROUP_BTN_FMT.format(
+            label=i18n.KO.IMAGE_INFO_GROUP_SLOT_FMT.format(slot="5", name="W_b", n=2))
+        dlg.choose_group(-1)
+        assert len(dlg._paths) == 5
+        # 메뉴 — 전체 · LOT 머리줄(누를 수 없음) · 폴더마다 한 줄, 현재 것에 체크
+        dlg._open_group_menu()
+        acts = dlg._group_menu.actions()
+        assert [a.text() for a in acts][1] == "LOT1" and not acts[1].isEnabled()
+        assert len(acts) == 4 and acts[0].isChecked()
+        dlg._group_menu.close()
+        dlg.show_image(lot / "w_a" / "w_a_0.jpg")          # 한 장 · 한 폴더면 버튼이 사라진다
+        assert dlg.group_btn.isHidden()
+        dlg.open_many([str(lot / "w_a")])                  # 폴더 하나 — 숨김
+        assert dlg.group_btn.isHidden() and len(dlg._paths) == 3
+        assert isinstance(dlg._photo_groups[0], _PhotoGroup)
+    finally:
+        dlg.deleteLater()
+
+
+def test_no_photos_message_is_visible_on_the_empty_screen(qapp, isolated_cache, tmp_path):
+    """비어 있는 동안은 빈 화면이 호스트를 덮는다 — 안내가 그 위(보이는 곳)에 떠야 한다."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    dlg = ImageInfoDialog()
+    dlg.resize(900, 600)
+    dlg.show()
+    try:
+        assert dlg._empty_open.isVisibleTo(dlg)
+        dlg.open_many([str(empty)])
+        assert dlg._empty_open.isVisibleTo(dlg)            # 여전히 빈 화면
+        assert dlg._empty_open.note.text() == i18n.KO.IMAGE_INFO_NO_PHOTOS
+        assert dlg._empty_open.note.isVisibleTo(dlg._empty_open)
+        assert dlg._toast.text() == ""                     # 가려진 토스트로 보내지 않는다
+        # 사진이 있으면 토스트 경로(복사 안내)는 그대로
+        img = _kla_image(tmp_path)
+        dlg.show_image(img)
+        dlg._flash("x")
+        assert dlg._toast.text() == "x"
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_stack_badge_count_and_tile(qapp):
+    from aoi_verification.app.ui.widgets.image_info_dialog import (
+        _STACK_OFF, _STRIP_PX, _StripTile, stack_badge_count)
+    assert stack_badge_count(True, 3) == 3 and stack_badge_count(True, 2) == 2
+    assert stack_badge_count(True, 1) == 0 and stack_badge_count(True, 0) == 0
+    assert stack_badge_count(False, 5) == 0              # 못 읽은 Scan 은 평범한 칸
+    t = _StripTile()
+    assert t.stack_n == 0 and t.width() != _STRIP_PX + 2 * _STACK_OFF
+    t.set_stack(3)
+    assert t.stack_n == 3 and t.width() == _STRIP_PX + 2 * _STACK_OFF
+    assert not t.grab().isNull()                         # 직접 그리기가 예외 없이 돈다
+    t.set_stack(1)
+    assert t.stack_n == 0 and t.width() == _STRIP_PX
+
+
+def test_strip_thumb_ready_marks_multi_defect_scan(qapp, isolated_cache, tmp_path):
+    for i in range(3):
+        (tmp_path / f"-1.{i}.t.jpeg").write_bytes(b"x")
+    dlg = ImageInfoDialog()
+    dlg._paths, dlg._pos = sorted(tmp_path.glob("*.jpeg")), 0
+    dlg._render_strip()
+    try:
+        key = str(dlg._paths[1])
+        dlg._on_thumb_ready(key, 4)
+        assert dlg._strip_map[key].stack_n == 4
+        assert "4" in dlg._strip_map[key].toolTip()
+        dlg._render_strip()                                # 띠를 다시 만들어도 기억한다
+        assert dlg._strip_map[key].stack_n == 4
+    finally:
+        dlg.deleteLater()
+
+
+def test_dividers_only_between_clusters(qapp, isolated_cache, tmp_path):
+    """구분선은 묶음이 바뀌는 곳에만 — 묶음 안 행은 ``rule="none"``(사용자 지시 2026-11-23).
+
+    묶음이 없는 행(``cluster=""``)은 옛 모양 그대로 행마다 선을 긋는다."""
+    from PyQt6.QtWidgets import QFrame
+
+    from aoi_verification.app.coords.single_info import InfoGroup, InfoRow
+    rows = (InfoRow("a", "1", cluster="x"), InfoRow("b", "2", cluster="x"),
+            InfoRow("c", "3", cluster="y"), InfoRow("d", "4", cluster="y"),
+            InfoRow("e", "5"), InfoRow("f", "6"))
+    dlg = ImageInfoDialog(image_path=str(_kla_image(tmp_path)))
+    dlg._groups = [InfoGroup("g", rows)]
+    dlg._render()
+    frames = [f for f in dlg._scroll.widget().findChildren(QFrame)
+              if f.property("role") == "row"]
+    assert [f.property("rule") == "none" for f in frames] == \
+        [True, False, True, False, False, True]   # 마지막 행은 상자 테두리가 대신한다
+    dlg.deleteLater()
+
+
+def test_qss_hides_divider_inside_cluster():
+    """``rule="none"`` 행은 아래 눈금을 투명한 행 테두리 색으로 — 두께는 같아 높이가 안 바뀐다."""
+    from pathlib import Path
+
+    from aoi_verification.app.ui import theme
+    src = Path(theme.__file__).with_name("style.qss").read_text(encoding="utf-8")
+    qss = theme.render_qss(src)
+    head = 'QFrame[role="row"][rule="none"]'
+    assert head in qss
+    body = qss.split(head, 1)[1].split("}", 1)[0]
+    assert "border-bottom: 1px solid" in body
+    assert theme.TOKENS["row_border"] in body
+
+
+def test_action_buttons_float_bottom_right_and_sheet_uses_full_height(qapp, isolated_cache):
+    """[GL 히스토그램]·[전체 복사] 는 레이아웃 밖에 떠 있다 — 가로 줄이 시트 높이를 깎지 않는다."""
+    dlg = ImageInfoDialog()
+    try:
+        dlg.resize(1000, 700)
+        dlg.show()
+        qapp.processEvents()
+        f = dlg._float
+        assert f.parentWidget() is dlg
+        assert dlg.copy_btn.parentWidget() is f and dlg._toast.parentWidget() is f
+        assert f not in [dlg.layout().itemAt(i).widget() for i in range(dlg.layout().count())]
+        assert not dlg.strip_bar.isVisible()
+        assert f.geometry().right() + 1 == dlg.width() - 16
+        assert f.geometry().bottom() + 1 == dlg.height() - 16
+        # 시트 영역이 바닥 여백 바로 위까지 내려온다(예전엔 버튼 줄 높이만큼 위에서 끝났다).
+        scroll_bottom = dlg._scroll.mapTo(dlg, dlg._scroll.rect().bottomLeft()).y() + 1
+        assert scroll_bottom >= dlg.height() - 16 - 2
+        assert dlg.copy_btn.autoDefault() is False
     finally:
         dlg.deleteLater()

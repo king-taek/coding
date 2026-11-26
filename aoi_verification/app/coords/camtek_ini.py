@@ -28,7 +28,7 @@ from .wafer_geometry import (CamtekGeometry, FALLBACK_CAMTEK, is_trusted_source,
 from .ini_text import read_ini_text
 
 __all__ = ["resolve", "load_folder", "load_abs_folder", "load_raw_folder",
-           "load_recipe_folder", "abs_coord", "has_ini"]
+           "load_recipe_folder", "abs_coord", "has_ini", "coord_from_xy"]
 
 _LOG = logging.getLogger("aoi.coords")
 
@@ -81,7 +81,7 @@ def load_folder(folder: Path) -> dict[str, DefectCoord]:
             out = _abs_entries(entries)
         else:
             out = {stem: _coord_from_raw(raw, geom)
-                   for stem, raw, _xy, _recipe in entries if raw is not None}
+                   for stem, raw, _xy, _recipe, _t in entries if raw is not None}
         shift = display_shift(folder)
         if shift != (0, 0):
             out = {k: replace(c, col_shift=shift[0], row_shift=shift[1])
@@ -196,6 +196,16 @@ def _coord_from_raw(raw: tuple[float, float, int, int],
     return DefectCoord(col=col, row=row, x=x, y=y, source="camtek_ini", number_warn=warn)
 
 
+def coord_from_xy(X: float, Y: float, geom: CamtekGeometry,
+                  shift: tuple[int, int] = (0, 0)) -> DefectCoord:
+    """결과 파일(flt)의 절대 ``(X, Y)`` → DefectCoord — 사진 INI 경로(:func:`load_folder`)와 같은 계산.
+
+    INI 의 Col/Row 필드는 :func:`_coord_from_raw` 가 원래 쓰지 않으므로 0 을 넣는다.  ``shift`` =
+    :func:`display_shift` — 화면 번호는 ``screen_col/screen_row`` 로 읽는다."""
+    c = _coord_from_raw((float(X), float(Y), 0, 0), geom)
+    return replace(c, col_shift=shift[0], row_shift=shift[1]) if shift != (0, 0) else c
+
+
 def abs_coord(X: float, Y: float, col_i: int, row_i: int) -> DefectCoord:
     """원시 ``(X, Y, Col, Row)`` → **절대 wafer 좌표** DefectCoord (순수 함수).
 
@@ -223,7 +233,7 @@ def _abs_entries(entries) -> dict[str, DefectCoord]:
     가 미리 막는다.
     """
     return {stem: abs_coord(*raw)
-            for stem, raw, _xy, _recipe in entries if raw is not None}
+            for stem, raw, _xy, _recipe, _t in entries if raw is not None}
 
 
 def _extract_raw(content: str) -> Optional[tuple[float, float, int, int]]:
@@ -279,7 +289,7 @@ def _raw_from_kv(kv: dict[str, str]) -> Optional[tuple[float, float, int, int]]:
 # 결함이 수천 건이면 INI 가 수 MB 다.  예전에는 좌표·검산·레시피·절대좌표가 **각자**
 # 파일을 다시 읽고 섹션 전체를 다시 파싱해, 사진 한 장을 조회해도 NAS 에서 같은 파일을
 # 4번 읽었다(단일 사진 정보가 느렸던 원인).  여기서 한 번 읽어 섹션마다
-# (stem, 원시 X/Y/Col/Row, 절대 X/Y, RecipeNumber) 를 뽑아 두고 네 맵이 나눠 쓴다.
+# (stem, 원시 X/Y/Col/Row, 절대 X/Y, RecipeNumber, Type) 를 뽑아 두고 맵들이 나눠 쓴다.
 # 캐시 키에 mtime·크기를 넣어 파일이 바뀌면 다시 읽는다.
 _RECIPE_PAT = re.compile(r"(?im)^\s*RecipeNumber[ \t]*=[ \t]*(-?\d+)\s*$")
 
@@ -304,9 +314,34 @@ def _parse_sections(ini: Path, _mtime_ns: int, _size: int) -> tuple:
     for name, content in zip(it, it):
         kv = _kv(content)
         m = _RECIPE_PAT.search(content)
+        t = kv.get("TYPE", "").strip()
         out.append((Path(name.strip()).stem.lower(), _raw_from_kv(kv),
-                    _xy_from_kv(kv), int(m.group(1)) if m else 0))
+                    _xy_from_kv(kv), int(m.group(1)) if m else 0,
+                    int(t) if t.lstrip("-").isdigit() else None))
     return tuple(out)
+
+
+def load_name_folder(folder: Path) -> dict[str, str]:
+    """폴더의 INI → ``{stem(소문자) → 섹션 이름(원래 대소문자·확장자 그대로)}``.
+
+    다른 맵은 키를 ``stem`` 으로만 들고 있어 원래 파일 이름을 되살릴 수 없다 — Scan 사진에서
+    Defect 를 찾을 때(:func:`~.scan_image.defects_in`) 그 Defect 의 사진 경로를 만드는 데 쓴다."""
+    ini = _find_ini(Path(folder))
+    if ini is None:
+        return {}
+    try:
+        st = ini.stat()
+        return dict(_section_names(ini, st.st_mtime_ns, st.st_size))
+    except Exception:
+        _LOG.warning("Camtek INI 섹션 이름 읽기 실패: %s", folder, exc_info=True)
+        return {}
+
+
+@lru_cache(maxsize=32)
+def _section_names(ini: Path, _mtime_ns: int, _size: int) -> tuple:
+    text = read_ini_text(ini) or ""
+    return tuple((Path(n.strip()).stem.lower(), n.strip())
+                 for n in _SECTION_PAT.findall(text))
 
 
 @lru_cache(maxsize=256)
@@ -317,7 +352,7 @@ def load_raw_folder(folder: Path) -> dict[str, tuple[float, float, int, int]]:
     (``Col == floor(X/pitch_x)``).  변환 상수를 안 쓰므로 geometry 와 순환하지 않는다.
     """
     try:
-        return {stem: raw for stem, raw, _xy, _recipe in _sections(folder)
+        return {stem: raw for stem, raw, _xy, _recipe, _t in _sections(folder)
                 if raw is not None}
     except Exception:
         _LOG.warning("Camtek INI 원시값 파싱 실패: %s", folder, exc_info=True)
@@ -335,9 +370,23 @@ def load_recipe_folder(folder: Path) -> dict[str, int]:
     :func:`load_raw_folder` 의 4-튜플 계약을 안 건드리려고 별도 캐시로 둔다
     (``load_abs_folder`` 와 같은 관습)."""
     try:
-        return {stem: recipe for stem, _raw, _xy, recipe in _sections(folder)}
+        return {stem: recipe for stem, _raw, _xy, recipe, _t in _sections(folder)}
     except Exception:
         _LOG.warning("Camtek INI RecipeNumber 파싱 실패: %s", folder, exc_info=True)
+        return {}
+
+
+@lru_cache(maxsize=256)
+def load_type_folder(folder: Path) -> dict[str, Optional[int]]:
+    """폴더의 INI → ``{stem(소문자) → Type}``.  키가 없으면 ``None``.
+
+    ``Type`` 은 사진이 어느 결과 파일의 Defect 인지다 — 0 = Surface, 2 = Height, 7 = Coplanarity
+    (같은 폴더 ``EquipmentClassifications.ini`` 각 절의 ``-1`` 값, 관측 2026-11-23 AOI-16 T254:
+    Type 2 사진 1,368장 = Height.flt 레코드).  :func:`~.geometry.resolve` 가 결과 파일을 고를 때 쓴다."""
+    try:
+        return {stem: t for stem, _raw, _xy, _recipe, t in _sections(folder)}
+    except Exception:
+        _LOG.warning("Camtek INI Type 파싱 실패: %s", folder, exc_info=True)
         return {}
 
 
@@ -356,7 +405,7 @@ def resolve(image_path: Path) -> Optional[DefectCoord]:
 def load_abs_folder(folder: Path) -> dict[str, tuple[float, float]]:
     """폴더의 INI → {stem(소문자) → (절대 X, 절대 Y)}.  없으면 빈 dict."""
     try:
-        return {stem: xy for stem, _raw, xy, _recipe in _sections(folder)
+        return {stem: xy for stem, _raw, xy, _recipe, _t in _sections(folder)
                 if xy is not None}
     except Exception:
         _LOG.warning("Camtek INI 절대 좌표 파싱 실패: %s", folder, exc_info=True)

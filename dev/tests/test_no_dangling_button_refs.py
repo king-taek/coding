@@ -23,7 +23,7 @@ from aoi_verification.app import i18n
 _NOT_BUTTONS = {
     "원인",      # 예외 원인을 덧붙일 때의 머리말
     "중요",      # 업데이트 안내의 강조 표식
-    "검토 완료",  # 실제 라벨은 동적이다: BTN_FINISH_REVIEW_KEPT_FMT = "검토 완료 · 유지 {n}"
+    "검토 완료",  # 실제 라벨은 BTN_FINISH_REVIEW = "검토 완료" (건수는 왼쪽 칩)
 }
 
 # 라벨에 붙는 장식(화살표·체크·중점 등)은 같은 버튼으로 본다.

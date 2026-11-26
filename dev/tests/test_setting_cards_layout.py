@@ -122,7 +122,7 @@ def test_legacy_toggle_grows_only_engine_card(qapp, width):
     try:
         run, eng = page._setting_cards
         run_before, eng_before = run.height(), eng.height()
-        page.legacy_switch.set_on(True, emit=True)
+        page.legacy_switch.setChecked(True)
         for _ in range(8):
             qapp.processEvents()
         assert run.height() == run_before, "실행 옵션 카드가 같이 커졌다"

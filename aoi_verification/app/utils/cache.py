@@ -78,7 +78,7 @@ def cache_path(src: Path, size_option: SizeOption, *,
 # 오래된 사진 캐시 정리 (TTL)
 # ---------------------------------------------------------------------------
 def prune_old_cache(max_age_days: float = 1.0) -> int:
-    """썸네일/중간이미지 캐시 중 ``max_age_days`` 보다 오래된 ``*.jpg`` 를 삭제한다.
+    """썸네일/중간이미지/Scan Crop 캐시 중 ``max_age_days`` 보다 오래된 ``*.jpg``·``*.png`` 를 삭제한다.
 
     디스크가 무한정 커지는 것을 막기 위한 단순 TTL 청소.  features/scores 캐시는
     재계산 비용이 커서 대상에서 제외한다.  읽기는 mtime 을 갱신하지 않으므로 매일
@@ -89,12 +89,12 @@ def prune_old_cache(max_age_days: float = 1.0) -> int:
     """
     cutoff = time.time() - max(0.0, float(max_age_days)) * 86400.0
     removed = 0
-    for cache_dir in (paths.thumb_cache_dir(), paths.mid_cache_dir()):
+    for cache_dir in (paths.thumb_cache_dir(), paths.mid_cache_dir(), paths.scan_crop_cache_dir()):
         try:
             with os.scandir(cache_dir) as it:
                 for entry in it:
                     try:
-                        if not entry.name.lower().endswith(".jpg"):
+                        if not entry.name.lower().endswith((".jpg", ".png")):
                             continue
                         if entry.stat().st_mtime < cutoff:
                             os.unlink(entry.path)

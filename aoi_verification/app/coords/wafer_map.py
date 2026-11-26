@@ -39,7 +39,8 @@ __all__ = ["WaferFrame", "MapPoint", "MapData", "frame_for_folder", "to_plane",
            "build_map", "grid_lines", "die_grid_segments", "cell_of",
            "cell_bounds", "defect_cells", "slot_maps", "ALL_SLOTS_KEY", "map_warnings",
            "warning_reasons",
-           "WARN_OFF_DIE", "WARN_MIXED_FRAMES", "WARN_UNPLACED", "WARN_PITCH_ASSUMED"]
+           "WARN_OFF_DIE", "WARN_MIXED_FRAMES", "WARN_MIXED_KINDS", "WARN_UNPLACED",
+           "WARN_PITCH_ASSUMED"]
 
 _LOG = logging.getLogger("aoi.coords.wafer_map")
 
@@ -96,6 +97,11 @@ class MapData:
     # 점이 엉뚱한 칸에 찍힌다(실측: 파일명 (3,3) 이 (9,3) 칸).  :func:`map_warnings`.
     # 위상(중심)만 다른 것은 :func:`_align_phase` 가 맞추므로 여기 들지 않는다.
     mixed_frames: bool = False
+    # KLA 점과 Camtek 점이 한 맵에 섞였다 — 두 장비는 노치 방향이 다를 수 있어(Kendall RDL4:
+    # KLA 아래 · Camtek 오른쪽, 관측) 평면 좌표를 그대로 겹치면 위치가 틀린다.  pitch 가
+    # 같으면 ``mixed_frames`` 로는 잡히지 않는다.  돌려서 맞추지 않는다(중심 추측 금지) —
+    # 알리기만 한다.  같은 장비끼리 공정별 노치가 다른 것은 여기서 구분하지 못한다.
+    mixed_kinds: bool = False
     # col/row 를 장비 번호표 없이 계산한(틀렸을 수 있는) 점 수 — DefectCoord.number_warn.
     # 점 위치는 x/y 라 안 틀리고, 툴팁 번호만 틀렸을 수 있다.
     guessed_points: int = 0
@@ -554,6 +560,7 @@ def build_map(coords: dict, matched=None) -> MapData:
     # 위상만 다른 폴더는 :func:`_align_phase` 로 맞췄으니 pitch 가 다를 때만 섞인 것이다.
     mixed = len({None if f is None else (f.pitch_x, f.pitch_y)
                  for f in folder_frames.values()}) > 1
+    mixed_kinds = len({kind for _folder, kind in folder_frames}) > 1
     # LOT 합산: die 맵은 웨이퍼마다 가장자리 칸이 다르다(실측 AVAGO TYW 25장 —
     # 2921~2956칸, 맨 왼쪽 열이 있는 웨이퍼·없는 웨이퍼).  첫 폴더 맵만 그리면 다른
     # 슬롯의 가장자리 die 점이 격자 밖에 떨어진다.  격자가 같은 폴더들의 칸을 합친다.
@@ -565,7 +572,8 @@ def build_map(coords: dict, matched=None) -> MapData:
         if len(union) > len(frame.die_cells):
             frame = replace(frame, die_cells=frozenset(union))
     return MapData(frame=frame, points=tuple(points), unplaced=tuple(unplaced),
-                   mixed_frames=mixed, guessed_points=guessed,
+                   mixed_frames=mixed, mixed_kinds=mixed_kinds,
+                   guessed_points=guessed,
                    notch_up_points=notch_up, shift_unknown_points=shift_unknown,
                    map_mismatch_points=map_mismatch)
 
@@ -575,6 +583,7 @@ def build_map(coords: dict, matched=None) -> MapData:
 # ---------------------------------------------------------------------------
 WARN_OFF_DIE = "off_die"                # die 가 없는 칸(또는 원 밖)에 찍힌 점이 있다
 WARN_MIXED_FRAMES = "mixed_frames"      # 합친 폴더들의 격자가 서로 다르다
+WARN_MIXED_KINDS = "mixed_kinds"        # KLA 점과 Camtek 점이 한 맵에 섞였다(노치 다를 수 있음)
 WARN_UNPLACED = "unplaced"              # 좌표를 못 놓은 사진이 있다
 WARN_PITCH_ASSUMED = "pitch_assumed"    # die 크기를 사진으로 추정했다(크기·외곽 근사)
 WARN_NUMBER_GUESS = "number_guess"      # col/row 를 장비 번호표 없이 계산한 점이 있다(툴팁 번호)
@@ -609,6 +618,8 @@ def map_warnings(data: Optional[MapData]) -> list[tuple[str, int]]:
                   if not _cell_drawn(fr, cell_of(fr, p.x, p.y)))
         if off:
             out.append((WARN_OFF_DIE, off))
+    if data.mixed_kinds:
+        out.append((WARN_MIXED_KINDS, len(data.points)))
     if data.mixed_frames:
         out.append((WARN_MIXED_FRAMES, len(data.points)))
     if data.unplaced:
@@ -629,7 +640,7 @@ def map_warnings(data: Optional[MapData]) -> list[tuple[str, int]]:
 # 칸·번호가 **틀렸을 가능성이 큰** 경고 — 화면 배너를 빨간 큰 경고로 바꾼다(사용자 지시
 # 2026-11-13).  LIVE 당부·die 크기 추정·좌표 없는 사진은 점이 엉뚱한 칸에 찍히는 일이
 # 아니라 넣지 않는다 — 늘 빨갛게 뜨면 정작 위험할 때 무시하게 된다.
-DANGER_CODES = (WARN_NUMBER_GUESS, WARN_OFF_DIE, WARN_MIXED_FRAMES)
+DANGER_CODES = (WARN_NUMBER_GUESS, WARN_OFF_DIE, WARN_MIXED_FRAMES, WARN_MIXED_KINDS)
 
 
 def is_high_risk(data: Optional[MapData]) -> bool:
@@ -647,6 +658,7 @@ def warning_reasons(data: Optional[MapData]) -> str:
     fmt = {
         WARN_OFF_DIE: lambda n: i18n.KO.WAFER_MAP_WARN_OFF_DIE_FMT.format(n=n),
         WARN_MIXED_FRAMES: lambda n: i18n.KO.WAFER_MAP_WARN_MIXED_FRAMES,
+        WARN_MIXED_KINDS: lambda n: i18n.KO.WAFER_MAP_WARN_MIXED_KINDS,
         WARN_UNPLACED: lambda n: i18n.KO.WAFER_MAP_WARN_UNPLACED_FMT.format(n=n),
         WARN_PITCH_ASSUMED: lambda n: i18n.KO.WAFER_MAP_WARN_PITCH_ASSUMED,
         WARN_NUMBER_GUESS: lambda n: i18n.KO.WAFER_MAP_WARN_NUMBER_GUESS_FMT.format(n=n),

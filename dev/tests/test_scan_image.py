@@ -287,3 +287,15 @@ def test_scan_folder_reindexed_when_folder_changes(tmp_path):
     later = (folder / si.SCAN_LIST_NAME).stat().st_mtime_ns + 10**9
     os.utime(folder / si.SCAN_LIST_NAME, ns=(later, later))
     assert len(si.resolve(color).candidates) == 2
+
+
+def test_mark_box_half_size_same_center():
+    """화면 표시용 네모 — 중심 그대로 폭·높이 절반(Crop 범위 자체는 안 바뀐다)."""
+    from aoi_verification.app.coords import scan_image as si
+    assert si.mark_box((100, 200, 100, 80)) == (125, 220, 50, 40)
+    assert si.mark_box((-10, 5, 1, 1)) [2:] == (1, 1)            # 최소 1px
+    box = (7, 9, 301, 299)
+    l, t, w, h = si.mark_box(box)
+    assert abs((l + w / 2) - (7 + 301 / 2)) <= 1 and abs((t + h / 2) - (9 + 299 / 2)) <= 1
+    assert (w, h) == (round(301 * .5), round(299 * .5))
+    assert si.mark_box(box, 1.0)[2:] == (301, 299)

@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from PyQt6.QtCore import QByteArray, Qt, pyqtSignal
-from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
                               QProgressBar, QScrollArea, QSizePolicy, QSlider,
                               QSplitter, QStackedWidget, QVBoxLayout, QWidget)
@@ -22,6 +21,7 @@ from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
 from ... import config, i18n
 from .. import theme
 from ..deferred import call_later
+from ..undo_keys import bind_undo
 from ...models.result import MatchResult
 from ...models.slot import ImageItem
 from ...utils import prefs as _prefs
@@ -103,6 +103,20 @@ class ReviewContext:
     coord_classical_refs: frozenset = frozenset()
     # col/row 를 확실히 정하지 못한 슬롯 ((슬롯, 사진 수), ...) — 검토 화면 큰 경고용.
     number_risk: tuple = ()
+
+
+# 중지·다음 사진으로 넘길 때 아직 도는 MatcherWorker 의 수명을 잡아 둔다(끝나면 놓음).
+_LIVE_MATCHERS: set = set()
+
+
+def stop_live_matchers(wait_ms: int = 500) -> None:
+    """창을 닫을 때 남은 매칭 스레드를 멈춘다."""
+    for w in list(_LIVE_MATCHERS):
+        try:
+            w.stop()
+            w.wait(wait_ms)
+        except RuntimeError:
+            pass
 
 
 class MatchPage(ProgressRowMixin, QWidget):
@@ -284,6 +298,8 @@ class MatchPage(ProgressRowMixin, QWidget):
         size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, center)
         size_label.setProperty("role", "muted")
         self.size_slider = NoWheelSlider(Qt.Orientation.Horizontal, center)
+        # 시작부터 포커스 테두리가 뜨지 않게 — 눌러 만질 때만 포커스를 받는다.
+        self.size_slider.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.size_slider.setRange(ScalableImage.MIN_LONG_EDGE,
                                    ScalableImage.MAX_LONG_EDGE)
         # 모니터 크기에 맞춰 자동 시작값 — 세션 한정 (재시작 시 다시 자동맞춤).
@@ -302,6 +318,7 @@ class MatchPage(ProgressRowMixin, QWidget):
 
         # 이미지 (스크롤 영역) -----------------------------------------
         self.center_img = ScalableImage(center)
+        self.center_img.enable_photo_mouse()             # 더블클릭 = 크게 · 우클릭 = 사진 메뉴(현택님 2026-11-24)
         self._img_scroll = QScrollArea(center)
         self._img_scroll.setWidgetResizable(False)
         self._img_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -317,9 +334,8 @@ class MatchPage(ProgressRowMixin, QWidget):
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 6, 0, 0)
         # 되돌리기 (#C1) — 직전 매칭/매칭없음 결정을 취소하고 그 기준 사진을 다시
-        # 큐 맨 앞으로 복귀.  Stage 1 은 Z 를 쓰므로 충돌을 피해 Ctrl+Z 사용.
-        self.undo_btn = NeonButton(i18n.KO.BTN_MATCH_UNDO, role="ghost")
-        self.undo_btn.setToolTip(i18n.KO.MATCH_UNDO_TOOLTIP)
+        # 큐 맨 앞으로 복귀.  키는 Z · Ctrl+Z(`bind_undo`, 아래 단축키 자리).
+        self.undo_btn = NeonButton(i18n.KO.BTN_UNDO, role="ghost")
         self.undo_btn.clicked.connect(self._undo_match)
         self.undo_btn.setEnabled(False)
         bar.addWidget(self.undo_btn)
@@ -341,15 +357,6 @@ class MatchPage(ProgressRowMixin, QWidget):
         #   자동 경로가 쓰는 `_confirm_no_match(user=False)` 는 그대로 남는다.
         bar.addStretch(1)
         cl.addLayout(bar)
-
-        # 자동 모드에서 우측 후보 패널을 떼면 이 카드가 폭 전체를 쓴다 — 결과를
-        # 어디서 보는지 한 줄로 알려 준다(빈 칸에 용도를 말하는 emptyHint 규칙의
-        # 연장이다).  수동 폴백에서는 감춘다.
-        self._auto_note = QLabel(i18n.KO.MATCH_AUTO_RESULT_NOTE, center)
-        self._auto_note.setProperty("role", "muted")
-        self._auto_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._auto_note.setVisible(False)
-        cl.addWidget(self._auto_note)
 
         center.setMinimumWidth(360)
         self._h_splitter.addWidget(center)
@@ -416,8 +423,9 @@ class MatchPage(ProgressRowMixin, QWidget):
         #   버튼만 지우고 단축키를 남기면 **보이지 않는 손잡이**가 되어 더 나쁘다:
         #   화면에 아무 것도 없는데 키 하나로 사실이 아닌 미탐이 확정된다.
         #   ‘S’(잠시 보류) 는 이미 #3 에서 비활성화됐다.
-        # 되돌리기 (#C1) — Stage 1 의 Z 와 충돌하지 않도록 Ctrl+Z.
-        QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._undo_match)
+        # 되돌리기 (#C1) — 앱 어디서나 Z(Ctrl+Z 도).  선별 화면과 같은 키여도 둘은 한 번에
+        #   보이지 않으므로(쌓인 페이지) 부딪치지 않는다.  자동 사슬 중에는 덮개가 막는다.
+        bind_undo(self, self._undo_match)
 
     # ------------------------------------------------------------------
     def resizeEvent(self, event):                       # noqa: N802
@@ -647,7 +655,7 @@ class MatchPage(ProgressRowMixin, QWidget):
             getattr(self, "_precompute_phase", "") or self._default_phase(),
             cancelable=True,
         )
-        if self._precompute_total > 0:
+        if self._precompute_total > 0 and not self._streaming_precompute:
             self._loading.set_progress(
                 self._precompute_done, self._precompute_total,
                 getattr(self, "_precompute_phase", "") or self._default_phase(),
@@ -713,8 +721,13 @@ class MatchPage(ProgressRowMixin, QWidget):
         self._precompute_total = total
         if self._current is None:
             phase = getattr(self, "_precompute_phase", "") or self._default_phase()
-            # 라벨엔 현재 작업명, 진행도는 처리 갯수(done / total)로 표시.
-            self._loading.set_progress(done, total, phase)
+            if self._streaming_precompute:
+                # 직접 고르기 — 이 덮개는 '첫 슬롯' 하나만 기다린다.  전체 실행 진행값은
+                # 그 슬롯의 것이 아니라 5~10% 에서 닫히는 것처럼 보이므로 busy 로 둔다.
+                self._loading.set_progress(0, 0, phase)
+            else:
+                # 라벨엔 현재 작업명, 진행도는 처리 갯수(done / total)로 표시.
+                self._loading.set_progress(done, total, phase)
 
     def _on_precompute_slot_finished(self,
                                       slot: str,
@@ -766,8 +779,10 @@ class MatchPage(ProgressRowMixin, QWidget):
         self._waiting_for_slot = None
         self._streaming_precompute = False
         # 좌표 매칭 모드에서 좌표 없음 오류 — 사용자에게 안내 후 설정 화면 복귀.
-        if self._coord_mode and msg and i18n.KO.COORD_MISSING in msg:
-            sheets.warn(self, i18n.KO.APP_TITLE, msg)
+        # 좌표 모드는 어떤 실패든(Notch · 예외 포함) 멈춘다 — 사진 유사도로 몰래 넘어가지 않는다.
+        if self._coord_mode:
+            sheets.warn(self, i18n.KO.APP_TITLE,
+                        msg or i18n.KO.COORD_MISSING)
             self.cancelled.emit()
             return
         if self.bg_status_label is not None:
@@ -999,6 +1014,10 @@ class MatchPage(ProgressRowMixin, QWidget):
         if w.isRunning():
             w.stop()
             w.wait(500)
+        if w.isRunning():
+            # 아직 도는 QThread 는 참조를 버리면 파괴돼 앱이 꺼진다 — 끝날 때까지 붙든다.
+            _LIVE_MATCHERS.add(w)
+            w.finished.connect(lambda x=w: _LIVE_MATCHERS.discard(x))
 
     def _stop_precompute_worker(self) -> None:
         """현재 precompute 워커의 시그널을 모두 끊고 중단 + 대기.
@@ -1064,7 +1083,7 @@ class MatchPage(ProgressRowMixin, QWidget):
             # 자동 모드는 매 ref 마다 모달이 뜨는 ‘모달 폭격’ 을 피하려고
             # 모달 없이 조용히 ‘매칭 없음’ 처리 (Bug #4).  수동 모드만 안내.
             if not self._auto_mode:
-                sheets.info(self, i18n.KO.APP_TITLE,
+                sheets.info(self, i18n.KO.STAT_NO_MATCH,
                                         i18n.KO.INFO_NO_VAL_PHOTOS)
             self._confirm_no_match(user=False)
             return
@@ -1192,7 +1211,7 @@ class MatchPage(ProgressRowMixin, QWidget):
                 call_later(self, 0, lambda: self._confirm_no_match(user=False))
             else:
                 self._loading.hide_overlay()
-                sheets.info(self, i18n.KO.APP_TITLE,
+                sheets.info(self, i18n.KO.STAT_NO_MATCH,
                                         i18n.KO.INFO_NO_MATCH_FOUND)
                 self._confirm_no_match(user=False)  # ‘잠시 보류’ 제거 (#3)
             return
@@ -1258,12 +1277,11 @@ class MatchPage(ProgressRowMixin, QWidget):
                 w.deleteLater()
 
     def _set_candidate_pane_visible(self, on: bool) -> None:
-        """우측 후보 패널 표시/숨김 + 중앙 카드의 안내 한 줄을 반대로 토글.
+        """우측 후보 패널 표시/숨김.
 
         스플리터는 숨은 자식을 자리로 치지 않으므로 남은 pane 이 폭을 전부 쓴다
         (저장된 분할 비율은 그대로 남아 있다가 패널이 돌아오면 다시 적용된다)."""
         self._right_panel.setVisible(bool(on))
-        self._auto_note.setVisible(not on)
 
     def _populate_right(self, candidates: list[Candidate]) -> None:
         # 수동 폴백이 실제로 돌았다 — 자동 모드에서 떼어 뒀던 패널을 되살린다.

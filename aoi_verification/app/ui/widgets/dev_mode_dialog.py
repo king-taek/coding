@@ -25,12 +25,16 @@ from ...utils import prefs as _prefs
 from ...utils import updater
 from .. import theme
 from .neon_button import NeonButton
+from . import popup_layout
 
 __all__ = ["DevModeDialog"]
 
 
 class DevModeDialog(QDialog):
     """:attr:`install_info` 가 결과다 — [이 브랜치로 설치] 를 눌렀으면 받을 대상 dict."""
+
+    #: 작은 팝업 — 시트 제목줄 ✕ 를 뺀다(자기 [취소] 가 있다, `sheet_host.POPUP_SMALL_ATTR`).
+    POPUP_SMALL = True
 
     _branches_loaded = pyqtSignal(list, str)           # (이름들, 실패 사유)
     _checked = pyqtSignal(str, dict, bool)             # (status, info, 설치까지)
@@ -97,28 +101,24 @@ class DevModeDialog(QDialog):
         self.status.setMinimumHeight(16)        # 자리 예약(창 높이가 흔들리지 않게)
         root.addWidget(self.status)
 
-        row = QHBoxLayout()
-        row.setSpacing(8)
         self.btn_reset = NeonButton(i18n.KO.DEV_MODE_RESET, role="ghost")
         self.btn_reset.clicked.connect(self._reset)
-        row.addWidget(self.btn_reset)
         # app.log 가 있는 캐시 폴더를 탐색기로 연다 — 로그를 보내 달라고 할 때마다
         # 경로를 설명하지 않아도 되게(사용자 요청).  툴팁에 실제 경로를 적는다.
         self.btn_log = NeonButton(i18n.KO.DEV_MODE_OPEN_LOG, role="ghost")
         self.btn_log.setToolTip(i18n.KO.DEV_MODE_LOG_PATH_FMT.format(
             path=self.log_dir() / "app.log"))
         self.btn_log.clicked.connect(self._open_log_dir)
-        row.addWidget(self.btn_log)
-        row.addStretch(1)
         self.btn_close = NeonButton(i18n.KO.DEV_MODE_CLOSE, role="ghost")
         self.btn_close.clicked.connect(self.reject)
         self.btn_check = NeonButton(i18n.KO.DEV_MODE_CHECK, role="ghost")
         self.btn_check.clicked.connect(lambda: self._check(install=False))
         self.btn_install = NeonButton(i18n.KO.DEV_MODE_INSTALL, role="primary")
         self.btn_install.clicked.connect(lambda: self._check(install=True))
-        for b in (self.btn_close, self.btn_check, self.btn_install):
-            row.addWidget(b)
-        root.addLayout(row)
+        root.addLayout(popup_layout.dialog_row(
+            QHBoxLayout(), left=[self.btn_reset, self.btn_log],
+            cancels=[self.btn_close], others=[self.btn_check],
+            primaries=[self.btn_install]))
 
     # ------------------------------------------------------------------
     @staticmethod

@@ -47,6 +47,7 @@ def _slot(root: Path, pitch_x: float, pitch_y: float, *, with_params=True) -> Pa
         for c, r in ((1, 1), (3, 2))
     )
     (folder / "ColorImageGrabingInfo.ini").write_text(entries, encoding="utf-8")
+    (folder / "d1.jpeg").write_bytes(b"x")       # 사진 없는 폴더는 설정 검사를 못 넘는다(E2)
     if with_params:
         (folder / "Params_WaferInfo.ini").write_text(
             f"[Geometry]\nDieStep_X={pitch_x:.6f}\nDieStep_Y={pitch_y:.6f}\n",
@@ -94,6 +95,15 @@ def test_missing_geometry_warns(qapp, tmp_path):
     assert _hint(page) == i18n.KO.DIE_SIZE_NOT_FOUND
     assert page._die_hint.property("role") == "warn"
     page.deleteLater()
+
+
+def test_missing_geometry_warning_is_one_short_sentence():
+    """경고는 짧은 한 문장 — 서식 기호('**')·파일 이름·줄바꿈이 없다(사용자 결정 2026-11-24)."""
+    text = i18n.KO.DIE_SIZE_NOT_FOUND
+    assert "**" not in text
+    assert "\n" not in text
+    assert ".ini" not in text and "DieStep" not in text
+    assert len(text) <= 40
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +184,7 @@ def test_ui_thread_does_not_wait_for_the_scan(qapp, tmp_path, monkeypatch):
         return ((37247.7, 44905.4), "느린 스캔", False)
 
     monkeypatch.setattr(SetupPage, "_detect_die_geometry", staticmethod(slow))
+    (tmp_path / "a.jpg").write_bytes(b"x")     # 사진 없는 폴더는 통과 못 한다(E2)
     page = SetupPage()
     page.coord_tol_spin.setValue(500.0)
     page.ref_path_edit.setText(str(tmp_path))
@@ -220,6 +231,7 @@ def test_no_duplicate_scan_while_one_is_running(qapp, tmp_path, monkeypatch):
         return ((37247.7, 44905.4), "느린 스캔", False)
 
     monkeypatch.setattr(SetupPage, "_detect_die_geometry", staticmethod(slow))
+    (tmp_path / "a.jpg").write_bytes(b"x")     # 사진 없는 폴더는 통과 못 한다(E2)
     page = SetupPage()
     page.ref_path_edit.setText(str(tmp_path))
     page._validate()

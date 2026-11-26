@@ -133,20 +133,24 @@ def _camtek_folder(tmp_path, monkeypatch, *, contrast=108.0):
 
 
 def test_geometry_lines_order_and_names(tmp_path, monkeypatch):
-    """표기 순서: recipe/zone → area → width → length → contrast, 이름만 표기."""
+    """표기 순서: recipe/zone → type → area → width → length → contrast, 이름만 표기.
+
+    type 은 장비 Export 의 Type 모양('<검사>-<Zone>', 2026-11-23).  이름 사전이 없는 폴더라 defect ·
+    classify 줄은 없다."""
     img = _camtek_folder(tmp_path, monkeypatch)
     lines = single_info.geometry_lines(img)
     assert lines[0] == "recipe PI / zone PI_Opening"
-    assert lines[1].startswith("area ")
-    assert lines[2].startswith("width ")
-    assert lines[3].startswith("length ")
-    assert lines[4] == "contrast 108.00"
+    assert lines[1] == "type Surface-PI_Opening"
+    assert lines[2].startswith("area ")
+    assert lines[3].startswith("width ")
+    assert lines[4].startswith("length ")
+    assert lines[5] == "contrast 108.00"
 
 
 def test_contrast_zero_is_dash_not_number(tmp_path, monkeypatch):
     """contrast 0 = '측정 안 함' — 0.00 으로 오해되지 않게 '—' 로."""
     img = _camtek_folder(tmp_path, monkeypatch, contrast=0.0)
-    assert single_info.geometry_lines(img)[4] == (
+    assert single_info.geometry_lines(img)[5] == (
         f"{i18n.KO.DEFECT_CONTRAST_LABEL} {i18n.KO.DEFECT_CONTRAST_NONE_VALUE}")
 
 
@@ -175,14 +179,18 @@ def test_defect_lines_is_geometry_then_coords(tmp_path, monkeypatch):
 # describe — 제도 시트 표: 그룹 · 값 있는 항목만 · 계측 없으면 덩이 자체가 없다
 # ---------------------------------------------------------------------------
 def test_describe_omits_rows_it_cannot_fill(tmp_path):
-    """정보파일이 없는 폴더 — '파일' 덩이만, WaferID·좌표 출처 등은 빠진다."""
+    """정보파일이 없는 폴더 — '파일' 덩이만, 좌표 출처 등은 빠진다.
+
+    LOT · Wafer ID · Slot# 는 예외다 — 줄은 늘 두고 못 읽으면 '—'(현택님 결정 2026-11-24).
+    폴더 이름으로 짐작해 채우지 않는다."""
     img = tmp_path / "plain.jpeg"
     img.write_bytes(b"x")
     groups = single_info.describe(img)
     assert [g.title for g in groups] == [i18n.KO.IMAGE_INFO_GROUP_FILE]
-    assert _labels(groups) == [i18n.KO.IMAGE_INFO_ROW_FILE,
-                               i18n.KO.IMAGE_INFO_ROW_FOLDER]
+    assert _labels(groups) == _ID_LABELS
     assert all(v for v in _values(groups)), "값이 빈 행을 남기면 안 된다"
+    by_label = {r.label: r.value for r in groups[0].rows}
+    assert {by_label[k] for k in _ID_LABELS[1:4]} == {i18n.KO.IMAGE_INFO_UNKNOWN}
 
 
 def test_describe_without_any_measurement_has_no_defect_group(tmp_path):
@@ -206,8 +214,7 @@ def test_describe_kla_includes_wafer_id_and_source(tmp_path):
     files = _group(groups, i18n.KO.IMAGE_INFO_GROUP_FILE)
     by_label = {r.label: r.value for r in files.rows if r.label}
     assert by_label[i18n.KO.IMAGE_INFO_ROW_WAFER_ID] == "W6459076XYG1"
-    assert by_label[i18n.KO.IMAGE_INFO_ROW_SOURCE] == \
-        i18n.KO.IMAGE_INFO_SOURCE_NAMES["kla"]
+    assert "좌표 출처" not in by_label                  # 이 화면에는 좌표 출처 행이 없다
     # geometry 가 없으므로 픽셀 크기 행은 아예 없다.
     assert i18n.KO.IMAGE_INFO_ROW_PIXEL not in _labels(groups)
 
@@ -221,7 +228,7 @@ def test_describe_defect_values_match_the_excel_numbers(tmp_path, monkeypatch):
     for m in single_info.measures(img):
         # 'col / row' 처럼 라벨이 값 사이에 끼는 표기가 있어 문자열 포함은 성립하지
         # 않는다.  성립해야 하는 것은 **값 토큰이 전부 엑셀 줄에도 있다**는 것.
-        for token in m.value.split(" / "):
+        for token in m.value.replace("µm", "㎛").split(" / "):   # 단위 글자만 다르다(화면 µm · 엑셀 ㎛)
             assert token in m.line, f"{token!r} 가 {m.line!r} 안에 없다"
     # 엑셀 줄 목록도 같은 Measure 에서 나온다.
     assert single_info.defect_lines(img) == [
@@ -239,9 +246,8 @@ def test_describe_defect_group_carries_measures_and_stamp(tmp_path, monkeypatch)
     assert i18n.KO.IMAGE_INFO_ROW_PIXEL in labels
     # 수치 행은 모노로 찍힌다(도면 컨셉의 계측 표기).
     assert all(r.mono for r in defect.rows if r.label)
-    # 마지막은 판정 스탬프 — 측정정보가 있으므로 'ok'.
-    assert defect.rows[-1].stamp == "ok"
-    assert defect.rows[-1].value == i18n.KO.IMAGE_INFO_STAMP_MEASURED
+    # 측정정보가 있으면 판정 스탬프를 띄우지 않는다(수치 행이 대신한다).
+    assert not any(r.stamp for r in defect.rows)
 
 
 def test_describe_stamps_unsupported_material(tmp_path, monkeypatch):
@@ -259,8 +265,57 @@ def test_describe_stamps_unsupported_material(tmp_path, monkeypatch):
 def test_describe_survives_missing_file(tmp_path):
     """존재하지 않는 경로여도 죽지 않는다(fail-safe)."""
     groups = single_info.describe(tmp_path / "nope.jpeg")
-    assert _labels(groups) == [i18n.KO.IMAGE_INFO_ROW_FILE,
-                               i18n.KO.IMAGE_INFO_ROW_FOLDER]
+    assert _labels(groups) == _ID_LABELS
+
+
+# 파일 덩이 맨 앞 다섯 줄 — 파일명 · LOT · Wafer ID · Slot# · 폴더(현택님 2026-11-24 안 A)
+_ID_LABELS = [i18n.KO.IMAGE_INFO_ROW_FILE, i18n.KO.IMAGE_INFO_ROW_LOT, i18n.KO.IMAGE_INFO_ROW_WAFER_ID,
+              i18n.KO.IMAGE_INFO_ROW_SLOT, i18n.KO.IMAGE_INFO_ROW_FOLDER]
+
+
+def _ids(groups) -> dict:
+    files = _group(groups, i18n.KO.IMAGE_INFO_GROUP_FILE)
+    return {r.label: r.value for r in files.rows if r.label in _ID_LABELS[1:4]}
+
+
+def test_describe_camtek_ids_from_waferinfo(tmp_path):
+    """Camtek — ``WaferInfo.ini`` 의 GlobalLotId · UseWaferID · ActiveSlot(관측: GX57527979 폴더)."""
+    (tmp_path / "WaferInfo.ini").write_text(
+        "[AutoCycleInfo]\nActiveSlot=1\nUseLot=OLD-LOT\nUseWaferID=GX57527979\nGlobalLotId=FLU-1122N\n",
+        encoding="utf-8")
+    img = tmp_path / "1.2.c.-3.jpeg"
+    img.write_bytes(b"x")
+    assert _ids(single_info.describe(img)) == {
+        i18n.KO.IMAGE_INFO_ROW_LOT: "FLU-1122N", i18n.KO.IMAGE_INFO_ROW_WAFER_ID: "GX57527979",
+        i18n.KO.IMAGE_INFO_ROW_SLOT: "1"}
+
+
+def test_describe_camtek_lot_falls_back_to_uselot(tmp_path):
+    (tmp_path / "WaferInfo.ini").write_text("UseLot=FLU-1122N\nUseWaferID=GX1\n", encoding="utf-8")
+    img = tmp_path / "a.jpeg"
+    img.write_bytes(b"x")
+    ids = _ids(single_info.describe(img))
+    assert ids[i18n.KO.IMAGE_INFO_ROW_LOT] == "FLU-1122N"
+    assert ids[i18n.KO.IMAGE_INFO_ROW_SLOT] == i18n.KO.IMAGE_INFO_UNKNOWN
+
+
+def test_describe_kla_ids_from_header(tmp_path):
+    """KLA — 정보파일 헤더 LotID · WaferID · Slot (실물 예시1 헤더와 같은 꼴)."""
+    (tmp_path / "info.001").write_text('LotID "TB500INT.271@6324";\n' + _KLA_INFO, encoding="utf-8")
+    img = tmp_path / "W6459076XYG1_2_0_23_2.jpg"
+    img.write_bytes(b"x")
+    ids = _ids(single_info.describe(img))
+    assert ids[i18n.KO.IMAGE_INFO_ROW_LOT] == "TB500INT.271@6324"
+    assert ids[i18n.KO.IMAGE_INFO_ROW_WAFER_ID] == "W6459076XYG1"
+
+
+def test_describe_does_not_guess_ids_from_folder_names(tmp_path):
+    """Conder 처럼 사진만 있는 폴더 — LOT · 웨이퍼 폴더 이름이 그럴듯해도 '—' 다."""
+    d = tmp_path / "TSC-FS" / "27125535EWA5"
+    d.mkdir(parents=True)
+    img = d / "R_T254_LIVE_3_5_100_200.jpg"
+    img.write_bytes(b"x")
+    assert set(_ids(single_info.describe(img)).values()) == {i18n.KO.IMAGE_INFO_UNKNOWN}
 
 
 # ---------------------------------------------------------------------------
@@ -297,3 +352,62 @@ def test_describe_reads_the_ini_only_once(tmp_path, monkeypatch):
     assert "col / row" in _labels(groups)
     assert camtek_ini.load_abs_folder(tmp_path)[img.stem.lower()] == (
         145523.83432694, 119503.165751992)
+
+
+# ---------------------------------------------------------------------------
+# 정보 화면 묶음 — 구분선은 묶음 사이에만(사용자 지시 2026-11-23)
+def _clusters(group) -> list[str]:
+    """연속한 같은 묶음을 하나로 줄인 순서."""
+    out: list[str] = []
+    for r in group.rows:
+        if not out or out[-1] != r.cluster:
+            out.append(r.cluster)
+    return out
+
+
+def test_describe_groups_rows_into_clusters(tmp_path, monkeypatch):
+    """파일 · 위치 · 분류 · 크기 · 스탬프 순서로 묶이고, 묶음이 끊겨 다시 나오지 않는다."""
+    img = _camtek_folder(tmp_path, monkeypatch)
+    groups = single_info.describe(img)
+    files = _group(groups, i18n.KO.IMAGE_INFO_GROUP_FILE)
+    assert _clusters(files) == [single_info.CLUSTER_FILE]
+    defect = _group(groups, i18n.KO.IMAGE_INFO_GROUP_DEFECT)
+    assert _clusters(defect) == [single_info.CLUSTER_WHERE,
+                                 single_info.CLUSTER_WHAT,
+                                 single_info.CLUSTER_SIZE]   # 있음 스탬프는 띄우지 않는다
+    by_label = {r.label: r.cluster for r in defect.rows if r.label}
+    assert by_label[i18n.KO.DEFECT_COLROW_LABEL] == single_info.CLUSTER_WHERE
+    assert by_label[i18n.KO.DEFECT_RECIPE_ZONE_LABEL] == single_info.CLUSTER_WHAT
+    assert by_label[i18n.KO.DEFECT_TYPE_LABEL] == single_info.CLUSTER_WHAT
+    assert by_label[i18n.KO.DEFECT_AREA_LABEL] == single_info.CLUSTER_SIZE
+    assert by_label[i18n.KO.IMAGE_INFO_ROW_PIXEL] == single_info.CLUSTER_SIZE
+
+
+def test_every_measure_has_a_cluster(tmp_path, monkeypatch):
+    """새 계측 줄을 넣고 묶음을 빼먹으면 화면에서 엉뚱한 곳에 선이 생긴다 — 빈 값 금지."""
+    img = _camtek_folder(tmp_path, monkeypatch)
+    assert all(m.cluster for m in single_info.measures(img))
+    for g in single_info.describe(img):
+        assert all(r.cluster for r in g.rows), g.title
+
+
+def test_describe_kla_rows_are_clustered(tmp_path):
+    (tmp_path / "info.001").write_text(_KLA_INFO, encoding="utf-8")
+    img = tmp_path / "W6459076XYG1_2_0_23_2.jpg"
+    img.write_bytes(b"x")
+    groups = single_info.describe(img)
+    assert _clusters(_group(groups, i18n.KO.IMAGE_INFO_GROUP_FILE)) == \
+        [single_info.CLUSTER_FILE]
+    defect = _group(groups, i18n.KO.IMAGE_INFO_GROUP_DEFECT)
+    assert _clusters(defect)[0] == single_info.CLUSTER_WHERE
+    assert all(r.cluster for r in defect.rows)
+
+
+def test_screen_values_say_um_but_excel_lines_keep_the_old_unit(tmp_path, monkeypatch):
+    """화면 값은 µm, 엑셀 D열 줄은 ㎛ 그대로(F11a) — `utils/excel_ref` 가 ㎛ 줄을 되읽는다."""
+    img = _camtek_folder(tmp_path, monkeypatch)
+    with_unit = [m for m in single_info.measures(img) if "µm" in m.value or "㎛" in m.value]
+    assert {m.label for m in with_unit} >= {"area", "x / y"}
+    for m in with_unit:
+        assert "㎛" not in m.value and "µm" in m.value, m
+        assert "µm" not in m.line and "㎛" in m.line, m

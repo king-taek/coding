@@ -424,6 +424,68 @@ def test_fold_keeps_every_row_at_the_same_height(styled_qapp):
         page.rail_fold_btn.click()
         page._apply_rail_collapsed(animate=False)
         assert page.is_rail_folded()
-        assert ys() == unfolded
+        folded = ys()
+        # 줄의 위치는 그대로.  메뉴 칸만 접으면 54 로 길어진다 — 아이콘 + 짧은 이름 묶음이 선택
+        # 바탕 가운데에 오게(현택님 2026-11-25).  아이콘 y 는 test_rail_style_fields 가 본다.
+        assert [y for y, _h in folded] == [y for y, _h in unfolded]
+        n_menu = len(page._tool_buttons) + 1
+        assert folded[:-n_menu] == unfolded[:-n_menu]
+        assert all(h == page._RAIL_FOLDED_H for _y, h in folded[-n_menu:])
+    finally:
+        page.close()
+
+
+def test_status_message_hides_credit_until_it_clears(qapp, no_sheets, monkeypatch):
+    """상태줄 알림(예: 차순위 후보 실패, B8)이 떠 있는 동안 크레딧이 같이 그려지면 글자가 겹친다 —
+    페이지가 바뀌어도 알림이 남아 있으면 크레딧을 숨기고, 알림이 사라지면 되돌린다."""
+    from aoi_verification.app.ui import main_window as mw
+    monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async", lambda self: None)
+    win = mw.MainWindow()
+    win.resize(1400, 900)
+    win.show()
+    try:
+        win._on_backend_loaded()
+        win._show_page(win._result_page, animate=False)
+        assert win._credit_label.isVisible()
+        win._status_bar.showMessage("알림", 6000)
+        win._show_page(win._result_page, animate=False)
+        assert not win._credit_label.isVisible()
+        win._status_bar.clearMessage()
+        assert win._credit_label.isVisible()
+    finally:
+        win._loading.hide_overlay()
+        win.close()
+
+
+def test_tool_screen_title_is_its_menu_name(styled_qapp, no_sheets):
+    """도구 화면 제목 = 왼쪽 메뉴 이름(현택님 2026-11-24) — 'Defect 정보' · 'Defect Map' …"""
+    page = _page(styled_qapp)
+    try:
+        assert page.image_info_btn.property("_railText") == "Defect 정보"
+        assert page.wafer_map_btn.property("_railText") == "Defect Map"
+        for key, btn in (("image_info", page.image_info_btn),
+                         ("wafer_map", page.wafer_map_btn),
+                         ("gl", page.gl_btn), ("threshold", page.threshold_btn),
+                         ("zone_origin", page.zone_origin_btn)):
+            page.show_page(key)
+            styled_qapp.processEvents()
+            assert page.tool_title() == btn.property("_railText"), key
+        # 이 화면들을 여는 다른 버튼도 같은 이름이다.
+        assert i18n.KO.ZO_BTN_INFO == i18n.KO.IMAGE_INFO_BUTTON
+        assert i18n.KO.IMAGE_INFO_GL == i18n.KO.GL_BUTTON
+    finally:
+        page.close()
+
+
+def test_rail_names_fit_the_rail(styled_qapp):
+    """펼친 메뉴에서 이름이 잘리지 않는다 — `_RAIL_W` 는 가장 긴 이름이 들어가는 하한."""
+    page = _page(styled_qapp)
+    try:
+        assert not page.is_rail_folded()
+        for b in (*page._tool_buttons, page.update_btn):
+            if not b.isVisible():
+                continue
+            assert b.sizeHint().width() <= b.width(), \
+                f"'{b.text()}' 가 메뉴 폭({b.width()}px)보다 넓다({b.sizeHint().width()}px)"
     finally:
         page.close()

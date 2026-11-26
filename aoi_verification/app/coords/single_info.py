@@ -29,12 +29,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import i18n
-from . import abs_coord, geometry, kla_info
+from . import abs_coord, geometry
+from ..models import lot_info
 from . import resolve as _resolve_coord
-from .models import NUMBER_WARN_KLA_GUESS, NUMBER_WARN_NO_TABLE
+from .models import KIND_HEIGHT, NUMBER_WARN_KLA_GUESS, NUMBER_WARN_NO_TABLE
 
 __all__ = ["Measure", "InfoRow", "InfoGroup", "measures", "geometry_lines",
-           "coord_lines", "defect_lines", "describe", "has_measurements"]
+           "coord_lines", "defect_lines", "describe", "describe_in_scan",
+           "scan_file_group", "has_measurements"]
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,7 @@ class Measure:
     label: str    # 정보 화면 좌측 라벨 ("area")
     value: str    # 정보 화면 우측 값, 모노로 찍힌다 ("55.00 ㎛²")
     line: str     # 엑셀 셀 안 한 줄 ("area 55.00 ㎛²")
+    cluster: str = ""   # 정보 화면 묶음 — 같은 묶음끼리는 구분선 없이 붙인다
 
 
 @dataclass(frozen=True)
@@ -52,6 +55,7 @@ class InfoRow:
     value: str
     mono: bool = False   # 값이 수치라 모노로 찍을지
     stamp: str = ""      # 판정 스탬프 칩: "" | "ok" | "none"
+    cluster: str = ""    # 묶음 — 구분선은 묶음이 바뀌는 곳에만 긋는다
 
 
 @dataclass(frozen=True)
@@ -61,9 +65,20 @@ class InfoGroup:
     rows: tuple[InfoRow, ...]
 
 
-def _m(label: str, value: str) -> Measure:
-    """label/value 가 그대로 이어붙는 계측 — 엑셀 줄은 "라벨 값"."""
-    return Measure(label=label, value=value, line=f"{label} {value}")
+# 정보 화면 묶음(사용자 지시 2026-11-23 — 묶음 안 구분선을 없애 읽기 쉽게).
+CLUSTER_FILE = "file"     # 파일명 · 폴더 · WaferID · 좌표 출처
+CLUSTER_WHERE = "where"   # col/row · x/y · 절대 X/Y
+CLUSTER_WHAT = "what"     # recipe/zone · type · defect · classify
+CLUSTER_SIZE = "size"     # area · width · length · contrast(또는 height) · 픽셀 크기
+CLUSTER_STAMP = "stamp"   # 측정정보 판정 스탬프
+
+
+def _m(label: str, value: str, cluster: str = "", line: str = "") -> Measure:
+    """label/value 가 그대로 이어붙는 계측 — 엑셀 줄은 "라벨 값".
+
+    단위가 붙는 값은 ``line`` 을 따로 준다 — 화면 값은 µm, 엑셀 줄은 ㎛ 다(ko.py 주석)."""
+    return Measure(label=label, value=value, line=line or f"{label} {value}",
+                   cluster=cluster)
 
 
 # ---------------------------------------------------------------------------
@@ -84,24 +99,47 @@ def geometry_measures(image_path: Path) -> tuple[str, list[Measure]]:
         recipe_disp = (i18n.KO.DEFECT_RECIPE_NONE_VALUE if g.recipe is None
                        else g.recipe_name or str(g.recipe))
         zone_disp = g.zone_name or str(g.zone)
-        # contrast 는 일부 자재(예: PI)만 측정 — 0 은 '측정 안 함'이라 0.00 대신 '—'.
-        contrast_val = (i18n.KO.DEFECT_CONTRAST_NONE_VALUE if g.contrast == 0
-                        else i18n.KO.DEFECT_CONTRAST_VALUE_FMT.format(v=g.contrast))
-        return "ok", [
+        head = [
             Measure(
                 label=i18n.KO.DEFECT_RECIPE_ZONE_LABEL,
                 value=i18n.KO.DEFECT_RECIPE_ZONE_VALUE_FMT.format(
                     recipe=recipe_disp, zone=zone_disp),
                 line=i18n.KO.DEFECT_RECIPE_ZONE_FMT.format(
                     recipe=recipe_disp, zone=zone_disp),
+                cluster=CLUSTER_WHAT,
             ),
+            # 장비 Export 의 Type 과 같은 모양 — '<검사>-<Zone>'(예: Height-amk_mask_6_170).
+            _m(i18n.KO.DEFECT_TYPE_LABEL,
+               i18n.KO.DEFECT_TYPE_VALUE_FMT.format(kind=g.kind, zone=zone_disp),
+               CLUSTER_WHAT),
+        ]
+        # 이름 두 가지(사용자 결정 2026-11-23 '둘 다') — 사전에 없으면 그 줄만 뺀다.
+        if g.type_name:
+            head.append(_m(i18n.KO.DEFECT_TYPE_NAME_LABEL, g.type_name,
+                           CLUSTER_WHAT))
+        if g.class_name:
+            head.append(_m(i18n.KO.DEFECT_CLASS_LABEL, g.class_name,
+                           CLUSTER_WHAT))
+        if g.kind == KIND_HEIGHT:
+            return "ok", head + [
+                _m(i18n.KO.DEFECT_HEIGHT_LABEL,
+                   i18n.KO.DEFECT_HEIGHT_VALUE_FMT.format(v=g.height_um),
+                   CLUSTER_SIZE, i18n.KO.DEFECT_HEIGHT_FMT.format(v=g.height_um)),
+            ]
+        # contrast 는 일부 자재(예: PI)만 측정 — 0 은 '측정 안 함'이라 0.00 대신 '—'.
+        contrast_val = (i18n.KO.DEFECT_CONTRAST_NONE_VALUE if g.contrast == 0
+                        else i18n.KO.DEFECT_CONTRAST_VALUE_FMT.format(v=g.contrast))
+        return "ok", head + [
             _m(i18n.KO.DEFECT_AREA_LABEL,
-               i18n.KO.DEFECT_AREA_VALUE_FMT.format(v=g.area_um2)),
+               i18n.KO.DEFECT_AREA_VALUE_FMT.format(v=g.area_um2), CLUSTER_SIZE,
+               i18n.KO.DEFECT_AREA_FMT.format(v=g.area_um2)),
             _m(i18n.KO.DEFECT_WIDTH_LABEL,
-               i18n.KO.DEFECT_WIDTH_VALUE_FMT.format(v=g.width_um)),
+               i18n.KO.DEFECT_WIDTH_VALUE_FMT.format(v=g.width_um), CLUSTER_SIZE,
+               i18n.KO.DEFECT_WIDTH_FMT.format(v=g.width_um)),
             _m(i18n.KO.DEFECT_LENGTH_LABEL,
-               i18n.KO.DEFECT_LENGTH_VALUE_FMT.format(v=g.length_um)),
-            _m(i18n.KO.DEFECT_CONTRAST_LABEL, contrast_val),
+               i18n.KO.DEFECT_LENGTH_VALUE_FMT.format(v=g.length_um), CLUSTER_SIZE,
+               i18n.KO.DEFECT_LENGTH_FMT.format(v=g.length_um)),
+            _m(i18n.KO.DEFECT_CONTRAST_LABEL, contrast_val, CLUSTER_SIZE),
         ]
     except Exception:
         return "no_data", []
@@ -133,11 +171,13 @@ def coord_measures(image_path: Path) -> list[Measure]:
                     label=i18n.KO.DEFECT_COL_ONLY_LABEL,
                     value=i18n.KO.DEFECT_COL_UNKNOWN_VALUE,
                     line=i18n.KO.DEFECT_COL_UNKNOWN_FMT,
+                    cluster=CLUSTER_WHERE,
                 ),
                 Measure(
                     label=i18n.KO.DEFECT_ABS_XY_LABEL,
                     value=i18n.KO.DEFECT_XY_VALUE_FMT.format(x=c.x, y=c.y),
                     line=i18n.KO.DEFECT_ABS_XY_FMT.format(x=c.x, y=c.y),
+                    cluster=CLUSTER_WHERE,
                 ),
             ]
         out = [
@@ -147,6 +187,7 @@ def coord_measures(image_path: Path) -> list[Measure]:
                 value=i18n.KO.DEFECT_COLROW_VALUE_FMT.format(col=c.screen_col,
                                                             row=c.screen_row),
                 line=i18n.KO.DEFECT_COLROW_FMT.format(col=c.screen_col, row=c.screen_row),
+                cluster=CLUSTER_WHERE,
             ),
         ]
         # 번호가 틀렸을 수 있을 때만 바로 밑에 경고 — 정상이면 아무것도 붙이지 않는다.
@@ -154,12 +195,14 @@ def coord_measures(image_path: Path) -> list[Measure]:
         if warn:
             text = getattr(i18n.KO, warn)
             out.append(Measure(label=i18n.KO.DEFECT_NUMBER_WARN_LABEL, value=text,
-                               line=i18n.KO.DEFECT_NUMBER_WARN_FMT.format(text=text)))
+                               line=i18n.KO.DEFECT_NUMBER_WARN_FMT.format(text=text),
+                               cluster=CLUSTER_WHERE))
         out += [
             Measure(
                 label=i18n.KO.DEFECT_XY_LABEL,
                 value=i18n.KO.DEFECT_XY_VALUE_FMT.format(x=c.x, y=c.y),
                 line=i18n.KO.DEFECT_XY_FMT.format(x=c.x, y=c.y),
+                cluster=CLUSTER_WHERE,
             ),
         ]
         if c.source == "kla" and c.native_x is not None and c.native_y is not None:
@@ -169,6 +212,7 @@ def coord_measures(image_path: Path) -> list[Measure]:
                                                          y=c.native_y),
                 line=i18n.KO.EXPORT_KLA_NATIVE_FMT.format(x=c.native_x,
                                                           y=c.native_y),
+                cluster=CLUSTER_WHERE,
             ))
         return out
     except Exception:
@@ -217,7 +261,7 @@ def defect_lines(image_path: Path) -> list[str]:
 def describe(image_path: Path) -> list[InfoGroup]:
     """사진 1장의 정보를 두 덩이로 — **값을 얻은 항목만** 담는다.
 
-    ``파일``   식별 정보(파일명·폴더·WaferID·좌표 출처)
+    ``파일``   식별 정보(파일명·폴더·WaferID)
     ``결함 계측`` 좌표·측정값, 그리고 측정정보 유무를 알리는 판정 스탬프
 
     매칭 상대·점수처럼 짝(기준↔검증)이 있어야 정해지는 값은 원리상 나올 수 없어
@@ -227,37 +271,33 @@ def describe(image_path: Path) -> list[InfoGroup]:
     groups: list[InfoGroup] = []
 
     file_rows = [
-        InfoRow(i18n.KO.IMAGE_INFO_ROW_FILE, p.name, mono=True),
-        InfoRow(i18n.KO.IMAGE_INFO_ROW_FOLDER, str(p.parent), mono=True),
+        InfoRow(i18n.KO.IMAGE_INFO_ROW_FILE, p.name, mono=True,
+                cluster=CLUSTER_FILE),
+        *_id_rows(p.parent),
+        InfoRow(i18n.KO.IMAGE_INFO_ROW_FOLDER, str(p.parent), mono=True,
+                cluster=CLUSTER_FILE),
     ]
-    wafer_id = _safe(lambda: kla_info.read_wafer_id(p.parent))
-    if wafer_id:
-        file_rows.append(
-            InfoRow(i18n.KO.IMAGE_INFO_ROW_WAFER_ID, wafer_id, mono=True))
-    coord = _safe(lambda: _resolve_coord(p))
-    if coord is not None:
-        file_rows.append(InfoRow(
-            i18n.KO.IMAGE_INFO_ROW_SOURCE,
-            i18n.KO.IMAGE_INFO_SOURCE_NAMES.get(coord.source, coord.source)))
     groups.append(InfoGroup(i18n.KO.IMAGE_INFO_GROUP_FILE, tuple(file_rows)))
 
-    defect_rows = [InfoRow(m.label, m.value, mono=True)
+    defect_rows = [InfoRow(m.label, m.value, mono=True, cluster=m.cluster)
                    for m in coord_measures(p)]
     xy = _safe(lambda: abs_coord.absolute_xy(p))
     if xy is not None:
         defect_rows.append(InfoRow(
             i18n.KO.IMAGE_INFO_ROW_ABS_XY,
-            i18n.KO.IMAGE_INFO_ABS_XY_FMT.format(x=xy[0], y=xy[1]), mono=True))
+            i18n.KO.IMAGE_INFO_ABS_XY_FMT.format(x=xy[0], y=xy[1]), mono=True,
+            cluster=CLUSTER_WHERE))
 
     status, geo = geometry_measures(p)
-    defect_rows.extend(InfoRow(m.label, m.value, mono=True) for m in geo)
+    defect_rows.extend(InfoRow(m.label, m.value, mono=True, cluster=m.cluster)
+                       for m in geo)
     if status == "ok":
         res = _safe(lambda: geometry.resolve(p))
         if res is not None and res.geometry is not None:
             defect_rows.append(InfoRow(
                 i18n.KO.IMAGE_INFO_ROW_PIXEL,
                 i18n.KO.IMAGE_INFO_PIXEL_FMT.format(v=res.geometry.pixel_um),
-                mono=True))
+                mono=True, cluster=CLUSTER_SIZE))
 
     # ★ 계측을 **하나도** 못 얻었으면 덩이 자체를 만들지 않는다.  스탬프만 남기면
     #   "이 자재는 원래 측정 안 함"(정상)과 "정보파일이 없어 못 읽음"(비정상)이
@@ -265,18 +305,60 @@ def describe(image_path: Path) -> list[InfoGroup]:
     if not defect_rows:
         return groups
 
-    if status == "ok":
-        defect_rows.append(InfoRow(
-            "", i18n.KO.IMAGE_INFO_STAMP_MEASURED, stamp="ok"))
-    elif status == "no_flt":
-        defect_rows.append(InfoRow("", i18n.KO.GEOM_NOT_SUPPORTED, stamp="none"))
+    # status == "ok"(측정정보 있음)는 스탬프를 띄우지 않는다 — 수치 행이 곧 그 표시다(사용자 지시).
+    #   좌표 출처 행도 이 화면에서는 보이지 않는다.
+    if status == "no_flt":
+        defect_rows.append(InfoRow("", i18n.KO.GEOM_NOT_SUPPORTED, stamp="none",
+                                   cluster=CLUSTER_STAMP))
     elif status == "no_data":
-        defect_rows.append(InfoRow("", i18n.KO.GEOM_NO_DATA, stamp="none"))
+        defect_rows.append(InfoRow("", i18n.KO.GEOM_NO_DATA, stamp="none",
+                                   cluster=CLUSTER_STAMP))
     # status == "disabled" 는 스탬프도 띄우지 않는다(엑셀과 같은 규칙).
 
     groups.append(InfoGroup(i18n.KO.IMAGE_INFO_GROUP_DEFECT,
                             tuple(defect_rows)))
     return groups
+
+
+def scan_file_group(scan_path: Path) -> InfoGroup:
+    """흑백 Scan 사진 자체의 '파일' 덩이 — 파일명·폴더·WaferID 만.
+
+    Scan 사진에는 :func:`describe` 를 쓰지 않는다 — Scan 파일명의 두 수치는 절대좌표가 아닌데
+    점표기 해석(:func:`abs_coord.dotted_xy`)이 그것을 좌표로 읽어 엉뚱한 '절대 X / Y' 를 낸다."""
+    p = Path(scan_path)
+    rows = [InfoRow(i18n.KO.IMAGE_INFO_ROW_SCAN, p.name, mono=True, cluster=CLUSTER_FILE),
+            *_id_rows(p.parent),
+            InfoRow(i18n.KO.IMAGE_INFO_ROW_FOLDER, str(p.parent), mono=True,
+                    cluster=CLUSTER_FILE)]
+    return InfoGroup(i18n.KO.IMAGE_INFO_GROUP_FILE, tuple(rows))
+
+
+def describe_in_scan(scan_path: Path, defect_path: Path) -> list[InfoGroup]:
+    """흑백 Scan 사진 안에서 찾은 Defect 하나 — 그 Defect 의 Color 사진과 **같은 생산자**
+    (:func:`describe`)로 만들고, '파일' 덩이 맨 위에 연 Scan 사진 이름을 붙인다.
+    Defect 의 파일명 줄은 'Defect 사진' 으로 부른다(사진이 폴더에 없어도 정보파일로 읽힌다)."""
+    groups = describe(Path(defect_path))
+    out = []
+    for g in groups:
+        if g.title == i18n.KO.IMAGE_INFO_GROUP_FILE:
+            rows = [InfoRow(i18n.KO.IMAGE_INFO_ROW_SCAN, Path(scan_path).name, mono=True,
+                            cluster=CLUSTER_FILE)]
+            rows += [InfoRow(i18n.KO.IMAGE_INFO_ROW_DEFECT_PHOTO, r.value, r.mono, r.stamp,
+                             r.cluster) if r.label == i18n.KO.IMAGE_INFO_ROW_FILE else r
+                     for r in g.rows]
+            g = InfoGroup(g.title, tuple(rows))
+        out.append(g)
+    return out
+
+
+def _id_rows(folder: Path) -> list[InfoRow]:
+    """LOT · Wafer ID · Slot# 세 줄 — 장비 파일에서 못 읽은 칸은 '—'(현택님 결정 2026-11-24: 줄은 늘 둔다)."""
+    ids = _safe(lambda: lot_info.read_wafer_ids(folder)) or lot_info.WaferIds()
+    blank = i18n.KO.IMAGE_INFO_UNKNOWN
+    return [InfoRow(label, value or blank, mono=True, cluster=CLUSTER_FILE)
+            for label, value in ((i18n.KO.IMAGE_INFO_ROW_LOT, ids.lot),
+                                 (i18n.KO.IMAGE_INFO_ROW_WAFER_ID, ids.wafer_id),
+                                 (i18n.KO.IMAGE_INFO_ROW_SLOT, ids.slot))]
 
 
 def has_measurements(groups: list[InfoGroup]) -> bool:

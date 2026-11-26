@@ -70,8 +70,6 @@ class Profile:
     check_sz: int = 18
     chip_w: int = 88
     chip_h: int = 20
-    toggle_w: int = 52
-    toggle_h: int = 30
     thumb_default_px: int = 118
     focus_ring_px: int = 2
     motion_scale: float = 0.8       # 제도 시트답게 담백한 모션
@@ -246,6 +244,8 @@ def _derive_tokens() -> dict:
         #   않는다 — WCAG 1.4.3 은 비활성 컨트롤을 대비 요건에서 제외한다.
         "disabled_ink": _mix(c["mute"], c["bg"], 0.45),
         "disabled_line": _mix(c["line"], c["bg"], 0.45),
+        # 꺼진 버튼의 면 — 테두리 없이 아주 연한 회색으로 채운다(점선은 '끌어다 놓는 칸'처럼 보였다).
+        "disabled_fill": _mix(c["line2"], c["bg"], 0.65),
         # 선택된 **카드**의 면 — ★ 반투명 틴트를 쓰면 안 된다.  card-soft 의 면은
         #   불투명($panel)이라, 더 구체적인 선택자가 반투명 배경으로 덮으면 면이
         #   통째로 사라져 뒤의 바탕이 비쳐 보인다(실측: 선택 타일만 배경이 뚫렸다).
